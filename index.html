@@ -984,14 +984,6 @@
           <button data-val="1">1</button><button data-val="2">2</button><button data-val="3" class="active">3</button><button data-val="4">4</button><button data-val="5">5</button>
         </div>
       </div>
-      <!-- Step 6: Condition -->
-      <div class="ob-step" data-step="5">
-        <div class="ob-question">How are you feeling?</div>
-        <div class="ob-hint">1 tired · 5 sharp</div>
-        <div class="ob-gauge" id="ob-condition">
-          <button data-val="1">1</button><button data-val="2">2</button><button data-val="3" class="active">3</button><button data-val="4">4</button><button data-val="5">5</button>
-        </div>
-      </div>
       <!-- Nav buttons -->
       <div class="ob-nav" id="ob-nav">
         <button class="ob-prev" id="ob-prev">← Prev</button>
@@ -3290,8 +3282,8 @@ function showQuiz(msg) {
     counterEl.textContent = `${idx + 1} / ${totalSteps}`;
     prevBtn.style.display = idx > 0 ? '' : 'none';
     const isLast = idx === totalSteps - 1;
-    navEl.style.display = isLast ? 'none' : '';
-    submitBtn.style.display = isLast ? '' : 'none';
+    navEl.style.display = isLast ? 'none' : 'flex';
+    submitBtn.style.display = isLast ? 'block' : 'none';
     // Auto-focus input on current step
     const input = steps[idx].querySelector('input, select');
     if (input) setTimeout(() => input.focus(), 100);
@@ -3321,7 +3313,6 @@ function showQuiz(msg) {
 
   submitBtn.addEventListener('click', () => {
     const diffBtn = document.querySelector('#ob-difficulty button.active');
-    const condBtn = document.querySelector('#ob-condition button.active');
     ws.send(JSON.stringify({
       type: 'onboarding_submit',
       name: document.getElementById('ob-name').value.trim(),
@@ -3329,7 +3320,7 @@ function showQuiz(msg) {
       goal: document.getElementById('ob-goal').value.trim(),
       hint_preference: document.getElementById('ob-hint-select').value,
       difficulty: diffBtn ? parseInt(diffBtn.dataset.val) : 3,
-      condition: condBtn ? parseInt(condBtn.dataset.val) : 3,
+      condition: 3,
     }));
     submitBtn.textContent = 'Setting up...';
     submitBtn.disabled = true;
