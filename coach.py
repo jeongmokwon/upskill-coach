@@ -227,36 +227,60 @@ async def ws_handler(websocket):
             print("  [WS] All clients disconnected — analyzing session...")
             threading.Thread(target=analyze_session_and_save, daemon=True).start()
 
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
 class _IndexHandler(http.server.SimpleHTTPRequestHandler):
     """Serve index.html from the project directory."""
     def __init__(self, *args, **kwargs):
-        directory = os.path.dirname(os.path.abspath(__file__))
-        super().__init__(*args, directory=directory, **kwargs)
+        super().__init__(*args, directory=PROJECT_DIR, **kwargs)
     def log_message(self, format, *args):
         pass  # Suppress logs
 
+
+async def _http_handler(path, request_headers):
+    """Serve static files for non-WebSocket requests (same port)."""
+    import mimetypes
+    # WebSocket upgrade requests return None to let websockets handle them
+    if "Upgrade" in request_headers and request_headers["Upgrade"].lower() == "websocket":
+        return None
+
+    # Serve static files
+    if path == "/" or path == "":
+        file_path = os.path.join(PROJECT_DIR, "index.html")
+    else:
+        file_path = os.path.join(PROJECT_DIR, path.lstrip("/"))
+
+    if os.path.isfile(file_path):
+        content_type, _ = mimetypes.guess_type(file_path)
+        content_type = content_type or "application/octet-stream"
+        with open(file_path, "rb") as f:
+            body = f.read()
+        return http.HTTPStatus.OK, [("Content-Type", content_type)], body
+
+    return http.HTTPStatus.NOT_FOUND, [], b"Not Found"
+
+
 def start_ws_server():
-    """Start WebSocket server + HTTP server in background threads."""
+    """Start combined WebSocket + HTTP server on a single port."""
     global ws_loop
     ws_loop = asyncio.new_event_loop()
 
-    # WebSocket server
-    async def _run_ws():
-        async with websockets.serve(ws_handler, BIND_HOST, WS_PORT):
+    async def _run():
+        async with websockets.serve(
+            ws_handler,
+            BIND_HOST,
+            HTTP_PORT,
+            process_request=_http_handler,
+        ):
             await asyncio.Future()
 
-    def _ws_thread():
+    def _thread():
         asyncio.set_event_loop(ws_loop)
-        ws_loop.run_until_complete(_run_ws())
+        ws_loop.run_until_complete(_run())
 
-    # HTTP server for serving index.html
-    def _http_thread():
-        httpd = http.server.HTTPServer((BIND_HOST, HTTP_PORT), _IndexHandler)
-        httpd.serve_forever()
-
-    threading.Thread(target=_ws_thread, daemon=True).start()
-    threading.Thread(target=_http_thread, daemon=True).start()
-    print(f"🌐 Browser UI: http://localhost:{HTTP_PORT}")
+    threading.Thread(target=_thread, daemon=True).start()
+    print(f"🌐 Browser UI: http://{BIND_HOST}:{HTTP_PORT}")
 
 # ─── Audio/Screen ─────────────────────────────────────────────────────
 recording = False
@@ -2828,8 +2852,7 @@ def main():
 
     if IS_SERVER:
         # Server mode: no terminal, just serve WebSocket/HTTP and wait
-        print(f"🌐 Server mode — listening on {BIND_HOST}:{HTTP_PORT}")
-        print(f"   WebSocket on {BIND_HOST}:{WS_PORT}")
+        print(f"🌐 Server mode — HTTP + WS on {BIND_HOST}:{HTTP_PORT}")
         try:
             while True:
                 time.sleep(1)

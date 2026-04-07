@@ -1292,7 +1292,8 @@ const statusMsg = document.getElementById('status-msg');
 let ws;
 
 function connect() {
-  ws = new WebSocket(`ws://${location.hostname}:8766`);
+  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${wsProto}//${location.host}`);
 
   ws.onopen = () => { dot.classList.add('on'); };
   ws.onclose = () => { dot.classList.remove('on'); setTimeout(connect, 2000); };
