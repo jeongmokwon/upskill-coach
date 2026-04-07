@@ -710,7 +710,8 @@ def handle_identify(msg, websocket):
         if ctx:
             ctx.db_session_id = db.get_session_id()
         db.touch_activity()
-        extract_teaching_style()
+        if db.get_recent_insights(1):
+            extract_teaching_style()
 
         print(f"  [Server] Returning user: {session_id} — studying: {study_topic}")
 
@@ -768,7 +769,7 @@ def handle_onboarding_submit(msg):
     db.start_session(study_topic=studying)
     _ctx().db_session_id = db.get_session_id()
     db.touch_activity()
-    extract_teaching_style()
+    # First session — no insights yet, skip API call
 
     print(f"  [Server] Onboarded: {uid} — studying: {studying}")
 
@@ -3016,8 +3017,9 @@ def main():
     current_study_topic = study_context
     _global_ctx.study_topic = study_context
 
-    # Extract teaching style from previous sessions
-    extract_teaching_style()
+    # Extract teaching style from previous sessions (only if insights exist)
+    if db.get_recent_insights(1):
+        extract_teaching_style()
 
     # Send onboarding quiz to browser (wait for browser connection)
     print("  [Quiz] Waiting for browser connection...")
