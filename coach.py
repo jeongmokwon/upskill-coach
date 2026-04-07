@@ -238,13 +238,19 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
         pass  # Suppress logs
 
 
-async def _http_handler(path, request_headers):
-    """Serve static files for non-WebSocket requests (same port)."""
+def _http_handler(connection, request):
+    """Serve static files for non-WebSocket requests (same port).
+    websockets v16 signature: process_request(connection, request) -> Response | None
+    """
     import mimetypes
-    # WebSocket upgrade requests return None to let websockets handle them
-    if "Upgrade" in request_headers and request_headers["Upgrade"].lower() == "websocket":
+    from websockets.http11 import Response
+    from websockets.datastructures import Headers
+
+    # WebSocket upgrade requests → return None to let websockets handle
+    if "Upgrade" in request.headers and request.headers["Upgrade"].lower() == "websocket":
         return None
 
+    path = request.path
     # Serve static files
     if path == "/" or path == "":
         file_path = os.path.join(PROJECT_DIR, "index.html")
@@ -256,9 +262,9 @@ async def _http_handler(path, request_headers):
         content_type = content_type or "application/octet-stream"
         with open(file_path, "rb") as f:
             body = f.read()
-        return http.HTTPStatus.OK, [("Content-Type", content_type)], body
+        return Response(200, "OK", Headers([("Content-Type", content_type)]), body)
 
-    return http.HTTPStatus.NOT_FOUND, [], b"Not Found"
+    return Response(404, "Not Found", Headers(), b"Not Found")
 
 
 def start_ws_server():
