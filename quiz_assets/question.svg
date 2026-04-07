@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300">
+  <!-- Grid -->
+  <rect width="300" height="300" fill="white" stroke="black" stroke-width="2"/>
+  <line x1="100" y1="0" x2="100" y2="300" stroke="black" stroke-width="1.5"/>
+  <line x1="200" y1="0" x2="200" y2="300" stroke="black" stroke-width="1.5"/>
+  <line x1="0" y1="100" x2="300" y2="100" stroke="black" stroke-width="1.5"/>
+  <line x1="0" y1="200" x2="300" y2="200" stroke="black" stroke-width="1.5"/>
+
+  <!-- Row 1, Col 1: → (right) -->
+  <g transform="translate(50,50)">
+    <polygon points="30,0 0,-20 0,-8 -30,-8 -30,8 0,8 0,20" fill="black"/>
+  </g>
+
+  <!-- Row 1, Col 2: ↘ (down-right) -->
+  <g transform="translate(150,50) rotate(135)">
+    <polygon points="0,-30 18,10 8,10 8,22 -8,22 -8,10 -18,10" fill="black"/>
+  </g>
+
+  <!-- Row 1, Col 3: ↓ (down) -->
+  <g transform="translate(250,50)">
+    <polygon points="0,30 -20,0 -8,0 -8,-30 8,-30 8,0 20,0" fill="black"/>
+  </g>
+
+  <!-- Row 2, Col 1: ↓ (down) -->
+  <g transform="translate(50,150)">
+    <polygon points="0,30 -20,0 -8,0 -8,-30 8,-30 8,0 20,0" fill="black"/>
+  </g>
+
+  <!-- Row 2, Col 2: ↙ (down-left) -->
+  <g transform="translate(150,150) rotate(-135)">
+    <polygon points="0,-30 18,10 8,10 8,22 -8,22 -8,10 -18,10" fill="black"/>
+  </g>
+
+  <!-- Row 2, Col 3: ← (left) -->
+  <g transform="translate(250,150)">
+    <polygon points="-30,0 0,-20 0,-8 30,-8 30,8 0,8 0,20" fill="black"/>
+  </g>
+
+  <!-- Row 3, Col 1: ↑ (up) -->
+  <g transform="translate(50,250)">
+    <polygon points="0,-30 20,0 8,0 8,30 -8,30 -8,0 -20,0" fill="black"/>
+  </g>
+
+  <!-- Row 3, Col 2: ↗ (up-right) -->
+  <g transform="translate(150,250) rotate(45)">
+    <polygon points="0,-30 18,10 8,10 8,22 -8,22 -8,10 -18,10" fill="black"/>
+  </g>
+
+  <!-- Row 3, Col 3: ? -->
+  <rect x="201" y="201" width="98" height="98" fill="white" stroke="#00aa00" stroke-width="2.5"/>
+  <text x="250" y="262" text-anchor="middle" font-size="40" font-weight="bold" fill="#888" font-family="sans-serif">?</text>
+</svg>

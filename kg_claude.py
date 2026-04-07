@@ -9,8 +9,14 @@ Claude Integration for Knowledge Graph
 import json
 import anthropic
 
-client = anthropic.Anthropic()
+_client = None
 MODEL = "claude-sonnet-4-20250514"
+
+def _get_client():
+    global _client
+    if _client is None:
+        _client = anthropic.Anthropic()
+    return _client
 
 USER_BACKGROUND = ""
 
@@ -50,7 +56,7 @@ def identify_domains(user_response):
     """Extract knowledge domain from user's study topic.
     Returns: [{"id": "deep_learning", "name": "Deep Learning"}]
     """
-    response = client.messages.create(
+    response = _get_client().messages.create(
         model=MODEL,
         max_tokens=200,
         system="""The user described what they want to study. Classify it into ONE academic/technical field.
@@ -85,7 +91,7 @@ def generate_diagnostic_questions(domain_name, n=5):
     """Generate CAT-style diagnostic questions.
     Returns: [{"question": "...", "concept": "concept_id", "concept_name": "...", "difficulty": "easy/medium/hard", "answer_hint": "..."}]
     """
-    response = client.messages.create(
+    response = _get_client().messages.create(
         model=MODEL,
         max_tokens=600,
         system=f"""Create {n} diagnostic questions for "{domain_name}".
@@ -115,7 +121,7 @@ def grade_answer(question, user_answer, concept_name):
     """Grade user's answer.
     Returns: {"correct": bool, "feedback": "...", "explanation": "..."}
     """
-    response = client.messages.create(
+    response = _get_client().messages.create(
         model=MODEL,
         max_tokens=150,
         system="""Grade this answer. Reply with JSON only. No backticks.
@@ -139,7 +145,7 @@ def extract_concepts_from_conversation(domain_name, conversation_text, existing_
     """
     existing_list = ", ".join(existing_concepts) if existing_concepts else "none"
 
-    response = client.messages.create(
+    response = _get_client().messages.create(
         model=MODEL,
         max_tokens=300,
         system=f"""Extract new "{domain_name}" concepts from this conversation.
@@ -177,7 +183,7 @@ def generate_exercise(domain_name, concept_name, mastery, user_background=None):
 
     bg = user_background or USER_BACKGROUND
 
-    response = client.messages.create(
+    response = _get_client().messages.create(
         model=MODEL,
         max_tokens=100,
         system=f"""Create ONE {difficulty} exercise about "{concept_name}".

@@ -9,7 +9,7 @@ python3 -m venv venv
 source venv/bin/activate
 
 # Install dependencies
-pip install anthropic openai sounddevice numpy
+pip install anthropic openai sounddevice numpy websockets
 
 echo ""
 echo "✅ Installed!"

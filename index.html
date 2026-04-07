@@ -1,0 +1,3135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Upskill Coach</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
+    background: #0d1117; color: #e6edf3; height: 100vh;
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  /* ─── Minimal top bar ─── */
+  #topbar {
+    padding: 8px 24px; display: flex; align-items: center; gap: 10px;
+    border-bottom: 1px solid #21262d; flex-shrink: 0;
+  }
+  #topbar .dot {
+    width: 8px; height: 8px; border-radius: 50%; background: #f85149;
+    transition: background 0.3s;
+  }
+  #topbar .dot.on { background: #3fb950; }
+  #topbar .label {
+    font-size: 12px; color: #484f58; letter-spacing: 0.5px; text-transform: uppercase;
+  }
+  #study-context {
+    font-size: 12px; color: #58a6ff; margin-left: auto;
+  }
+
+  /* ─── Layout ─── */
+  #main-layout {
+    flex: 1; display: flex; overflow: hidden;
+  }
+  .key-term:hover { border-color: #30363d; color: #e6edf3; }
+
+  /* ─── Knowledge Gaps dropdown ─── */
+  #user-btn {
+    position: relative; cursor: pointer;
+    font-size: 14px; color: #484f58;
+    display: flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 6px;
+    transition: color 0.2s, background 0.2s;
+    user-select: none;
+  }
+  #user-btn:hover { color: #e6edf3; background: #21262d; }
+  #user-dropdown {
+    display: none; position: absolute; top: 100%; right: 0;
+    margin-top: 8px; width: 260px;
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    z-index: 50; overflow: hidden;
+    animation: dropdownIn 0.15s ease;
+  }
+  #user-dropdown.open { display: block; }
+  #user-dropdown .dd-header {
+    font-size: 11px; color: #484f58; text-transform: uppercase;
+    letter-spacing: 0.8px; padding: 12px 16px 8px; font-weight: 600;
+    border-bottom: 1px solid #21262d;
+  }
+  .gauge-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px;
+  }
+  .gauge-row + .gauge-row { border-top: 1px solid #21262d; }
+  .gauge-label { font-size: 12px; color: #c9d1d9; }
+  .gauge-label small { display: block; font-size: 10px; color: #484f58; margin-top: 2px; }
+  .gauge-btns { display: flex; gap: 4px; }
+  .gauge-btns button {
+    width: 28px; height: 28px; border-radius: 6px;
+    border: 1px solid #30363d; background: #0d1117;
+    color: #8b949e; font-size: 12px; font-weight: 600;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .gauge-btns button:hover { border-color: #58a6ff; color: #e6edf3; }
+  .gauge-btns button.active { background: #58a6ff; color: #0d1117; border-color: #58a6ff; }
+  #reopen-explain-btn {
+    display: none;
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    color: #8b949e;
+    margin-left: auto;
+    margin-right: 8px;
+    user-select: none;
+  }
+  #reopen-explain-btn:hover { color: #e6edf3; background: #21262d; }
+  #gaps-btn {
+    position: relative; cursor: pointer;
+    font-size: 14px; color: #484f58;
+    display: flex; align-items: center; gap: 5px;
+    padding: 4px 10px; border-radius: 6px;
+    transition: color 0.2s, background 0.2s;
+    user-select: none;
+  }
+  #gaps-btn:hover { color: #e6edf3; background: #21262d; }
+  #gaps-btn.has-items { color: #f0883e; }
+  #gaps-badge {
+    background: #f0883e; color: #0d1117; font-size: 10px;
+    font-weight: 700; min-width: 16px; height: 16px;
+    border-radius: 8px; display: none;
+    align-items: center; justify-content: center; padding: 0 4px;
+  }
+  #gaps-badge.visible { display: flex; }
+  #gaps-dropdown {
+    display: none; position: absolute; top: 100%; right: 0;
+    margin-top: 8px; width: 320px;
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    z-index: 50; overflow: hidden;
+    animation: dropdownIn 0.15s ease;
+  }
+  #gaps-dropdown.open { display: block; }
+  @keyframes dropdownIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  #gaps-dropdown .dd-header {
+    font-size: 11px; color: #484f58; text-transform: uppercase;
+    letter-spacing: 0.8px; padding: 12px 16px 8px; font-weight: 600;
+    border-bottom: 1px solid #21262d;
+  }
+  #gaps-dropdown .dd-empty {
+    padding: 20px 16px; text-align: center;
+    font-size: 12px; color: #484f58;
+  }
+  .hole-item {
+    padding: 10px 16px; cursor: pointer;
+    border-left: 3px solid transparent;
+    transition: background 0.15s;
+  }
+  .hole-item:hover { background: #1f2937; }
+  .hole-item .hole-title {
+    font-size: 13px; color: #f0883e; font-weight: 600; margin-bottom: 4px;
+  }
+  .hole-item .hole-context {
+    font-size: 11px; color: #8b949e; line-height: 1.4;
+  }
+
+  /* ─── Right explainer panel ─── */
+  #explain-panel {
+    width: 0; flex-shrink: 0; overflow: hidden;
+    background: #0d1117; border-left: 1px solid #21262d;
+    transition: width 0.35s ease;
+    display: flex; flex-direction: column;
+  }
+  #explain-panel.open { width: 560px; }
+  #explain-panel-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px; border-bottom: 1px solid #21262d;
+    flex-shrink: 0; z-index: 5; position: relative;
+  }
+  #explain-panel-title {
+    font-size: 15px; color: #f0883e; font-weight: 700;
+  }
+  #explain-dismiss {
+    background: none; border: 1px solid #30363d; color: #8b949e;
+    border-radius: 6px; padding: 4px 12px; cursor: pointer;
+    font-size: 12px; font-family: inherit;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  #explain-dismiss:hover { color: #e6edf3; border-color: #58a6ff; }
+  #explain-panel-scroll {
+    flex: 1; overflow-y: auto; padding: 20px;
+  }
+  #explain-context-box {
+    background: #1c1c1c; border: 1px solid #f0883e44;
+    border-radius: 8px; padding: 14px 18px; margin-bottom: 24px;
+    font-size: 13px; color: #e6edf3; line-height: 1.6;
+  }
+  #explain-context-box .drill-label {
+    font-size: 10px; color: #f0883e; text-transform: uppercase;
+    letter-spacing: 0.8px; margin-bottom: 6px; font-weight: 600;
+  }
+  #explain-context-box code {
+    background: #21262d; padding: 2px 6px; border-radius: 3px;
+    color: #ff7b72; font-size: 12px;
+  }
+
+  /* ─── Drill content sections ─── */
+  .drill-section {
+    margin-bottom: 24px;
+    opacity: 0; transform: translateY(12px);
+    animation: drillFadeIn 0.5s ease forwards;
+  }
+  @keyframes drillFadeIn {
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Explanation */
+  .drill-explanation {
+    font-size: 14px; color: #e6edf3; line-height: 1.7;
+    padding: 14px 18px; background: #161b22;
+    border-left: 3px solid #58a6ff; border-radius: 0 8px 8px 0;
+  }
+
+  /* Pipeline — vertical flow */
+  .drill-pipeline { padding: 12px 0; }
+  .drill-pipeline .pipe-title {
+    font-size: 11px; color: #484f58; text-transform: uppercase;
+    letter-spacing: 0.8px; margin-bottom: 16px; font-weight: 600;
+  }
+  .pipe-steps {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 0; padding: 0 8px;
+  }
+  .pipe-step {
+    width: 100%; max-width: 440px;
+    opacity: 0; transform: translateY(10px) scale(0.95);
+  }
+  .pipe-step.animated {
+    animation: pipeStepIn 0.5s ease forwards;
+  }
+  @keyframes pipeStepIn {
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .pipe-step .step-box {
+    background: #161b22; border: 2px solid #30363d;
+    border-radius: 10px; padding: 14px 18px; text-align: left;
+    display: flex; flex-direction: column;
+    transition: border-color 0.3s, box-shadow 0.3s;
+  }
+  .pipe-step.ok .step-box { border-color: #3fb950; }
+  .pipe-step.missing .step-box {
+    border-color: #f0883e; border-style: dashed;
+    box-shadow: 0 0 16px #f0883e33;
+    animation: pulseMissing 2s ease-in-out infinite;
+  }
+  .pipe-step.error .step-box {
+    border-color: #f85149;
+    box-shadow: 0 0 16px #f8514933;
+  }
+  @keyframes pulseMissing {
+    0%, 100% { box-shadow: 0 0 8px #f0883e22; }
+    50% { box-shadow: 0 0 24px #f0883e55; }
+  }
+  .pipe-step .step-label {
+    font-size: 13px; font-weight: 600; margin-bottom: 6px;
+  }
+  .pipe-step.ok .step-label { color: #3fb950; }
+  .pipe-step.missing .step-label { color: #f0883e; }
+  .pipe-step.error .step-label { color: #f85149; }
+  .pipe-step .step-value {
+    font-size: 12px; color: #8b949e; font-family: 'SF Mono', monospace;
+    word-break: break-all; line-height: 1.5;
+  }
+  .pipe-step .step-desc {
+    font-size: 11px; color: #484f58; margin-top: 4px; line-height: 1.4;
+  }
+  .pipe-arrow {
+    display: flex; flex-direction: column; align-items: center;
+    color: #30363d; font-size: 16px; padding: 4px 0;
+    opacity: 0;
+  }
+  .pipe-arrow.animated {
+    animation: pipeStepIn 0.3s ease forwards;
+  }
+  .pipe-arrow .arrow-line {
+    width: 2px; height: 20px; background: #30363d;
+  }
+
+  /* Comparison */
+  .drill-comparison {
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .comp-side {
+    border-radius: 8px; padding: 14px 16px; font-size: 13px;
+  }
+  .comp-side.wrong {
+    background: #f8514911; border: 1px solid #f8514933;
+  }
+  .comp-side.right {
+    background: #23863611; border: 1px solid #23863633;
+  }
+  .comp-side .comp-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
+    font-weight: 600; margin-bottom: 8px;
+  }
+  .comp-side.wrong .comp-label { color: #f85149; }
+  .comp-side.right .comp-label { color: #3fb950; }
+  .comp-side code {
+    display: block; background: #0d1117; padding: 8px 10px;
+    border-radius: 4px; font-size: 13px; margin-bottom: 8px;
+    font-family: 'SF Mono', monospace;
+  }
+  .comp-side.wrong code { color: #ff7b72; }
+  .comp-side.right code { color: #7ee787; }
+  .comp-side .comp-why {
+    font-size: 12px; color: #8b949e; line-height: 1.5;
+  }
+
+  /* Analogy */
+  .drill-analogy {
+    background: #1c1c1c; border: 1px solid #58a6ff33;
+    border-radius: 8px; padding: 14px 18px;
+    font-size: 13px; color: #c9d1d9; line-height: 1.6;
+  }
+  .drill-analogy::before {
+    content: '💡 '; font-size: 14px;
+  }
+
+  /* Code example */
+  .drill-code-example {
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 8px; overflow: hidden;
+  }
+  .drill-code-example .ce-title {
+    font-size: 11px; color: #484f58; padding: 8px 14px;
+    border-bottom: 1px solid #21262d; text-transform: uppercase;
+    letter-spacing: 0.6px; font-weight: 600;
+  }
+  .drill-code-example pre {
+    padding: 12px 14px; margin: 0; font-size: 13px;
+    color: #e6edf3; line-height: 1.5; overflow-x: auto;
+  }
+  .drill-code-example .ce-output {
+    border-top: 1px solid #21262d; padding: 10px 14px;
+    font-size: 12px; color: #3fb950; background: #0d1117;
+    font-family: 'SF Mono', monospace;
+  }
+  .drill-code-example .ce-output::before {
+    content: '>>> '; color: #484f58;
+  }
+
+  /* ─── Main display area ─── */
+  #display {
+    flex: 1; display: flex; flex-direction: column;
+    justify-content: flex-start; align-items: center;
+    padding: 32px 48px; overflow-y: auto;
+    transition: flex 0.35s ease;
+    min-width: 0;
+  }
+
+  /* Waiting state */
+  #waiting {
+    color: #484f58; font-size: 16px; text-align: center; line-height: 2.2;
+  }
+  #waiting code {
+    background: #161b22; padding: 2px 8px; border-radius: 4px;
+    color: #8b949e;
+  }
+
+  /* ─── Plain text output ─── */
+  #output {
+    width: 100%; max-width: 900px;
+    font-size: 16px; line-height: 1.7;
+    color: #f0f6fc; white-space: pre-wrap; word-wrap: break-word;
+    display: none;
+  }
+  #output .cursor {
+    display: inline-block; width: 3px; height: 1em;
+    background: #58a6ff; margin-left: 3px;
+    animation: blink 0.7s step-end infinite;
+    vertical-align: text-bottom;
+  }
+
+  /* ─── Annotated code view ─── */
+  #code-view {
+    width: 100%; max-width: 900px; display: none;
+    animation: fadeIn 0.4s ease;
+  }
+  #code-view .code-block {
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 8px; overflow: hidden;
+    font-size: 14px; line-height: 1.6;
+  }
+  #code-view .code-line {
+    display: flex; padding: 0 16px;
+    position: relative;
+  }
+  #code-view .code-line .line-no {
+    width: 36px; flex-shrink: 0; text-align: right;
+    color: #484f58; padding-right: 12px;
+    user-select: none;
+  }
+  #code-view .code-line .line-text {
+    flex: 1; white-space: pre;
+    padding: 0 4px;
+  }
+  #code-view .code-line.highlighted {
+    background: #58a6ff18;
+    border-left: 3px solid #58a6ff;
+  }
+  #code-view .code-line.highlighted .line-text {
+    color: #fff;
+  }
+
+  /* ─── Post-it note ─── */
+  .postit-wrapper {
+    position: relative;
+    padding: 0 16px;
+  }
+  .postit {
+    background: #fef3c7;
+    color: #78350f;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px; line-height: 1.5;
+    padding: 12px 16px;
+    margin: 8px 0 4px 44px;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2);
+    max-width: 500px;
+    position: relative;
+    animation: postitIn 0.3s ease;
+  }
+  .postit::after {
+    content: '';
+    position: absolute; bottom: -6px; left: 24px;
+    width: 12px; height: 12px;
+    background: #fef3c7;
+    transform: rotate(45deg);
+    box-shadow: 2px 2px 4px rgba(0,0,0,0.15);
+  }
+
+  /* Question label */
+  #question-label {
+    width: 100%; max-width: 900px;
+    font-size: 13px; color: #484f58; margin-bottom: 16px;
+    display: none; letter-spacing: 0.3px;
+  }
+  #question-label .q-text { color: #8b949e; }
+  #question-label .q-mode {
+    display: inline-block; padding: 1px 6px; border-radius: 3px;
+    background: #1f6feb33; color: #58a6ff; font-size: 11px;
+    margin-right: 6px; vertical-align: middle;
+  }
+
+  /* Status messages */
+  #status-msg {
+    width: 100%; max-width: 900px;
+    font-size: 13px; color: #484f58; margin-top: 12px;
+    display: none;
+  }
+
+  /* ─── Floating context menu ─── */
+  #context-menu {
+    position: fixed; display: none; z-index: 100;
+    background: #1c2333; border: 1px solid #30363d;
+    border-radius: 8px; padding: 4px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    animation: fadeIn 0.15s ease;
+  }
+  #context-menu button {
+    display: block; width: 100%;
+    background: transparent; border: none; color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 13px; padding: 8px 16px; text-align: left;
+    border-radius: 4px; cursor: pointer; white-space: nowrap;
+  }
+  #context-menu button:hover {
+    background: #1f6feb33; color: #58a6ff;
+  }
+  #context-menu button .menu-icon {
+    margin-right: 8px; font-size: 14px;
+  }
+  #context-menu button.disabled {
+    color: #484f58; cursor: default;
+  }
+  #context-menu button.disabled:hover {
+    background: transparent; color: #484f58;
+  }
+
+  /* ─── Practice questions card ─── */
+  .practice-card {
+    width: 100%; max-width: 900px;
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 8px; padding: 20px 24px; margin-top: 20px;
+    animation: fadeIn 0.4s ease;
+  }
+  .practice-card .card-header {
+    font-size: 13px; color: #58a6ff; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+  }
+  .practice-card .card-code {
+    background: #0d1117; border: 1px solid #21262d;
+    border-radius: 4px; padding: 8px 12px; margin-bottom: 16px;
+    font-size: 13px; color: #8b949e; white-space: pre-wrap;
+    max-height: 80px; overflow: hidden;
+  }
+  .practice-card .question-item {
+    padding: 10px 0;
+    border-bottom: 1px solid #21262d;
+    font-size: 14px; line-height: 1.6; color: #c9d1d9;
+  }
+  .practice-card .question-item:last-child { border-bottom: none; }
+  .practice-card .q-num {
+    color: #58a6ff; font-weight: 600; margin-right: 8px;
+  }
+  .practice-card .loading {
+    color: #484f58; font-size: 13px; padding: 12px 0;
+  }
+  .practice-card .answer-row {
+    display: flex; gap: 8px; margin-top: 8px; align-items: center;
+  }
+  .practice-card .answer-input {
+    flex: 1; background: #0d1117; border: 1px solid #30363d;
+    border-radius: 4px; padding: 6px 10px; color: #e6edf3;
+    font-family: inherit; font-size: 13px; outline: none;
+  }
+  .practice-card .answer-input:focus {
+    border-color: #58a6ff;
+  }
+  .practice-card .answer-input:disabled {
+    opacity: 0.5;
+  }
+  .practice-card .submit-btn {
+    background: #1f6feb; color: #fff; border: none;
+    border-radius: 4px; padding: 6px 14px; font-size: 13px;
+    cursor: pointer; white-space: nowrap; font-family: inherit;
+  }
+  .practice-card .submit-btn:hover { background: #388bfd; }
+  .practice-card .submit-btn:disabled {
+    background: #21262d; color: #484f58; cursor: default;
+  }
+  .practice-card .feedback {
+    margin-top: 6px; font-size: 13px; line-height: 1.5;
+    padding: 8px 10px; border-radius: 4px;
+    animation: fadeIn 0.3s ease;
+  }
+  .practice-card .feedback.correct {
+    background: #3fb95018; color: #3fb950; border: 1px solid #3fb95033;
+  }
+  .practice-card .feedback.incorrect {
+    background: #f8514918; color: #f85149; border: 1px solid #f8514933;
+  }
+  .practice-card .feedback.grading {
+    color: #484f58;
+  }
+  .practice-card .regen-row {
+    display: flex; gap: 8px; margin-top: 4px; align-items: center;
+    padding: 10px 0 4px; border-bottom: 1px solid #21262d;
+  }
+  .practice-card .regen-input {
+    flex: 1; background: #0d1117; border: 1px solid #30363d;
+    border-radius: 4px; padding: 6px 10px; color: #e6edf3;
+    font-family: inherit; font-size: 12px; outline: none;
+  }
+  .practice-card .regen-input:focus { border-color: #f0883e; }
+  .practice-card .regen-input::placeholder { color: #484f58; }
+  .practice-card .regen-btn {
+    background: #f0883e; color: #fff; border: none;
+    border-radius: 4px; padding: 6px 14px; font-size: 12px;
+    cursor: pointer; white-space: nowrap; font-family: inherit; font-weight: 500;
+  }
+  .practice-card .regen-btn:hover { background: #f09f5b; }
+  .practice-card .regen-btn:disabled {
+    background: #21262d; color: #484f58; cursor: default;
+  }
+
+  /* ─── Follow-up question card ─── */
+  .followup-card {
+    width: 100%; max-width: 900px;
+    background: #1a1f2e; border: 1px solid #f0883e44;
+    border-left: 3px solid #f0883e;
+    border-radius: 8px; padding: 20px 24px; margin-top: 16px;
+    animation: fadeIn 0.4s ease;
+  }
+  .followup-card .card-header {
+    font-size: 13px; color: #f0883e; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .stop-followup-btn {
+    font-size: 11px; color: #484f58; background: transparent;
+    border: 1px solid #484f58; border-radius: 4px;
+    padding: 2px 8px; cursor: pointer; text-transform: none;
+    letter-spacing: 0; font-weight: 400;
+  }
+  .stop-followup-btn:hover { color: #f85149; border-color: #f85149; }
+  .followup-card .weak-concepts {
+    font-size: 12px; color: #484f58; margin-bottom: 12px;
+  }
+  .followup-card .weak-concepts span {
+    display: inline-block; background: #f8514918; color: #f85149;
+    padding: 2px 8px; border-radius: 3px; margin-right: 6px;
+    font-size: 11px;
+  }
+
+  /* ─── Code answer editor ─── */
+  .code-answer-area {
+    width: 100%; max-width: 900px;
+    margin-top: 16px;
+    animation: fadeIn 0.3s ease;
+  }
+  .code-answer-area .ca-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 8px;
+  }
+  .code-answer-area .ca-label {
+    font-size: 12px; color: #58a6ff; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .code-answer-area .ca-lang {
+    font-size: 11px; color: #484f58; background: #21262d;
+    padding: 2px 8px; border-radius: 3px;
+  }
+  /* Wrapper for textarea + floating post-its */
+  .code-editor-wrap {
+    position: relative;
+  }
+  .code-editor-wrap textarea {
+    width: 100%; height: calc(100vh - 120px);
+    background: #0d1117; border: 1px solid #30363d;
+    border-radius: 6px; padding: 12px 14px;
+    color: #e6edf3; font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 13px; line-height: 20.8px; resize: none;
+    outline: none; tab-size: 4;
+  }
+  .code-editor-wrap textarea:focus { border-color: #58a6ff; }
+  .code-editor-wrap textarea::placeholder { color: #484f58; }
+  /* Answer line overlay (#A: lines) */
+  .answer-line-overlay {
+    position: absolute;
+    left: 0; right: 0;
+    background: #1f6feb12;
+    pointer-events: none;
+    z-index: 5;
+  }
+  /* Floating post-it positioned above error line */
+  .floating-postit {
+    position: absolute;
+    left: 20px; right: 20px;
+    padding: 6px 10px;
+    background: #fffbe6; color: #1a1a1a;
+    border-radius: 4px; font-size: 11px; line-height: 1.4;
+    border-left: 3px solid #f0c000;
+    box-shadow: 1px 2px 8px rgba(0,0,0,0.4);
+    animation: postitIn 0.3s ease;
+    font-family: -apple-system, sans-serif;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .floating-postit code {
+    background: #f0e8c8; padding: 1px 4px; border-radius: 2px;
+    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px;
+  }
+  .answer-code-btn.outline {
+    background: transparent; border: 1px solid #30363d; color: #c9d1d9;
+    border-radius: 6px; padding: 7px 16px; font-size: 13px;
+    cursor: pointer; font-family: inherit; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .answer-code-btn.outline:hover { border-color: #58a6ff; color: #58a6ff; }
+
+  /* Selection popup */
+  #selection-popup {
+    display: none; position: absolute; z-index: 20;
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 8px; padding: 4px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    white-space: nowrap;
+    animation: fadeIn 0.15s ease;
+  }
+  #selection-popup .sel-opt {
+    display: block; width: 100%; text-align: left;
+    background: none; border: none; color: #e6edf3;
+    padding: 6px 14px; font-size: 12px; font-family: inherit;
+    cursor: pointer; border-radius: 5px;
+  }
+  #selection-popup .sel-opt:hover { background: #1f6feb; }
+
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes postitIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  /* ── Quiz screen ── */
+  #quiz-screen {
+    display: none;
+    position: absolute; inset: 0;
+    background: #0d1117;
+    z-index: 100;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    animation: fadeIn 0.5s ease;
+  }
+  #quiz-screen.active { display: flex; }
+  #quiz-question-img {
+    max-width: 340px;
+    border: 2px solid #30363d;
+    border-radius: 10px;
+    margin-bottom: 24px;
+    background: #fff;
+  }
+  #quiz-label {
+    color: #e6edf3;
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 20px;
+  }
+  #quiz-choices {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .quiz-choice {
+    width: 100px; height: 100px;
+    border: 2px solid #30363d;
+    border-radius: 10px;
+    background: #161b22;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .quiz-choice:hover { border-color: #58a6ff; transform: scale(1.05); }
+  .quiz-choice.selected { border-color: #58a6ff; background: #1c2d4a; }
+  .quiz-choice.correct { border-color: #3fb950; background: #1a3a2a; }
+  .quiz-choice.wrong { border-color: #f85149; background: #3a1a1a; }
+  .quiz-choice img, .quiz-choice svg { width: 60px; height: 60px; }
+  .quiz-choice-label {
+    position: absolute; top: 4px; left: 8px;
+    font-size: 11px; color: #484f58; font-weight: 600;
+  }
+  #quiz-feedback {
+    margin-top: 20px;
+    font-size: 14px;
+    color: #8b949e;
+    min-height: 24px;
+    text-align: center;
+  }
+  #quiz-timer {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #484f58;
+  }
+  #quiz-continue {
+    display: none;
+    margin-top: 16px;
+    padding: 10px 28px;
+    border-radius: 8px;
+    border: 1px solid #30363d;
+    background: #21262d;
+    color: #e6edf3;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  #quiz-continue:hover { background: #30363d; }
+
+  /* ── Fill-in-the-blank card ── */
+  .fill-blank-card {
+    margin: 8px 0 4px; padding: 12px 14px;
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 10px;
+  }
+  .fb-sentence {
+    font-size: 13px; line-height: 1.8; color: #e6edf3;
+  }
+  .fb-slot { display: inline-block; margin: 0 4px; }
+  .fb-input {
+    width: 140px; background: #0d1117; color: #58a6ff;
+    border: 1px dashed #58a6ff; border-radius: 4px;
+    padding: 2px 8px; font-family: inherit; font-size: 13px;
+    outline: none; text-align: center;
+    transition: border-color 0.2s;
+  }
+  .fb-input:focus { border-style: solid; }
+  .fb-check {
+    margin-top: 8px; padding: 4px 14px; border-radius: 6px;
+    border: 1px solid #30363d; background: #21262d;
+    color: #e6edf3; font-size: 11px; cursor: pointer;
+    font-family: inherit; transition: background 0.15s;
+  }
+  .fb-check:hover { background: #30363d; }
+  .fb-check:disabled { opacity: 0.4; cursor: default; }
+  .fb-result { margin-top: 6px; font-size: 12px; min-height: 18px; }
+
+  /* ── Chat panel ── */
+  #chat-messages {
+    flex: 1; overflow-y: auto; padding: 16px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .chat-msg {
+    max-width: 88%; font-size: 13px; line-height: 1.6;
+    padding: 10px 14px; border-radius: 12px;
+    word-wrap: break-word; animation: fadeIn 0.2s ease;
+  }
+  .chat-msg.user {
+    align-self: flex-end; background: #1f6feb20;
+    border: 1px solid #1f6feb40; color: #e6edf3;
+  }
+  .chat-msg.claude {
+    align-self: flex-start; background: #161b22;
+    border: 1px solid #30363d; color: #e6edf3;
+  }
+  .chat-msg.system {
+    align-self: center; color: #484f58; font-size: 11px;
+    background: none; border: none; padding: 4px;
+  }
+  #chat-input-bar {
+    display: flex; gap: 8px; padding: 12px 16px;
+    border-top: 1px solid #21262d;
+  }
+  #chat-input {
+    flex: 1; background: #0d1117; color: #e6edf3;
+    border: 1px solid #30363d; border-radius: 10px;
+    padding: 10px 14px; font-size: 13px; font-family: inherit;
+    resize: none; min-height: 42px; max-height: 120px;
+    outline: none; transition: border-color 0.15s;
+  }
+  #chat-input:focus { border-color: #58a6ff; }
+  #chat-send {
+    width: 42px; height: 42px; border-radius: 10px;
+    border: 1px solid #30363d; background: #21262d;
+    color: #e6edf3; font-size: 18px; cursor: pointer;
+    align-self: flex-end; transition: all 0.15s;
+  }
+  #chat-send:hover { border-color: #58a6ff; background: #30363d; }
+  #chat-send:disabled { opacity: 0.4; cursor: default; }
+
+  #explain-nav button:hover:not(:disabled) { filter: brightness(1.2); }
+  #explain-nav button:disabled { cursor: default; }
+
+  .sec-settings-btn {
+    position: absolute; top: 6px; right: 6px; z-index: 10;
+    width: 26px; height: 26px; border-radius: 6px;
+    border: 1px solid #30363d; background: #0d1117cc;
+    cursor: pointer; font-size: 12px; line-height: 26px;
+    text-align: center; opacity: 0;
+    transition: opacity 0.2s, border-color 0.2s;
+  }
+  [data-sec-idx]:hover .sec-settings-btn { opacity: 1; }
+  .sec-settings-btn:hover { border-color: #58a6ff; }
+  .sec-popover {
+    display: none; position: absolute; top: 6px; right: 36px; z-index: 20;
+    background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+    padding: 12px; width: 220px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+    animation: dropdownIn 0.15s ease;
+  }
+  .sec-popover.open { display: block; }
+  .pop-gauge { display: flex; gap: 3px; }
+  .pop-gauge button {
+    width: 24px; height: 24px; border-radius: 5px;
+    border: 1px solid #30363d; background: #0d1117;
+    color: #8b949e; font-size: 11px; font-weight: 600;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .pop-gauge button:hover { border-color: #58a6ff; color: #e6edf3; }
+  .pop-gauge button.active { background: #58a6ff; color: #0d1117; border-color: #58a6ff; }
+  .pop-regen {
+    width: 100%; padding: 6px; border-radius: 6px;
+    border: 1px solid #30363d; background: #21262d;
+    color: #e6edf3; font-size: 11px; cursor: pointer;
+    transition: background 0.15s;
+  }
+  .pop-regen:hover { background: #30363d; }
+  .sec-spinner {
+    text-align: center; color: #484f58; font-size: 12px;
+    padding: 8px; animation: blink 1s infinite;
+  }
+</style>
+</head>
+<body>
+  <!-- Quiz screen (shown during onboarding) -->
+  <div id="quiz-screen">
+    <div id="quiz-label">What comes in place of <b>?</b></div>
+    <img id="quiz-question-img" alt="pattern question">
+    <div id="quiz-choices"></div>
+    <div id="quiz-feedback"></div>
+    <div id="quiz-timer"></div>
+    <button id="quiz-continue">Continue →</button>
+  </div>
+
+  <div id="topbar">
+    <div class="dot" id="dot"></div>
+    <span class="label">upskill coach</span>
+    <span id="study-context"></span>
+    <div id="reopen-explain-btn" title="Reopen explanation panel">✨</div>
+    <div id="user-btn">
+      👤
+      <div id="user-dropdown">
+        <div class="dd-header">Learning Settings</div>
+        <div class="gauge-row">
+          <div class="gauge-label">Difficulty<small>1 easy · 5 hard</small></div>
+          <div class="gauge-btns" id="gauge-difficulty">
+            <button data-val="1">1</button><button data-val="2">2</button><button data-val="3">3</button><button data-val="4">4</button><button data-val="5">5</button>
+          </div>
+        </div>
+        <div class="gauge-row">
+          <div class="gauge-label">Condition<small>1 tired · 5 sharp</small></div>
+          <div class="gauge-btns" id="gauge-condition">
+            <button data-val="1">1</button><button data-val="2">2</button><button data-val="3">3</button><button data-val="4">4</button><button data-val="5">5</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="gaps-btn">
+      🧠 <span id="gaps-badge">0</span>
+      <div id="gaps-dropdown">
+        <div class="dd-header">Knowledge Gaps</div>
+        <div id="hole-list">
+          <div class="dd-empty">No gaps detected yet</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="main-layout">
+    <div id="display">
+      <div id="waiting">
+        Waiting for terminal...<br>
+        <code>python coach.py</code>
+      </div>
+      <div id="question-label"><span class="q-mode"></span><span class="q-text"></span></div>
+      <div id="output"><span class="text"></span><span class="cursor"></span></div>
+      <div id="code-view"></div>
+      <div id="status-msg"></div>
+    </div>
+    <div id="explain-panel">
+      <div id="explain-panel-header">
+        <span id="explain-panel-title"></span>
+        <button id="explain-dismiss">Dismiss</button>
+      </div>
+      <div id="explain-panel-scroll">
+        <div id="explain-context-box">
+          <div class="drill-label">What happened</div>
+          <div id="explain-context-text"></div>
+        </div>
+        <div id="explain-content"></div>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Floating context menu for code selection -->
+  <div id="context-menu">
+    <button id="btn-ask-claude" class="disabled"><span class="menu-icon">💬</span>Ask Claude</button>
+    <button id="btn-practice"><span class="menu-icon">📝</span>Practice Questions</button>
+  </div>
+
+<script>
+// ═══════════════════════════════════════════════════════════
+// TEMPLATE RENDERER — 12 visual template types
+// ═══════════════════════════════════════════════════════════
+const TMPL_COLORS = {
+  primary: '#58a6ff', success: '#3fb950', warning: '#f0883e',
+  error: '#f85149', bg: '#161b22', text: '#e6edf3', muted: '#8b949e',
+  border: '#30363d', palette: ['#58a6ff','#3fb950','#f0883e','#f85149','#bc8cff','#56d4dd','#f778ba']
+};
+
+function renderTemplate(template, data) {
+  const sid = 'tmpl-' + Math.random().toString(36).slice(2,8);
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const delay = i => `animation-delay:${i*0.7}s;`;
+  const fadeBase = `opacity:0;animation:tmplFade 0.5s ease forwards;`;
+
+  const keyframes = `@keyframes tmplFade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}`;
+  const baseCSS = `#${sid}{font-family:"SF Mono","Fira Code",monospace;font-size:13px;color:${TMPL_COLORS.text};padding:20px;display:flex;flex-direction:column;align-items:center;gap:16px;}
+#${sid} .t-label{font-size:15px;font-weight:700;color:${TMPL_COLORS.primary};text-align:center;}
+#${sid} .t-caption{font-size:11px;color:${TMPL_COLORS.muted};text-align:center;max-width:400px;}
+#${sid} .t-box{padding:10px 16px;border-radius:8px;border:1px solid ${TMPL_COLORS.border};background:${TMPL_COLORS.bg};text-align:center;min-width:60px;}
+#${sid} .t-box .t-sub{font-size:10px;color:${TMPL_COLORS.muted};margin-top:4px;}
+#${sid} .t-arrow{color:${TMPL_COLORS.muted};font-size:18px;}`;
+
+  let step = 0;
+  const s = () => { const d = step; step++; return `style="${fadeBase}${delay(d)}"`; };
+
+  try {
+    switch(template) {
+
+    // ── 1. LINEAR SEQUENCE ──
+    case 'linear_sequence': {
+      const steps = data.steps || [];
+      let items = '';
+      steps.forEach((st, i) => {
+        if (i > 0) items += `<span class="t-arrow" ${s()}>→</span>`;
+        items += `<div class="t-box" ${s()} style="${fadeBase}${delay(step-1)}border-color:${TMPL_COLORS.palette[i%7]}40;">
+          <div style="color:${TMPL_COLORS.palette[i%7]}">${esc(st.text)}</div>
+          ${st.sub ? `<div class="t-sub">${esc(st.sub)}</div>` : ''}
+        </div>`;
+      });
+      return `<style>${keyframes}\n${baseCSS}\n#${sid} .seq{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:center;}</style>
+<div id="${sid}">
+  <div class="t-label" ${s()}>${esc(data.label || '')}</div>
+  <div class="seq">${items}</div>
+  ${data.caption ? `<div class="t-caption" ${s()}>${esc(data.caption)}</div>` : ''}
+</div>`;
+    }
+
+    // ── 2. TRANSFORMATION ──
+    case 'transformation': {
+      const inp = data.input || {text:''};
+      const proc = data.process || {text:''};
+      const out = data.output || {text:''};
+      return `<style>${keyframes}\n${baseCSS}\n#${sid} .tf{display:flex;align-items:center;gap:12px;justify-content:center;flex-wrap:wrap;}</style>
+<div id="${sid}">
+  <div class="t-label" ${s()}>${esc(data.label || '')}</div>
+  <div class="tf">
+    <div class="t-box" ${s()} style="${fadeBase}${delay(step-1)}border-color:${TMPL_COLORS.primary}40;">
+      <div style="color:${TMPL_COLORS.primary}">${esc(inp.text)}</div>
+      ${inp.sub ? `<div class="t-sub">${esc(inp.sub)}</div>` : ''}
+    </div>
+    <span class="t-arrow" ${s()}>→</span>
+    <div class="t-box" ${s()} style="${fadeBase}${delay(step-1)}border-color:${TMPL_COLORS.warning}40;border-style:dashed;">
+      <div style="color:${TMPL_COLORS.warning}">${esc(proc.text)}</div>
+      ${proc.sub ? `<div class="t-sub">${esc(proc.sub)}</div>` : ''}
+    </div>
+    <span class="t-arrow" ${s()}>→</span>
+    <div class="t-box" ${s()} style="${fadeBase}${delay(step-1)}border-color:${TMPL_COLORS.success}40;">
+      <div style="color:${TMPL_COLORS.success}">${esc(out.text)}</div>
+      ${out.sub ? `<div class="t-sub">${esc(out.sub)}</div>` : ''}
+    </div>
+  </div>
+  ${data.caption ? `<div class="t-caption" ${s()}>${esc(data.caption)}</div>` : ''}
+</div>`;
+    }
+
+    // ── 3. MATRIX ──
+    case 'matrix': {
+      const h = data.headers || {rows:[], cols:[]};
+      const cells = data.cells || [];
+      const hl = new Set((data.highlight||[]).map(p=>p[0]+','+p[1]));
+      let rows = '';
+      cells.forEach((row, ri) => {
+        let tds = `<td class="t-rh" ${s()}>${esc(h.rows[ri]||'')}</td>`;
+        row.forEach((v, ci) => {
+          const isHl = hl.has(ri+','+ci);
+          tds += `<td ${s()} style="${fadeBase}${delay(step-1)}${isHl?'background:#58a6ff20;color:#58a6ff;font-weight:700;':''}">${typeof v==='number'?v.toFixed?v.toFixed(2):v:esc(v)}</td>`;
+        });
+        rows += `<tr>${tds}</tr>`;
+      });
+      let ths = '<th></th>' + (h.cols||[]).map((c,i) => `<th ${s()}>${esc(c)}</th>`).join('');
+      return `<style>${keyframes}\n${baseCSS}\n#${sid} table{border-collapse:collapse;margin:0 auto;}
+#${sid} th,#${sid} td{padding:8px 14px;border:1px solid ${TMPL_COLORS.border};text-align:center;font-size:12px;}
+#${sid} th{color:${TMPL_COLORS.primary};font-weight:600;background:${TMPL_COLORS.bg};}
+#${sid} .t-rh{color:${TMPL_COLORS.warning};font-weight:600;background:${TMPL_COLORS.bg};}</style>
+<div id="${sid}">
+  <div class="t-label" ${s()}>${esc(data.label || '')}</div>
+  <table><tr>${ths}</tr>${rows}</table>
+  ${data.caption ? `<div class="t-caption" ${s()}>${esc(data.caption)}</div>` : ''}
+</div>`;
+    }
+
+    // ── 4. MANY_TO_MANY ──
+    case 'many_to_many': {
+      const inputs = data.inputs || [];
+      const outputs = data.outputs || [];
+      const conns = data.connections || [];
+      const h = Math.max(inputs.length, outputs.length) * 50 + 20;
+      const w = 350;
+      let inBoxes = '', outBoxes = '', lines = '';
+      inputs.forEach((inp, i) => {
+        const y = (i+1)*h/(inputs.length+1);
+        inBoxes += `<g ${s()}><rect x="10" y="${y-15}" width="90" height="30" rx="6" fill="${TMPL_COLORS.bg}" stroke="${TMPL_COLORS.palette[i%7]}" stroke-opacity="0.4"/>
+          <text x="55" y="${y+4}" text-anchor="middle" fill="${TMPL_COLORS.palette[i%7]}" font-size="11">${esc(inp.text)}</text></g>`;
+      });
+      outputs.forEach((out, i) => {
+        const y = (i+1)*h/(outputs.length+1);
+        outBoxes += `<g ${s()}><rect x="${w-100}" y="${y-15}" width="90" height="30" rx="6" fill="${TMPL_COLORS.bg}" stroke="${TMPL_COLORS.palette[i%7]}" stroke-opacity="0.4"/>
+          <text x="${w-55}" y="${y+4}" text-anchor="middle" fill="${TMPL_COLORS.palette[i%7]}" font-size="11">${esc(out.text)}</text></g>`;
+      });
+      conns.forEach(([fi, ti]) => {
+        const y1 = (fi+1)*h/(inputs.length+1);
+        const y2 = (ti+1)*h/(outputs.length+1);
+        lines += `<line x1="100" y1="${y1}" x2="${w-100}" y2="${y2}" stroke="${TMPL_COLORS.muted}" stroke-opacity="0.5" stroke-dasharray="4" ${s()}/>`;
+      });
+      return `<style>${keyframes}\n${baseCSS}\n#${sid} svg{overflow:visible;}</style>
+<div id="${sid}">
+  <div class="t-label" ${s()}>${esc(data.label || '')}</div>
+  <svg width="${w}" height="${h}">${lines}${inBoxes}${outBoxes}</svg>
+  ${data.caption ? `<div class="t-caption" ${s()}>${esc(data.caption)}</div>` : ''}
+</div>`;
+    }
+
+    // ── 5. TREE ──
+    case 'tree': {
+      const root = data.root || {text:'root'};
+      let html = '';
+      function renderNode(node, depth) {
+        const indent = depth * 28;
+        const col = TMPL_COLORS.palette[depth % 7];
+        html += `<div ${s()} style="${fadeBase}${delay(step-1)}margin-left:${indent}px;display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          ${depth > 0 ? `<span style="color:${TMPL_COLORS.border}">└─</span>` : ''}
+          <div class="t-box" style="border-color:${col}40;padding:6px 14px;"><span style="color:${col}">${esc(node.text)}</span></div>
+        </div>`;
+        (node.children || []).forEach(c => renderNode(c, depth + 1));
+      }
+      renderNode(root, 0);
+      return `<style>${keyframes}\n${baseCSS}\n#${sid}{align-items:flex-start;}</style>
+<div id="${sid}">
+  <div class="t-label" ${s()} style="align-self:center;">${esc(data.label || '')}</div>
+  ${html}
+  ${data.caption ? `<div class="t-caption" ${s()} style="align-self:center;">${esc(data.caption)}</div>` : ''}
+</div>`;
+    }
+
+    // ── 6. BEFORE_AFTER ──
+    case 'before_after': {
+      const bef = data.before || {title:'Before',items:[]};
+      const aft = data.after || {title:'After',items:[]};
+      const hlSet = new Set(data.highlight || []);
+      let befItems = bef.items.map((it,i) => `<div ${s()} style="${fadeBase}${delay(step-1)}padding:6px 10px;border-radius:4px;${hlSet.has(i)?'background:#f8514920;text-decoration:line-through;color:'+TMPL_COLORS.error+';':''}">${esc(it)}</div>`).join('');
+      let aftItems = aft.items.map((it,i) => `<div ${s()} style="${fadeBase}${delay(step-1)}padding:6px 10px;border-radius:4px;${hlSet.has(i)?'background:#3fb95020;color:'+TMPL_COLORS.success+';font-weight:600;':''}">${esc(it)}</div>`).join('');
+      return `<style>${keyframes}\n${baseCSS}\n#${sid} .ba{display:grid;grid-template-columns:1fr auto 1fr;gap:16px;align-items:start;width:100%;max-width:500px;}
+#${sid} .ba-col{display:flex;flex-direction:column;gap:4px;}
+#${sid} .ba-title{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;}
+#${sid} .ba-div{width:1px;background:${TMPL_COLORS.border};min-height:60px;align-self:stretch;}</style>
+<div id="${sid}">
+  <div class="t-label" ${s()}>${esc(data.label || '')}</div>
+  <div class="ba">
+    <div class="ba-col"><div class="ba-title" style="color:${TMPL_COLORS.error};" ${s()}>${esc(bef.title)}</div>${befItems}</div>
+    <div class="ba-div"></div>
+    <div class="ba-col"><div class="ba-title" style="color:${TMPL_COLORS.success};" ${s()}>${esc(aft.title)}</div>${aftItems}</div>
+  </div>
+  ${data.caption ? `<div class="t-caption" ${s()}>${esc(data.caption)}</div>` : ''}
+</div>`;
+    }
+
+    // ── 7. ONE_TO_MANY ──
+    case 'one_to_many': {
+      const src = data.source || {text:''};
+      const tgts = data.targets || [];
+      const h = tgts.length * 50 + 20;
+      const w = 350;
+      const srcY = h / 2;
+      let tgtEls = '', lines = '';
+      tgts.forEach((t, i) => {
+        const y = (i+1)*h/(tgts.length+1);
+        const col = TMPL_COLORS.palette[i%7];
+        lines += `<line x1="120" y1="${srcY}" x2="${w-120}" y2="${y}" stroke="${col}" stroke-opacity="0.4" ${s()}/>`;
+        tgtEls += `<g ${s()}><rect x="${w-115}" y="${y-15}" width="105" height="30" rx="6" fill="${TMPL_COLORS.bg}" stroke="${col}" stroke-opacity="0.4"/>
+          <text x="${w-62}" y="${y+4}" text-anchor="middle" fill="${col}" font-size="11">${esc(t.text)}</text>
+          ${t.sub ? `<text x="${w-62}" y="${y+16}" text-anchor="middle" fill="${TMPL_COLORS.muted}" font-size="9">${esc(t.sub)}</text>` : ''}</g>`;
+      });
+      return `<style>${keyframes}\n${baseCSS}\n#${sid} svg{overflow:visible;}</style>
+<div id="${sid}">
+  <div class="t-label" ${s()}>${esc(data.label || '')}</div>
+  <svg width="${w}" height="${h}">
+    <g ${s()}><rect x="10" y="${srcY-18}" width="110" height="36" rx="6" fill="${TMPL_COLORS.bg}" stroke="${TMPL_COLORS.primary}" stroke-opacity="0.4"/>
+      <text x="65" y="${srcY+4}" text-anchor="middle" fill="${TMPL_COLORS.primary}" font-size="11">${esc(src.text)}</text>
+      ${src.sub ? `<text x="65" y="${srcY+16}" text-anchor="middle" fill="${TMPL_COLORS.muted}" font-size="9">${esc(src.sub)}</text>` : ''}</g>
+    ${lines}${tgtEls}
+  </svg>
+  ${data.caption ? `<div class="t-caption" ${s()}>${esc(data.caption)}</div>` : ''}
+</div>`;
+    }
+
+    // ── 8. MANY_TO_ONE ──
+    case 'many_to_one': {
+      const srcs = data.sources || [];
+      const tgt = data.target || {text:''};
+      const h = srcs.length * 50 + 20;
+      const w = 350;
+      const tgtY = h / 2;
+      let srcEls = '', lines = '';
+      srcs.forEach((s2, i) => {
+        const y = (i+1)*h/(srcs.length+1);
+        const col = TMPL_COLORS.palette[i%7];
+        lines += `<line x1="120" y1="${y}" x2="${w-120}" y2="${tgtY}" stroke="${col}" stroke-opacity="0.4" ${s()}/>`;
+        srcEls += `<g ${s()}><rect x="10" y="${y-15}" width="105" height="30" rx="6" fill="${TMPL_COLORS.bg}" stroke="${col}" stroke-opacity="0.4"/>
+          <text x="62" y="${y+4}" text-anchor="middle" fill="${col}" font-size="11">${esc(s2.text)}</text></g>`;
+      });
+      return `<style>${keyframes}\n${baseCSS}\n#${sid} svg{overflow:visible;}</style>
+<div id="${sid}">
+  <div class="t-label" ${s()}>${esc(data.label || '')}</div>
+  <svg width="${w}" height="${h}">
+    ${srcEls}${lines}
+    <g ${s()}><rect x="${w-115}" y="${tgtY-18}" width="105" height="36" rx="6" fill="${TMPL_COLORS.bg}" stroke="${TMPL_COLORS.primary}" stroke-opacity="0.4"/>
+      <text x="${w-62}" y="${tgtY+4}" text-anchor="middle" fill="${TMPL_COLORS.primary}" font-size="11">${esc(tgt.text)}</text>
+      ${tgt.sub ? `<text x="${w-62}" y="${tgtY+16}" text-anchor="middle" fill="${TMPL_COLORS.muted}" font-size="9">${esc(tgt.sub)}</text>` : ''}</g>
+  </svg>
+  ${data.caption ? `<div class="t-caption" ${s()}>${esc(data.caption)}</div>` : ''}
+</div>`;
+    }
+
+    // ── 9. COMPARISON ──
+    case 'comparison': {
+      const left = data.left || {title:'A',items:[]};
+      const right = data.right || {title:'B',items:[]};
+      let lItems = left.items.map((it,i) => `<div ${s()} style="${fadeBase}${delay(step-1)}padding:6px 10px;border-left:2px solid ${TMPL_COLORS.primary}30;margin-bottom:4px;">${esc(it)}</div>`).join('');
+      let rItems = right.items.map((it,i) => `<div ${s()} style="${fadeBase}${delay(step-1)}padding:6px 10px;border-left:2px solid ${TMPL_COLORS.warning}30;margin-bottom:4px;">${esc(it)}</div>`).join('');
+      return `<style>${keyframes}\n${baseCSS}\n#${sid} .cmp{display:grid;grid-template-columns:1fr 1fr;gap:20px;width:100%;max-width:500px;}
+#${sid} .cmp-col{display:flex;flex-direction:column;}
+#${sid} .cmp-title{font-size:12px;font-weight:700;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid ${TMPL_COLORS.border};}</style>
+<div id="${sid}">
+  <div class="t-label" ${s()}>${esc(data.label || '')}</div>
+  <div class="cmp">
+    <div class="cmp-col"><div class="cmp-title" style="color:${TMPL_COLORS.primary};" ${s()}>${esc(left.title)}</div>${lItems}</div>
+    <div class="cmp-col"><div class="cmp-title" style="color:${TMPL_COLORS.warning};" ${s()}>${esc(right.title)}</div>${rItems}</div>
+  </div>
+  ${data.caption ? `<div class="t-caption" ${s()}>${esc(data.caption)}</div>` : ''}
+</div>`;
+    }
+
+    // ── 10. CYCLE ──
+    case 'cycle': {
+      const nodes = data.nodes || [];
+      const n = nodes.length;
+      const cx = 160, cy = 130, r = 90;
+      let els = '';
+      nodes.forEach((nd, i) => {
+        const angle = (i / n) * 2 * Math.PI - Math.PI/2;
+        const x = cx + r * Math.cos(angle);
+        const y = cy + r * Math.sin(angle);
+        const nextAngle = ((i+1) / n) * 2 * Math.PI - Math.PI/2;
+        const ax = cx + (r-15) * Math.cos(angle + 0.3);
+        const ay = cy + (r-15) * Math.sin(angle + 0.3);
+        const bx = cx + (r-15) * Math.cos(nextAngle - 0.3);
+        const by = cy + (r-15) * Math.sin(nextAngle - 0.3);
+        els += `<g ${s()}>
+          <rect x="${x-50}" y="${y-14}" width="100" height="28" rx="6" fill="${TMPL_COLORS.bg}" stroke="${TMPL_COLORS.palette[i%7]}" stroke-opacity="0.5"/>
+          <text x="${x}" y="${y+4}" text-anchor="middle" fill="${TMPL_COLORS.palette[i%7]}" font-size="11">${esc(nd.text)}</text>
+        </g>`;
+        els += `<path d="M${ax},${ay} Q${cx},${cy} ${bx},${by}" fill="none" stroke="${TMPL_COLORS.muted}" stroke-opacity="0.4" stroke-dasharray="4" marker-end="url(#${sid}-arrow)" ${s()}/>`;
+      });
+      return `<style>${keyframes}\n${baseCSS}\n#${sid} svg{overflow:visible;}</style>
+<div id="${sid}">
+  <div class="t-label" ${s()}>${esc(data.label || '')}</div>
+  <svg width="320" height="260">
+    <defs><marker id="${sid}-arrow" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto"><path d="M0,0 L8,3 L0,6" fill="${TMPL_COLORS.muted}" fill-opacity="0.6"/></marker></defs>
+    ${els}
+  </svg>
+  ${data.caption ? `<div class="t-caption" ${s()}>${esc(data.caption)}</div>` : ''}
+</div>`;
+    }
+
+    // ── 11. DISTRIBUTION ──
+    case 'distribution': {
+      const items = data.items || [];
+      const maxVal = Math.max(...items.map(it => it.value || 0), 1);
+      let bars = '';
+      items.forEach((it, i) => {
+        const pct = ((it.value || 0) / maxVal * 100).toFixed(0);
+        const col = it.color || TMPL_COLORS.palette[i%7];
+        bars += `<div ${s()} style="${fadeBase}${delay(step-1)}display:flex;align-items:center;gap:10px;width:100%;">
+          <div style="width:80px;text-align:right;font-size:11px;color:${TMPL_COLORS.muted};flex-shrink:0;">${esc(it.label)}</div>
+          <div style="flex:1;height:22px;background:${TMPL_COLORS.border}30;border-radius:4px;overflow:hidden;">
+            <div style="width:${pct}%;height:100%;background:${col};border-radius:4px;transition:width 1s ease;"></div>
+          </div>
+          <div style="width:50px;font-size:11px;color:${col};font-weight:600;">${it.value}${data.unit ? ' '+data.unit : ''}</div>
+        </div>`;
+      });
+      return `<style>${keyframes}\n${baseCSS}\n#${sid} .bars{display:flex;flex-direction:column;gap:6px;width:100%;max-width:420px;}</style>
+<div id="${sid}">
+  <div class="t-label" ${s()}>${esc(data.label || '')}</div>
+  <div class="bars">${bars}</div>
+  ${data.caption ? `<div class="t-caption" ${s()}>${esc(data.caption)}</div>` : ''}
+</div>`;
+    }
+
+    // ── 12. INCLUSION ──
+    case 'inclusion': {
+      const sets = data.sets || [];
+      let html = '';
+      function renderSet(node, depth) {
+        const col = TMPL_COLORS.palette[depth % 7];
+        const pad = 16 + depth * 4;
+        html += `<div ${s()} style="${fadeBase}${delay(step-1)}border:2px solid ${col}40;border-radius:${12-depth*2}px;padding:${pad}px;margin:6px 0;position:relative;">
+          <div style="position:absolute;top:-10px;left:14px;background:#0d1117;padding:0 8px;font-size:11px;color:${col};font-weight:600;">${esc(node.text)}</div>`;
+        (node.children || []).forEach(c => renderSet(c, depth + 1));
+        html += '</div>';
+      }
+      sets.forEach(s2 => renderSet(s2, 0));
+      return `<style>${keyframes}\n${baseCSS}\n#${sid}{align-items:stretch;max-width:420px;width:100%;}</style>
+<div id="${sid}">
+  <div class="t-label" ${s()} style="text-align:center;">${esc(data.label || '')}</div>
+  ${html}
+  ${data.caption ? `<div class="t-caption" ${s()} style="text-align:center;">${esc(data.caption)}</div>` : ''}
+</div>`;
+    }
+
+    default:
+      return `<div style="color:${TMPL_COLORS.muted};padding:20px;text-align:center;">Unknown template: ${esc(template)}</div>`;
+    }
+  } catch(e) {
+    return `<div style="color:${TMPL_COLORS.error};padding:20px;">Template render error: ${esc(e.message)}</div>`;
+  }
+}
+// ═══════════════════════════════════════════════════════════
+
+const dot = document.getElementById('dot');
+const contextEl = document.getElementById('study-context');
+const waitingEl = document.getElementById('waiting');
+const questionLabel = document.getElementById('question-label');
+const outputEl = document.getElementById('output');
+const textEl = outputEl.querySelector('.text');
+const cursorEl = outputEl.querySelector('.cursor');
+const codeView = document.getElementById('code-view');
+const statusMsg = document.getElementById('status-msg');
+let ws;
+
+function connect() {
+  ws = new WebSocket(`ws://${location.hostname}:8766`);
+
+  ws.onopen = () => { dot.classList.add('on'); };
+  ws.onclose = () => { dot.classList.remove('on'); setTimeout(connect, 2000); };
+  ws.onerror = () => ws.close();
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    console.log('[WS]', msg.type, msg);
+
+    switch (msg.type) {
+      case 'connected':
+        if (waitingEl) waitingEl.style.display = 'none';
+        contextEl.textContent = msg.study_context;
+        break;
+
+      case 'show_quiz':
+        if (waitingEl) waitingEl.style.display = 'none';
+        showQuiz(msg);
+        break;
+
+      case 'show_code_editor':
+        if (waitingEl) waitingEl.style.display = 'none';
+        document.getElementById('quiz-screen').classList.remove('active');
+        showCodeEditor();
+        break;
+
+      case 'init_settings': {
+        userDifficulty = msg.difficulty || 3;
+        userCondition = msg.condition || 3;
+        document.querySelectorAll('#gauge-difficulty button').forEach(b => {
+          b.classList.toggle('active', parseInt(b.dataset.val) === userDifficulty);
+        });
+        document.querySelectorAll('#gauge-condition button').forEach(b => {
+          b.classList.toggle('active', parseInt(b.dataset.val) === userCondition);
+        });
+        break;
+      }
+
+      case 'question':
+        if (waitingEl) waitingEl.style.display = 'none';
+        lastQuestionText = msg.text;
+        questionLabel.querySelector('.q-mode').textContent = msg.mode;
+        questionLabel.querySelector('.q-text').textContent = msg.text;
+        questionLabel.style.display = 'block';
+        // Clear both views
+        textEl.textContent = '';
+        outputEl.style.display = 'none';
+        codeView.style.display = 'none';
+        codeView.innerHTML = '';
+        statusMsg.style.display = 'none';
+        break;
+
+      case 'capturing':
+        statusMsg.textContent = 'capturing screen...';
+        statusMsg.style.display = 'block';
+        break;
+
+      case 'streaming':
+        statusMsg.textContent = 'thinking...';
+        statusMsg.style.display = 'block';
+        break;
+
+      case 'delta':
+        statusMsg.style.display = 'none';
+        cursorEl.style.display = 'inline-block';
+        outputEl.style.display = 'block';
+        // Strip [[term]] markers for display
+        textEl.textContent += msg.text.replace(/\[\[([^\]]+)\]\]/g, '$1');
+        document.getElementById('display').scrollTop = document.getElementById('display').scrollHeight;
+        break;
+
+      case 'done':
+        cursorEl.style.display = 'none';
+        showAnswerInCodeBtn();
+        break;
+
+      case 'annotated_code':
+        statusMsg.style.display = 'none';
+        outputEl.style.display = 'none';
+        lastClaudeResponse = msg.note || '';
+        console.log('[WS] annotated_code received, code length:', msg.code?.length, 'line:', msg.highlight_line);
+        try {
+          renderAnnotatedCode(msg.code, msg.highlight_line, msg.note);
+        } catch (err) {
+          console.error('[WS] renderAnnotatedCode error:', err);
+          textEl.textContent = msg.note || 'Render error';
+          outputEl.style.display = 'block';
+        }
+        showAnswerInCodeBtn();
+        break;
+
+      case 'practice_questions':
+        renderPracticeQuestions(msg.questions, msg.code, msg.topic, msg.level);
+        break;
+
+      case 'followup_question':
+        renderFollowup(msg.question, msg.weak_concepts, msg.topic, msg.level);
+        break;
+
+      case 'grade_result': {
+        const fb = document.getElementById('fb-' + msg.gradeId);
+        if (fb) {
+          fb.textContent = (msg.correct ? '✅ ' : '❌ ') + msg.feedback;
+          fb.className = 'feedback ' + (msg.correct ? 'correct' : 'incorrect');
+          fb.style.display = 'block';
+        }
+        break;
+      }
+
+      case 'code_line_check_result': {
+        const textarea = document.getElementById(msg.editorId);
+        if (!textarea) break;
+
+        // Update error store
+        if (!window._codeErrors) window._codeErrors = {};
+        if (!window._codeErrors[msg.editorId]) window._codeErrors[msg.editorId] = {};
+        const errors = window._codeErrors[msg.editorId];
+
+        if (msg.has_error) {
+          errors[msg.lineNum] = { line: msg.line, correction: msg.correction };
+        } else {
+          delete errors[msg.lineNum];
+        }
+
+        // Clean errors for lines that changed or were removed
+        const lines = textarea.value.split('\n');
+        for (const ln of Object.keys(errors)) {
+          const idx = parseInt(ln) - 1;
+          if (idx >= lines.length || lines[idx].trim() !== errors[ln].line.trim()) {
+            delete errors[ln];
+          }
+        }
+
+        // Render floating post-its
+        renderPostits(msg.editorId);
+
+        // Handle major knowledge hole
+        if (msg.major_hole && msg.hole_topic) {
+          addKnowledgeHole(msg.hole_topic, msg.hole_context || '', msg.line || '', msg.correction || '');
+        }
+        break;
+      }
+
+      case 'code_inline_answer': {
+        const textarea = document.getElementById(msg.editorId);
+        if (!textarea) break;
+
+        // Find the #Q: line and insert answer right after it
+        const lines = textarea.value.split('\n');
+        const qLineIdx = msg.lineNum - 1;
+        if (qLineIdx >= 0 && qLineIdx < lines.length) {
+          // Wrap each answer line with #A: prefix
+          const answerLines = msg.answer.split('\n').map(l => '#A: ' + l);
+          lines.splice(qLineIdx + 1, 0, ...answerLines);
+          const newValue = lines.join('\n');
+          textarea.value = newValue;
+          // Move cursor to after the inserted answer
+          const cursorPos = lines.slice(0, qLineIdx + 1 + answerLines.length).join('\n').length + 1;
+          textarea.selectionStart = textarea.selectionEnd = cursorPos;
+
+          // Render answer line highlights
+          renderAnswerLines(msg.editorId);
+        }
+        break;
+      }
+
+
+      case 'drill_content':
+        renderDrillContent(msg.sections, msg.topic);
+        break;
+
+      case 'explain_animation_result': {
+        // Initial setup — clear panel and show loading
+        const contentEl = document.getElementById('explain-content');
+        document.getElementById('explain-panel-title').textContent = '✨ ' + (msg.title || 'Explanation');
+        document.getElementById('explain-context-text').innerHTML = '';
+        contentEl.innerHTML = msg.html || '';
+        document.getElementById('explain-panel').classList.add('open');
+        document.getElementById('explain-panel-scroll').scrollTop = 0;
+        break;
+      }
+
+      case 'explain_section': {
+        // Store section data for paginated display
+        if (!window._explainSections) window._explainSections = [];
+
+        // Generate HTML from template+data (or use raw html as fallback)
+        const secHtml = msg.template
+          ? renderTemplate(msg.template, msg.data || {})
+          : (msg.html || '');
+
+        // Regeneration: replace existing section
+        const existing = window._explainSections.find(s => s.index === msg.index);
+        if (existing) {
+          existing.html = secHtml;
+          existing.template = msg.template;
+          existing.data = msg.data;
+          existing.title = msg.title;
+          if (window._explainCurrentPage === msg.index) {
+            _renderExplainPage(msg.index);
+          }
+          break;
+        }
+
+        window._explainSections.push({ index: msg.index, total: msg.total, html: secHtml, template: msg.template, data: msg.data, title: msg.title });
+
+        document.getElementById('explain-panel-title').textContent = '✨ ' + (msg.title || 'Explanation');
+
+        // Remove loading
+        const contentEl = document.getElementById('explain-content');
+        const loading = contentEl.querySelector('[data-loading]');
+        if (loading) loading.remove();
+
+        // Only render the first section once; after that just update nav
+        if (window._explainSections.length === 1) {
+          window._explainCurrentPage = 0;
+          _renderExplainPage(0);
+        } else {
+          _updateExplainNav();
+        }
+        break;
+      }
+
+      case 'explain_done': {
+        // Final total correction — update sections with actual total (do NOT re-render iframe)
+        const finalTotal = msg.total;
+        if (window._explainSections) {
+          window._explainSections.forEach(s => { s.total = finalTotal; });
+          _updateExplainNav();
+        }
+        break;
+      }
+
+      case 'diagnostic_question':
+        renderDiagnosticQuestion(msg.question, msg.questionNum);
+        break;
+
+      case 'diagnostic_feedback_and_next': {
+        // Remove thinking indicator
+        const thinking = document.getElementById('diag-thinking');
+        if (thinking) thinking.remove();
+
+        const contentEl = document.getElementById('explain-content');
+
+        // Show evaluation feedback
+        const fbWrap = document.createElement('div');
+        fbWrap.style.cssText = 'padding:4px 16px 8px;animation:fadeIn 0.3s ease;';
+        const color = msg.understood ? '#3fb950' : '#f0883e';
+        fbWrap.innerHTML = `<div style="font-size:12px;color:${color};padding:8px 12px;background:${color}10;border-radius:8px;border:1px solid ${color}30;">${msg.understood ? '✓' : '✗'} ${msg.evaluation}</div>`;
+        contentEl.appendChild(fbWrap);
+
+        const scroll = document.getElementById('explain-panel-scroll');
+        scroll.scrollTop = scroll.scrollHeight;
+
+        if (msg.done) {
+          // Show transition to task
+          const transDiv = document.createElement('div');
+          transDiv.style.cssText = 'padding:20px 16px;text-align:center;color:#484f58;font-size:12px;animation:blink 1s infinite;';
+          transDiv.textContent = '⏳ Generating a practice task matched to your level...';
+          contentEl.appendChild(transDiv);
+          document.getElementById('explain-panel-title').textContent = '🏋️ Practice';
+        } else if (msg.nextQuestion) {
+          // Show next question after a brief pause
+          setTimeout(() => {
+            renderDiagnosticQuestion(msg.nextQuestion, msg.questionNum);
+          }, 800);
+        }
+        break;
+      }
+
+      case 'practice_task':
+        renderPracticeEditor(msg.task, msg.sectionMeta || {});
+        break;
+
+      case 'practice_review': {
+        const fb = document.getElementById('practice-feedback');
+        if (fb) {
+          fb.innerHTML = `<div style="margin-top:8px;padding:14px;border-radius:8px;border:1px solid ${msg.passed?'#3fb950':'#f0883e'};background:${msg.passed?'#3fb95010':'#f0883e10'};font-size:13px;line-height:1.6;color:#e6edf3;">${msg.feedback.replace(/\n/g,'<br>')}</div>`;
+        }
+        const submitBtn = document.querySelector('#practice-feedback')?.parentElement?.querySelector('button');
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = msg.passed ? '✅ Passed!' : '🔄 Try again & submit';
+        }
+        break;
+      }
+
+      case 'chat_reply': {
+        const chatMsgs = document.getElementById('chat-messages');
+        if (!chatMsgs) break;
+        // Remove typing indicator
+        const typing = chatMsgs.querySelector('[data-typing]');
+        if (typing) typing.remove();
+        // Add Claude's message
+        const cDiv = document.createElement('div');
+        cDiv.className = 'chat-msg claude';
+        cDiv.innerHTML = msg.text.replace(/</g, '&lt;').replace(/\n/g, '<br>');
+        chatMsgs.appendChild(cDiv);
+        chatMsgs.scrollTop = chatMsgs.scrollHeight;
+        // Re-enable input
+        const chatInput = document.getElementById('chat-input');
+        const chatSend = document.getElementById('chat-send');
+        if (chatInput) { chatInput.disabled = false; chatInput.focus(); }
+        if (chatSend) chatSend.disabled = false;
+        break;
+      }
+
+      case 'chat_stream': {
+        const chatMsgs2 = document.getElementById('chat-messages');
+        if (!chatMsgs2) break;
+        // Find or create streaming message
+        let streamEl = chatMsgs2.querySelector('[data-streaming]');
+        if (!streamEl) {
+          const typing2 = chatMsgs2.querySelector('[data-typing]');
+          if (typing2) typing2.remove();
+          streamEl = document.createElement('div');
+          streamEl.className = 'chat-msg claude';
+          streamEl.dataset.streaming = '1';
+          chatMsgs2.appendChild(streamEl);
+        }
+        streamEl.innerHTML += msg.token.replace(/</g, '&lt;').replace(/\n/g, '<br>');
+        chatMsgs2.scrollTop = chatMsgs2.scrollHeight;
+        break;
+      }
+
+      case 'chat_done': {
+        const chatMsgs3 = document.getElementById('chat-messages');
+        if (chatMsgs3) {
+          const sEl = chatMsgs3.querySelector('[data-streaming]');
+          if (sEl) {
+            delete sEl.dataset.streaming;
+            // Check for fill_blank JSON in the streamed text
+            const raw = sEl.textContent;
+            const jsonMatch = raw.match(/\{[^{}]*"type"\s*:\s*"fill_blank"[^{}]*\}/);
+            if (jsonMatch) {
+              try {
+                const fb = JSON.parse(jsonMatch[0]);
+                // Split text: before JSON and after JSON
+                const idx = raw.indexOf(jsonMatch[0]);
+                const before = raw.substring(0, idx).trim();
+                const after = raw.substring(idx + jsonMatch[0].length).trim();
+                sEl.innerHTML = '';
+                if (before) sEl.innerHTML = before.replace(/\n/g, '<br>') + '<br><br>';
+                // Render fill-in-the-blank card
+                const card = document.createElement('div');
+                card.className = 'fill-blank-card';
+                const parts = fb.sentence.split('_____');
+                card.innerHTML = `
+                  <div class="fb-sentence">${parts[0]}<span class="fb-slot"><input type="text" class="fb-input" placeholder="?" autocomplete="off"></span>${parts[1] || ''}</div>
+                  <button class="fb-check">Check</button>
+                  <div class="fb-result"></div>
+                `;
+                const fbInput = card.querySelector('.fb-input');
+                const fbCheck = card.querySelector('.fb-check');
+                const fbResult = card.querySelector('.fb-result');
+                function checkFB() {
+                  const val = fbInput.value.trim().toLowerCase();
+                  const ans = fb.answer.trim().toLowerCase();
+                  if (val === ans) {
+                    fbResult.innerHTML = '<span style="color:#3fb950;">✓ Correct!</span>';
+                    fbInput.style.borderColor = '#3fb950';
+                    fbInput.disabled = true;
+                    fbCheck.disabled = true;
+                  } else {
+                    fbResult.innerHTML = `<span style="color:#f0883e;">Not quite. Answer: <b>${fb.answer}</b></span>`;
+                    fbInput.style.borderColor = '#f0883e';
+                  }
+                }
+                fbCheck.addEventListener('click', checkFB);
+                fbInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') checkFB(); });
+                sEl.appendChild(card);
+                if (after) {
+                  const afterDiv = document.createElement('div');
+                  afterDiv.style.marginTop = '8px';
+                  afterDiv.innerHTML = after.replace(/\n/g, '<br>');
+                  sEl.appendChild(afterDiv);
+                }
+                setTimeout(() => fbInput.focus(), 100);
+              } catch(e) { /* not valid JSON, ignore */ }
+            }
+          }
+        }
+        const chatInput2 = document.getElementById('chat-input');
+        const chatSend2 = document.getElementById('chat-send');
+        if (chatInput2) { chatInput2.disabled = false; chatInput2.focus(); }
+        if (chatSend2) chatSend2.disabled = false;
+        break;
+      }
+
+      case 'chat_animation_start': {
+        // Save chat panel state before animation takes over
+        const caContent = document.getElementById('explain-content');
+        window._savedChatHTML = caContent.innerHTML;
+        window._savedChatStyle = caContent.style.cssText;
+        window._savedChatTitle = document.getElementById('explain-panel-title').textContent;
+        window._chatAnimationActive = true;
+
+        // Hide code editor, show animation panel full-width
+        const caDisplay = document.getElementById('display');
+        if (caDisplay) caDisplay.style.display = 'none';
+        const caPanel = document.getElementById('explain-panel');
+        document.getElementById('explain-panel-title').textContent = '✨ Animated Explanation';
+        document.getElementById('explain-dismiss').textContent = '← Back to chat';
+        caContent.style.cssText = '';
+        caContent.innerHTML = '<div data-loading="1" style="color:#484f58;font-size:14px;padding:40px 20px;text-align:center;">✨ Generating animation from conversation...</div>';
+        caPanel.classList.add('open');
+        caPanel.style.width = '100%';
+        document.getElementById('reopen-explain-btn').style.display = 'none';
+        document.getElementById('explain-panel-scroll').scrollTop = 0;
+        // Reset sections for new animation
+        window._explainSections = [];
+        window._explainCurrentPage = 0;
+        break;
+      }
+
+      case 'diagnostic_error': {
+        const contentEl2 = document.getElementById('explain-content');
+        const th = document.getElementById('diag-thinking');
+        if (th) th.remove();
+        const ld = contentEl2?.querySelector('[data-loading]');
+        if (ld) ld.remove();
+        const errDiv = document.createElement('div');
+        errDiv.style.cssText = 'padding:20px 16px;text-align:center;animation:fadeIn 0.3s ease;';
+        errDiv.innerHTML = `<div style="color:#f0883e;font-size:13px;padding:14px;border:1px solid #f0883e30;background:#f0883e10;border-radius:8px;">${msg.message}</div><button style="margin-top:12px;padding:6px 16px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#e6edf3;font-size:12px;cursor:pointer;font-family:inherit;" onclick="this.parentElement.remove()">Dismiss</button>`;
+        contentEl2.appendChild(errDiv);
+        break;
+      }
+
+      case 'diagnostic_status': {
+        const contentEl3 = document.getElementById('explain-content');
+        let statusDiv = contentEl3?.querySelector('[data-diag-status]');
+        if (!statusDiv) {
+          statusDiv = document.createElement('div');
+          statusDiv.dataset.diagStatus = '1';
+          statusDiv.style.cssText = 'padding:8px 16px;color:#484f58;font-size:12px;text-align:center;animation:blink 1s infinite;';
+          contentEl3.appendChild(statusDiv);
+        }
+        statusDiv.textContent = msg.message;
+        break;
+      }
+
+      case 'error':
+        statusMsg.textContent = 'error: ' + msg.message;
+        statusMsg.style.display = 'block';
+        break;
+    }
+  };
+}
+
+function renderAnnotatedCode(code, highlightLine, note) {
+  const lines = code.split('\n');
+  codeView.innerHTML = '';
+
+  const block = document.createElement('div');
+  block.className = 'code-block';
+
+  lines.forEach((lineText, i) => {
+    const lineNum = i + 1;
+
+    // Insert post-it BEFORE the highlighted line
+    if (lineNum === highlightLine) {
+      const postitWrapper = document.createElement('div');
+      postitWrapper.className = 'postit-wrapper';
+      const postit = document.createElement('div');
+      postit.className = 'postit';
+      postit.textContent = note;
+      postitWrapper.appendChild(postit);
+      block.appendChild(postitWrapper);
+    }
+
+    const lineDiv = document.createElement('div');
+    lineDiv.className = 'code-line' + (lineNum === highlightLine ? ' highlighted' : '');
+
+    const lineNo = document.createElement('span');
+    lineNo.className = 'line-no';
+    lineNo.textContent = lineNum;
+
+    const lineContent = document.createElement('span');
+    lineContent.className = 'line-text';
+    lineContent.textContent = lineText;
+
+    lineDiv.appendChild(lineNo);
+    lineDiv.appendChild(lineContent);
+    block.appendChild(lineDiv);
+  });
+
+  codeView.appendChild(block);
+  codeView.style.display = 'block';
+
+  // Scroll to highlighted line
+  const highlighted = block.querySelector('.highlighted');
+  if (highlighted) {
+    setTimeout(() => {
+      highlighted.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
+  }
+}
+
+/* ─── Code selection context menu ─── */
+const contextMenu = document.getElementById('context-menu');
+const btnAskClaude = document.getElementById('btn-ask-claude');
+const btnPractice = document.getElementById('btn-practice');
+let selectedCodeText = '';
+
+document.addEventListener('mouseup', (e) => {
+  // Small delay so selection is finalized
+  setTimeout(() => {
+    const sel = window.getSelection();
+    const text = sel.toString().trim();
+
+    // Only show menu if selection is inside #code-view
+    if (text.length > 3 && codeView.contains(sel.anchorNode)) {
+      selectedCodeText = text;
+      // Position menu near mouse
+      contextMenu.style.left = Math.min(e.clientX, window.innerWidth - 220) + 'px';
+      contextMenu.style.top = Math.min(e.clientY - 10, window.innerHeight - 100) + 'px';
+      contextMenu.style.display = 'block';
+    } else {
+      contextMenu.style.display = 'none';
+    }
+  }, 10);
+});
+
+// Hide menu on click elsewhere
+document.addEventListener('mousedown', (e) => {
+  if (!contextMenu.contains(e.target)) {
+    contextMenu.style.display = 'none';
+  }
+});
+
+btnPractice.addEventListener('click', () => {
+  contextMenu.style.display = 'none';
+  if (!selectedCodeText || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+  // Send request to server
+  ws.send(JSON.stringify({
+    type: 'practice_request',
+    code: selectedCodeText,
+  }));
+
+  // Show loading card immediately
+  const card = document.createElement('div');
+  card.className = 'practice-card';
+  card.id = 'practice-loading';
+  card.innerHTML = `
+    <div class="card-header">📝 Practice Questions</div>
+    <div class="card-code">${escapeHtml(selectedCodeText)}</div>
+    <div class="loading">Generating questions...</div>
+  `;
+  const display = document.getElementById('display');
+  display.appendChild(card);
+  display.scrollTop = display.scrollHeight;
+});
+
+btnAskClaude.addEventListener('click', () => {
+  contextMenu.style.display = 'none';
+  // TODO: implement Ask Claude from browser
+});
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+let gradeIdCounter = 0;
+
+function renderPracticeQuestions(questions, code, topic, level) {
+  const loading = document.getElementById('practice-loading');
+  if (loading) loading.remove();
+
+  const card = document.createElement('div');
+  card.className = 'practice-card';
+  const topicLabel = topic ? ` — ${escapeHtml(topic)}` : '';
+  const levelLabel = level ? ` (Lv.${level})` : '';
+  card.innerHTML = `<div class="card-header">📝 Practice Question${topicLabel}${levelLabel}</div>`;
+
+  if (code) {
+    const codeEl = document.createElement('div');
+    codeEl.className = 'card-code';
+    codeEl.textContent = code;
+    card.appendChild(codeEl);
+  }
+
+  // Regenerate row
+  const regenRow = document.createElement('div');
+  regenRow.className = 'regen-row';
+  const regenId = 'regen-' + Date.now();
+  regenRow.innerHTML = `
+    <input class="regen-input" id="input-${regenId}" placeholder="Too easy? Too hard? Give feedback..." />
+    <button class="regen-btn" id="btn-${regenId}">Regenerate</button>
+  `;
+  card.appendChild(regenRow);
+
+  setTimeout(() => {
+    const regenInput = document.getElementById('input-' + regenId);
+    const regenBtn = document.getElementById('btn-' + regenId);
+
+    function doRegenerate() {
+      const feedback = regenInput.value.trim();
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      regenBtn.disabled = true;
+      regenBtn.textContent = 'Regenerating...';
+
+      ws.send(JSON.stringify({
+        type: 'practice_regenerate',
+        code: code || '',
+        feedback: feedback,
+        oldQuestions: questions,
+      }));
+
+      // Show loading card
+      const loadCard = document.createElement('div');
+      loadCard.className = 'practice-card';
+      loadCard.id = 'practice-loading';
+      loadCard.innerHTML = `
+        <div class="card-header">📝 Practice Questions</div>
+        <div class="card-code">${escapeHtml(code || '')}</div>
+        <div class="loading">Regenerating with feedback...</div>
+      `;
+      const display = document.getElementById('display');
+      display.appendChild(loadCard);
+      display.scrollTop = display.scrollHeight;
+    }
+
+    regenBtn.addEventListener('click', doRegenerate);
+    regenInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doRegenerate();
+    });
+  }, 0);
+
+  const questionPresentedAt = Date.now();
+
+  questions.forEach((q, i) => {
+    const gradeId = 'grade-' + (++gradeIdCounter);
+    const item = document.createElement('div');
+    item.className = 'question-item';
+    item.innerHTML = `
+      <div><span class="q-num">Q${i + 1}.</span>${escapeHtml(q)}</div>
+      <div class="answer-row">
+        <input class="answer-input" id="input-${gradeId}" placeholder="Type your answer..." />
+        <button class="submit-btn" id="btn-${gradeId}">Submit</button>
+      </div>
+      <div class="feedback" id="fb-${gradeId}" style="display:none;"></div>
+    `;
+    card.appendChild(item);
+
+    // Attach events after appending
+    setTimeout(() => {
+      const input = document.getElementById('input-' + gradeId);
+      const btn = document.getElementById('btn-' + gradeId);
+      const fb = document.getElementById('fb-' + gradeId);
+
+      function submitAnswer() {
+        const answer = input.value.trim();
+        if (!answer || !ws || ws.readyState !== WebSocket.OPEN) return;
+        const timeTaken = (Date.now() - questionPresentedAt) / 1000;
+        input.disabled = true;
+        btn.disabled = true;
+        fb.textContent = 'Grading...';
+        fb.className = 'feedback grading';
+        fb.style.display = 'block';
+
+        ws.send(JSON.stringify({
+          type: 'grade_request',
+          gradeId: gradeId,
+          question: q,
+          answer: answer,
+          code: code || '',
+          timeTaken: timeTaken,
+          practiceTopic: topic || '',
+          practiceLevel: level || 0,
+        }));
+      }
+
+      btn.addEventListener('click', submitAnswer);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') submitAnswer();
+      });
+    }, 0);
+  });
+
+  const display = document.getElementById('display');
+  display.appendChild(card);
+  display.scrollTop = display.scrollHeight;
+}
+
+function renderFollowup(question, weakConcepts, topic, level) {
+  const card = document.createElement('div');
+  card.className = 'followup-card';
+
+  let weakHtml = '';
+  if (weakConcepts && weakConcepts.length > 0) {
+    weakHtml = '<div class="weak-concepts">Weak areas: ' +
+      weakConcepts.map(c => `<span>${escapeHtml(c)}</span>`).join('') +
+      '</div>';
+  }
+
+  const topicLabel = topic ? ` — ${escapeHtml(topic)}` : '';
+  const levelLabel = level ? ` (Lv.${level})` : '';
+
+  const gradeId = 'grade-' + (++gradeIdCounter);
+  const followupPresentedAt = Date.now();
+
+  const stopId = 'stop-' + gradeId;
+
+  card.innerHTML = `
+    <div class="card-header">
+      <span>🔄 Follow-up Question${topicLabel}${levelLabel}</span>
+      <button class="stop-followup-btn" id="${stopId}">Stop Follow-ups</button>
+    </div>
+    ${weakHtml}
+    <div class="question-item">
+      <div>${escapeHtml(question)}</div>
+      <div class="answer-row">
+        <input class="answer-input" id="input-${gradeId}" placeholder="Type your answer..." />
+        <button class="submit-btn" id="btn-${gradeId}">Submit</button>
+      </div>
+      <div class="feedback" id="fb-${gradeId}" style="display:none;"></div>
+    </div>
+  `;
+
+  const display = document.getElementById('display');
+  display.appendChild(card);
+  display.scrollTop = display.scrollHeight;
+
+  setTimeout(() => {
+    const input = document.getElementById('input-' + gradeId);
+    const btn = document.getElementById('btn-' + gradeId);
+    const fb = document.getElementById('fb-' + gradeId);
+    const stopBtn = document.getElementById(stopId);
+
+    stopBtn.addEventListener('click', () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'stop_followups' }));
+      }
+      stopBtn.textContent = 'Stopped';
+      stopBtn.disabled = true;
+      stopBtn.style.color = '#484f58';
+    });
+
+    function submitAnswer() {
+      const answer = input.value.trim();
+      if (!answer || !ws || ws.readyState !== WebSocket.OPEN) return;
+      const timeTaken = (Date.now() - followupPresentedAt) / 1000;
+      input.disabled = true;
+      btn.disabled = true;
+      fb.textContent = 'Grading...';
+      fb.className = 'feedback grading';
+      fb.style.display = 'block';
+
+      ws.send(JSON.stringify({
+        type: 'grade_request',
+        gradeId: gradeId,
+        question: question,
+        answer: answer,
+        code: '',
+        timeTaken: timeTaken,
+        isFollowup: true,
+        practiceTopic: topic || '',
+        practiceLevel: level || 0,
+      }));
+    }
+
+    btn.addEventListener('click', submitAnswer);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') submitAnswer();
+    });
+  }, 0);
+}
+
+/* ─── "Answer in Code" button after Claude's response ─── */
+let lastClaudeResponse = '';
+let lastQuestionText = '';
+
+function showAnswerInCodeBtn() {
+  lastClaudeResponse = textEl.textContent;
+  // Remove any existing answer-code buttons
+  document.querySelectorAll('.answer-code-trigger').forEach(el => el.remove());
+
+  const btn = document.createElement('button');
+  btn.className = 'answer-code-btn outline answer-code-trigger';
+  btn.innerHTML = '💻 Answer in Code';
+  btn.style.marginTop = '16px';
+  btn.style.display = 'block';
+  btn.addEventListener('click', () => {
+    btn.remove();
+    showCodeEditor();
+  });
+
+  const display = document.getElementById('display');
+  display.appendChild(btn);
+  display.scrollTop = display.scrollHeight;
+}
+
+function showCodeEditor() {
+  const area = document.createElement('div');
+  area.className = 'code-answer-area';
+  const editorId = 'code-editor-' + Date.now();
+  area.innerHTML = `
+    <div class="ca-header">
+      <span class="ca-label">✏️ Your Code</span>
+      <span class="ca-lang">Python</span>
+    </div>
+    <div class="code-editor-wrap" id="wrap-${editorId}">
+      <textarea id="${editorId}" placeholder="Write your Python code here..." spellcheck="false"></textarea>
+    </div>
+  `;
+
+  const display = document.getElementById('display');
+  display.appendChild(area);
+  display.scrollTop = display.scrollHeight;
+
+  let lineCheckDebounce = null;
+  if (!window._codeErrors) window._codeErrors = {};
+  window._codeErrors[editorId] = {};
+
+  setTimeout(() => {
+    const textarea = document.getElementById(editorId);
+
+    // Tab key inserts spaces
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        textarea.value = textarea.value.substring(0, start) + '    ' + textarea.value.substring(end);
+        textarea.selectionStart = textarea.selectionEnd = start + 4;
+      }
+
+      // On Enter, check the line just completed
+      if (e.key === 'Enter') {
+        const cursorPos = textarea.selectionStart;
+        const textBefore = textarea.value.substring(0, cursorPos);
+        const lines = textBefore.split('\n');
+        const currentLine = lines[lines.length - 1];
+        const lineNum = lines.length;
+
+        const trimmed = currentLine.trim();
+
+        // #Q: inline question to Claude
+        if (trimmed.startsWith('#Q:') && ws && ws.readyState === WebSocket.OPEN) {
+          const question = trimmed.substring(3).trim();
+          if (question) {
+            ws.send(JSON.stringify({
+              type: 'code_inline_question',
+              question: question,
+              lineNum: lineNum,
+              fullCode: textarea.value,
+              editorId: editorId,
+            }));
+          }
+        }
+        // Regular code check (skip comments)
+        else if (trimmed && !trimmed.startsWith('#') && ws && ws.readyState === WebSocket.OPEN) {
+          if (lineCheckDebounce) clearTimeout(lineCheckDebounce);
+          lineCheckDebounce = setTimeout(() => {
+            ws.send(JSON.stringify({
+              type: 'code_line_check',
+              line: currentLine,
+              lineNum: lineNum,
+              fullCode: textarea.value,
+              context: lastClaudeResponse,
+              editorId: editorId,
+            }));
+          }, 300);
+        }
+      }
+    });
+
+    // Reposition overlays when textarea scrolls
+    textarea.addEventListener('scroll', () => {
+      renderPostits(editorId);
+      renderAnswerLines(editorId);
+    });
+
+    // Selection popup — dropdown with two options
+    let selPopup = document.getElementById('selection-popup');
+    if (!selPopup) {
+      selPopup = document.createElement('div');
+      selPopup.id = 'selection-popup';
+      selPopup.innerHTML = `
+        <button class="sel-opt" data-action="explain">✨ Explain with Animation</button>
+        <button class="sel-opt" data-action="practice">🏋️ Help me practice</button>
+        <button class="sel-opt" data-action="chat">💬 자유 대화</button>
+      `;
+      document.body.appendChild(selPopup);
+    }
+
+    let _selectedCode = '';
+
+    function checkSelection() {
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      if (start === end) {
+        selPopup.style.display = 'none';
+        return;
+      }
+      const selected = textarea.value.substring(start, end).trim();
+      if (!selected || selected.length < 3) {
+        selPopup.style.display = 'none';
+        return;
+      }
+
+      _selectedCode = selected;
+
+      // Position popup near selection
+      const style = getComputedStyle(textarea);
+      const lineHeight = parseFloat(style.lineHeight) || 20.8;
+      const paddingTop = parseFloat(style.paddingTop);
+      const paddingLeft = parseFloat(style.paddingLeft);
+      const textBefore = textarea.value.substring(0, end);
+      const linesBeforeEnd = textBefore.split('\n').length;
+      const wrapRect = document.getElementById('wrap-' + editorId).getBoundingClientRect();
+
+      const top = wrapRect.top + paddingTop + (linesBeforeEnd * lineHeight) - textarea.scrollTop + 4;
+      const left = wrapRect.left + paddingLeft + 20;
+
+      selPopup.style.display = 'block';
+      selPopup.style.position = 'fixed';
+      selPopup.style.top = Math.min(top, window.innerHeight - 60) + 'px';
+      selPopup.style.left = Math.min(left, window.innerWidth - 220) + 'px';
+
+      // Wire up actions
+      selPopup.querySelector('[data-action="explain"]').onclick = () => {
+        selPopup.style.display = 'none';
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'explain_animation',
+            selectedCode: _selectedCode,
+            fullCode: textarea.value,
+            context: lastClaudeResponse,
+          }));
+          openExplainPanel('<div style="color:#484f58;font-size:14px;padding:40px 20px;text-align:center;">✨ Generating animated explanation...</div>');
+        }
+      };
+
+      selPopup.querySelector('[data-action="practice"]').onclick = () => {
+        selPopup.style.display = 'none';
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'practice_from_selection',
+            selectedCode: _selectedCode,
+            fullCode: textarea.value,
+            context: lastClaudeResponse,
+          }));
+          openPracticePanel(_selectedCode);
+        }
+      };
+
+      selPopup.querySelector('[data-action="chat"]').onclick = () => {
+        selPopup.style.display = 'none';
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'chat_init',
+            selectedCode: _selectedCode,
+            fullCode: textarea.value,
+          }));
+          openChatPanel(_selectedCode);
+        }
+      };
+    }
+
+    textarea.addEventListener('mouseup', () => setTimeout(checkSelection, 50));
+    textarea.addEventListener('keyup', (e) => {
+      if (e.shiftKey) setTimeout(checkSelection, 50);
+    });
+
+    textarea.focus();
+  }, 0);
+}
+
+function renderPostits(editorId) {
+  const wrap = document.getElementById('wrap-' + editorId);
+  const textarea = document.getElementById(editorId);
+  if (!wrap || !textarea) return;
+  const errors = (window._codeErrors && window._codeErrors[editorId]) || {};
+
+  // Remove old post-its
+  wrap.querySelectorAll('.floating-postit').forEach(el => el.remove());
+
+  // textarea metrics
+  const style = getComputedStyle(textarea);
+  const paddingTop = parseFloat(style.paddingTop);
+  const lineHeight = parseFloat(style.lineHeight) || 20.8;
+  const scrollTop = textarea.scrollTop;
+  const textareaTop = 0; // relative to wrap
+
+  for (const [ln, err] of Object.entries(errors)) {
+    const lineIdx = parseInt(ln) - 1;
+    // Position: just below the error line
+    const lineBottom = textareaTop + paddingTop + (lineIdx + 1) * lineHeight - scrollTop;
+
+    // Skip if scrolled out of view
+    if (lineBottom < -30 || lineBottom > textarea.clientHeight + 30) continue;
+
+    const postit = document.createElement('div');
+    postit.className = 'floating-postit';
+    postit.style.top = (lineBottom + 2) + 'px'; // position below the line
+    postit.innerHTML = `💡 ${escapeHtml(err.correction)}`;
+    wrap.appendChild(postit);
+  }
+}
+
+function renderAnswerLines(editorId) {
+  const wrap = document.getElementById('wrap-' + editorId);
+  const textarea = document.getElementById(editorId);
+  if (!wrap || !textarea) return;
+
+  // Remove old answer overlays
+  wrap.querySelectorAll('.answer-line-overlay').forEach(el => el.remove());
+
+  const style = getComputedStyle(textarea);
+  const paddingTop = parseFloat(style.paddingTop);
+  const lineHeight = parseFloat(style.lineHeight) || 20.8;
+  const scrollTop = textarea.scrollTop;
+
+  const lines = textarea.value.split('\n');
+  lines.forEach((line, i) => {
+    if (!line.trimStart().startsWith('#A:')) return;
+    const top = paddingTop + i * lineHeight - scrollTop;
+    if (top < -lineHeight || top > textarea.clientHeight) return;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'answer-line-overlay';
+    overlay.style.top = top + 'px';
+    overlay.style.height = lineHeight + 'px';
+    wrap.appendChild(overlay);
+  });
+}
+
+// ─── User Settings (dropdown + gauges) ─────────────────────────
+let userDifficulty = 3;
+let userCondition = 3;
+
+document.getElementById('user-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  document.getElementById('user-dropdown').classList.toggle('open');
+  document.getElementById('gaps-dropdown').classList.remove('open');
+});
+document.getElementById('user-dropdown').addEventListener('click', (e) => e.stopPropagation());
+
+function initGauge(containerId, initial, onChange) {
+  const container = document.getElementById(containerId);
+  const btns = container.querySelectorAll('button');
+  btns.forEach(btn => {
+    if (parseInt(btn.dataset.val) === initial) btn.classList.add('active');
+    btn.addEventListener('click', () => {
+      btns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      onChange(parseInt(btn.dataset.val));
+    });
+  });
+}
+
+initGauge('gauge-difficulty', userDifficulty, (val) => {
+  userDifficulty = val;
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'update_settings', difficulty: val, condition: userCondition }));
+});
+initGauge('gauge-condition', userCondition, (val) => {
+  userCondition = val;
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'update_settings', difficulty: userDifficulty, condition: val }));
+});
+
+// ─── Knowledge Holes (dropdown + drill-down) ──────────────────
+const knowledgeHoles = []; // { topic, context, userCode, correction }
+
+// Toggle dropdown
+document.getElementById('gaps-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  document.getElementById('gaps-dropdown').classList.toggle('open');
+  document.getElementById('user-dropdown').classList.remove('open');
+});
+document.addEventListener('click', () => {
+  document.getElementById('gaps-dropdown').classList.remove('open');
+  document.getElementById('user-dropdown').classList.remove('open');
+  document.querySelectorAll('.sec-popover.open').forEach(p => p.classList.remove('open'));
+});
+document.getElementById('gaps-dropdown').addEventListener('click', (e) => e.stopPropagation());
+
+function addKnowledgeHole(topic, context, userCode, correction) {
+  // Deduplicate by topic
+  if (knowledgeHoles.some(h => h.topic === topic)) return;
+
+  knowledgeHoles.push({ topic, context, userCode, correction });
+
+  const list = document.getElementById('hole-list');
+  const badge = document.getElementById('gaps-badge');
+  const btn = document.getElementById('gaps-btn');
+
+  // Clear empty message
+  const empty = list.querySelector('.dd-empty');
+  if (empty) empty.remove();
+
+  const item = document.createElement('div');
+  item.className = 'hole-item';
+  item.innerHTML = `
+    <div class="hole-title">⚠️ ${escapeHtml(topic)}</div>
+    <div class="hole-context">${escapeHtml(context)}</div>
+  `;
+  item.addEventListener('click', () => {
+    document.getElementById('gaps-dropdown').classList.remove('open');
+    openDrillDown(topic, context, userCode, correction);
+  });
+  list.appendChild(item);
+
+  // Update badge
+  badge.textContent = knowledgeHoles.length;
+  badge.classList.add('visible');
+  btn.classList.add('has-items');
+}
+
+function openDrillDown(topic, context, userCode, correction) {
+  const panel = document.getElementById('explain-panel');
+  document.getElementById('explain-panel-title').textContent = '⚠️ ' + topic;
+  document.getElementById('explain-context-text').innerHTML =
+    `<p>${escapeHtml(context)}</p>` +
+    `<p style="margin-top:8px">Your code: <code>${escapeHtml(userCode)}</code></p>` +
+    `<p style="margin-top:4px; color:#8b949e">Fix: ${escapeHtml(correction)}</p>`;
+
+  const contentEl = document.getElementById('explain-content');
+  contentEl.innerHTML = '<div style="color:#484f58; font-size:13px; padding:20px 0;">Generating explanation...</div>';
+
+  panel.classList.add('open');
+
+  // Ask server for educational content
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({
+      type: 'drill_questions',
+      topic: topic,
+      context: context,
+      userCode: userCode,
+      correction: correction,
+    }));
+  }
+}
+
+document.getElementById('explain-dismiss').addEventListener('click', () => {
+  const panel = document.getElementById('explain-panel');
+  const scrollEl = document.getElementById('explain-panel-scroll');
+  const ctxBox = document.getElementById('explain-context-box');
+
+  // Restore scroll container and context box defaults
+  scrollEl.style.cssText = 'flex:1;overflow-y:auto;padding:20px;';
+  if (ctxBox) ctxBox.style.display = '';
+
+  if (window._chatAnimationActive) {
+    // Restore chat panel instead of closing
+    window._chatAnimationActive = false;
+    document.getElementById('explain-dismiss').textContent = 'Dismiss';
+    panel.style.width = '';  // Back to normal width (560px)
+    const content = document.getElementById('explain-content');
+    content.innerHTML = window._savedChatHTML || '';
+    content.style.cssText = window._savedChatStyle || '';
+    document.getElementById('explain-panel-title').textContent = window._savedChatTitle || '💬 자유 대화';
+    // Restore code editor
+    const display = document.getElementById('display');
+    if (display && display.style.display === 'none') {
+      display.style.display = '';
+    }
+    // Re-enable chat input
+    const chatInput = document.getElementById('chat-input');
+    const chatSend = document.getElementById('chat-send');
+    if (chatInput) { chatInput.disabled = false; chatInput.focus(); }
+    if (chatSend) chatSend.disabled = false;
+    // Scroll to bottom of chat
+    const chatMsgs = document.getElementById('chat-messages');
+    if (chatMsgs) chatMsgs.scrollTop = chatMsgs.scrollHeight;
+  } else {
+    panel.classList.remove('open');
+    panel.style.width = '';
+    const display = document.getElementById('display');
+    if (display && display.style.display === 'none') {
+      display.style.display = '';
+    }
+    document.getElementById('reopen-explain-btn').style.display = 'block';
+  }
+});
+
+document.getElementById('reopen-explain-btn').addEventListener('click', () => {
+  document.getElementById('explain-panel').classList.add('open');
+  document.getElementById('reopen-explain-btn').style.display = 'none';
+});
+
+function openExplainPanel(initialHtml) {
+  window._explainSections = [];
+  window._explainCurrentPage = 0;
+  const panel = document.getElementById('explain-panel');
+  document.getElementById('explain-panel-title').textContent = '✨ Animated Explanation';
+  document.getElementById('explain-context-text').innerHTML = '';
+  const content = document.getElementById('explain-content');
+  content.style.cssText = '';
+  content.innerHTML = '';
+  const loadingDiv = document.createElement('div');
+  loadingDiv.dataset.loading = '1';
+  loadingDiv.innerHTML = initialHtml || '';
+  content.appendChild(loadingDiv);
+  panel.classList.add('open');
+  document.getElementById('reopen-explain-btn').style.display = 'none';
+  document.getElementById('explain-panel-scroll').scrollTop = 0;
+}
+
+function _renderExplainPage(pageIdx) {
+  const sections = window._explainSections || [];
+  const sec = sections.find(s => s.index === pageIdx);
+  if (!sec) return;
+
+  // Hide context box during paginated animation view
+  const ctxBox = document.getElementById('explain-context-box');
+  if (ctxBox) ctxBox.style.display = 'none';
+
+  // Make scroll container fill available space without excessive padding
+  const scrollEl = document.getElementById('explain-panel-scroll');
+  scrollEl.style.cssText = 'flex:1;overflow:hidden;padding:0;display:flex;flex-direction:column;';
+
+  const contentEl = document.getElementById('explain-content');
+  contentEl.style.cssText = 'display:flex;flex-direction:column;flex:1;overflow:hidden;';
+  contentEl.innerHTML = '';
+
+  // Page counter
+  const totalLoaded = sections.length;
+  const totalExpected = sec.total;
+  const counter = document.createElement('div');
+  counter.id = 'explain-page-counter';
+  counter.style.cssText = 'text-align:center;padding:10px 0 6px;font-size:12px;color:#484f58;flex-shrink:0;';
+  counter.textContent = `${pageIdx + 1} / ${totalExpected}`;
+  contentEl.appendChild(counter);
+
+  // Section iframe container
+  const pageContainer = document.createElement('div');
+  pageContainer.dataset.pageContainer = '1';
+  pageContainer.style.cssText = 'flex:1;overflow-y:auto;padding:0 12px;position:relative;opacity:0;transform:translateY(10px);transition:opacity 0.4s,transform 0.4s;';
+
+  const iframe = document.createElement('iframe');
+  iframe.style.cssText = 'width:100%;border:none;background:transparent;min-height:200px;';
+  const baseStyle = '* { margin: 0; padding: 0; box-sizing: border-box; } body { background: transparent; color: #e6edf3; font-family: "SF Mono","Fira Code","Cascadia Code",monospace; font-size: 13px; padding: 0; overflow: hidden; }';
+  const heightScript = 'function rh(){window.parent.postMessage({type:"section-height",id:"page-' + pageIdx + '",height:document.body.scrollHeight},"*")} new MutationObserver(rh).observe(document.body,{childList:true,subtree:true,attributes:true}); setInterval(rh,500); setTimeout(rh,100);';
+  const blob = new Blob([
+    '<!DOCTYPE html><html><head><style>' + baseStyle + '</style></head><body>',
+    sec.html,
+    '<scr' + 'ipt>' + heightScript + '</scr' + 'ipt>',
+    '</body></html>'
+  ], { type: 'text/html' });
+  iframe.src = URL.createObjectURL(blob);
+  iframe.dataset.sectionId = 'page-' + pageIdx;
+  pageContainer.appendChild(iframe);
+
+  // Settings button (top-right of section)
+  const settingsBtn = document.createElement('button');
+  settingsBtn.className = 'sec-settings-btn';
+  settingsBtn.style.opacity = '1';  // Always visible in single-page mode
+  settingsBtn.textContent = '⚙️';
+  settingsBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    document.querySelectorAll('.sec-popover.open').forEach(p => p.classList.remove('open'));
+    pageContainer.querySelector('.sec-popover')?.classList.toggle('open');
+  });
+  pageContainer.appendChild(settingsBtn);
+
+  // Popover
+  const popover = document.createElement('div');
+  popover.className = 'sec-popover';
+  popover.addEventListener('click', e => e.stopPropagation());
+  popover.innerHTML = `
+    <div style="font-size:10px;color:#484f58;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Regenerate this section</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <span style="font-size:11px;color:#c9d1d9;">Difficulty</span>
+      <div class="pop-gauge" data-gauge="difficulty">
+        ${[1,2,3,4,5].map(v => `<button data-val="${v}" class="${v===userDifficulty?'active':''}">${v}</button>`).join('')}
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <span style="font-size:11px;color:#c9d1d9;">Condition</span>
+      <div class="pop-gauge" data-gauge="condition">
+        ${[1,2,3,4,5].map(v => `<button data-val="${v}" class="${v===userCondition?'active':''}">${v}</button>`).join('')}
+      </div>
+    </div>
+    <button class="pop-regen">Regenerate ↻</button>
+  `;
+  popover.querySelectorAll('.pop-gauge button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+  popover.querySelector('.pop-regen').addEventListener('click', () => {
+    const d = parseInt(popover.querySelector('[data-gauge="difficulty"] .active')?.dataset.val || userDifficulty);
+    const c = parseInt(popover.querySelector('[data-gauge="condition"] .active')?.dataset.val || userCondition);
+    popover.classList.remove('open');
+    pageContainer.style.opacity = '0.4';
+    ws.send(JSON.stringify({ type: 'regenerate_section', sectionIndex: pageIdx, difficulty: d, condition: c }));
+  });
+  pageContainer.appendChild(popover);
+  contentEl.appendChild(pageContainer);
+
+  // Fade in
+  requestAnimationFrame(() => {
+    pageContainer.style.opacity = '1';
+    pageContainer.style.transform = 'translateY(0)';
+  });
+
+  // Navigation bar
+  const nav = document.createElement('div');
+  nav.id = 'explain-nav';
+  nav.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-top:1px solid #21262d;flex-shrink:0;';
+
+  const prevBtn = document.createElement('button');
+  prevBtn.textContent = '← Prev';
+  prevBtn.style.cssText = 'padding:8px 18px;border-radius:8px;border:1px solid #30363d;background:#21262d;color:#e6edf3;font-size:13px;font-family:inherit;cursor:pointer;transition:all 0.15s;';
+  prevBtn.disabled = pageIdx === 0;
+  if (pageIdx === 0) prevBtn.style.opacity = '0.3';
+  prevBtn.addEventListener('mouseover', () => { if (!prevBtn.disabled) prevBtn.style.borderColor = '#58a6ff'; });
+  prevBtn.addEventListener('mouseout', () => { prevBtn.style.borderColor = '#30363d'; });
+  prevBtn.addEventListener('click', () => {
+    if (pageIdx > 0) {
+      window._explainCurrentPage = pageIdx - 1;
+      _renderExplainPage(pageIdx - 1);
+    }
+  });
+
+  const pageLabel = document.createElement('span');
+  pageLabel.style.cssText = 'color:#484f58;font-size:12px;';
+  const loaded = sections.length;
+  if (loaded < totalExpected) {
+    pageLabel.textContent = `Loading... (${loaded}/${totalExpected})`;
+  }
+
+  const nextBtn = document.createElement('button');
+  const isLast = pageIdx >= totalExpected - 1;
+  const nextAvailable = pageIdx < loaded - 1;
+  nextBtn.textContent = isLast ? '✓ Done' : 'Next →';
+  nextBtn.style.cssText = 'padding:8px 18px;border-radius:8px;border:1px solid ' + (isLast ? '#3fb950' : '#58a6ff') + ';background:' + (isLast ? '#3fb95020' : '#1f6feb20') + ';color:' + (isLast ? '#3fb950' : '#58a6ff') + ';font-size:13px;font-family:inherit;font-weight:600;cursor:pointer;transition:all 0.15s;';
+  if (!nextAvailable && !isLast) {
+    nextBtn.disabled = true;
+    nextBtn.style.opacity = '0.3';
+    nextBtn.textContent = 'Loading...';
+  }
+  nextBtn.addEventListener('click', () => {
+    if (isLast) {
+      // Done — dismiss
+      document.getElementById('explain-dismiss').click();
+    } else if (nextAvailable) {
+      window._explainCurrentPage = pageIdx + 1;
+      _renderExplainPage(pageIdx + 1);
+    }
+  });
+
+  nav.appendChild(prevBtn);
+  nav.appendChild(pageLabel);
+  nav.appendChild(nextBtn);
+  contentEl.appendChild(nav);
+
+  // Scroll to top
+  document.getElementById('explain-panel-scroll').scrollTop = 0;
+}
+
+function _updateExplainNav() {
+  // Called when a new section loads — only update nav buttons, do NOT re-render iframe
+  const pageIdx = window._explainCurrentPage || 0;
+  const sections = window._explainSections || [];
+  const sec = sections.find(s => s.index === pageIdx);
+  if (!sec) return;
+  const totalExpected = sec.total;
+  const loaded = sections.length;
+
+  // Update page counter
+  const counter = document.getElementById('explain-page-counter');
+  if (counter) counter.textContent = `${pageIdx + 1} / ${totalExpected}`;
+
+  // Update nav buttons
+  const nav = document.getElementById('explain-nav');
+  if (!nav) return;
+  const buttons = nav.querySelectorAll('button');
+  const nextBtn = buttons[1];
+  const pageLabel = nav.querySelector('span');
+  if (nextBtn) {
+    const isLast = pageIdx >= totalExpected - 1;
+    const nextAvailable = pageIdx < loaded - 1;
+    if (isLast) {
+      nextBtn.textContent = '✓ Done';
+      nextBtn.disabled = false;
+      nextBtn.style.opacity = '1';
+    } else if (nextAvailable) {
+      nextBtn.textContent = 'Next →';
+      nextBtn.disabled = false;
+      nextBtn.style.opacity = '1';
+    } else {
+      nextBtn.textContent = 'Loading...';
+      nextBtn.disabled = true;
+      nextBtn.style.opacity = '0.3';
+    }
+  }
+  if (pageLabel) {
+    pageLabel.textContent = loaded < totalExpected ? `Loading... (${loaded}/${totalExpected})` : '';
+  }
+}
+
+function openChatPanel(selectedCode) {
+  const panel = document.getElementById('explain-panel');
+  document.getElementById('explain-panel-title').textContent = '💬 자유 대화';
+  document.getElementById('explain-context-text').innerHTML = '';
+  const content = document.getElementById('explain-content');
+  content.innerHTML = '';
+  content.style.cssText = 'display:flex;flex-direction:column;height:100%;';
+
+  // Messages area
+  const msgsDiv = document.createElement('div');
+  msgsDiv.id = 'chat-messages';
+  content.appendChild(msgsDiv);
+
+  // System message showing context
+  const sysMsg = document.createElement('div');
+  sysMsg.className = 'chat-msg system';
+  sysMsg.textContent = `Context: ${selectedCode.substring(0, 80)}${selectedCode.length > 80 ? '...' : ''}`;
+  msgsDiv.appendChild(sysMsg);
+
+  // Input bar
+  const inputBar = document.createElement('div');
+  inputBar.id = 'chat-input-bar';
+  const input = document.createElement('textarea');
+  input.id = 'chat-input';
+  input.placeholder = '질문이나 생각을 자유롭게...';
+  input.rows = 1;
+  // Auto-resize
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+  });
+  const sendBtn = document.createElement('button');
+  sendBtn.id = 'chat-send';
+  sendBtn.textContent = '→';
+
+  function sendChatMsg() {
+    const text = input.value.trim();
+    if (!text) return;
+    // Show user message
+    const uDiv = document.createElement('div');
+    uDiv.className = 'chat-msg user';
+    uDiv.innerHTML = text.replace(/</g, '&lt;').replace(/\n/g, '<br>');
+    msgsDiv.appendChild(uDiv);
+    // Show typing indicator
+    const typingDiv = document.createElement('div');
+    typingDiv.className = 'chat-msg system';
+    typingDiv.dataset.typing = '1';
+    typingDiv.textContent = '⏳';
+    typingDiv.style.animation = 'blink 1s infinite';
+    msgsDiv.appendChild(typingDiv);
+    msgsDiv.scrollTop = msgsDiv.scrollHeight;
+    // Disable input
+    input.value = '';
+    input.style.height = 'auto';
+    input.disabled = true;
+    sendBtn.disabled = true;
+    // Send to server
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'chat_message',
+        text: text,
+      }));
+    }
+  }
+
+  sendBtn.addEventListener('click', sendChatMsg);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMsg(); }
+  });
+
+  inputBar.appendChild(input);
+  inputBar.appendChild(sendBtn);
+  content.appendChild(inputBar);
+
+  panel.classList.add('open');
+  document.getElementById('reopen-explain-btn').style.display = 'none';
+  input.focus();
+}
+
+function openPracticePanel(selectedCode) {
+  const panel = document.getElementById('explain-panel');
+  document.getElementById('explain-panel-title').textContent = '🏋️ Practice';
+  document.getElementById('explain-context-text').innerHTML = '';
+  const content = document.getElementById('explain-content');
+  content.innerHTML = '';
+
+  // Loading state
+  const loadingDiv = document.createElement('div');
+  loadingDiv.dataset.loading = '1';
+  loadingDiv.innerHTML = '<div style="color:#484f58;font-size:14px;padding:40px 20px;text-align:center;">🏋️ Generating practice task...</div>';
+  content.appendChild(loadingDiv);
+
+  panel.classList.add('open');
+  document.getElementById('reopen-explain-btn').style.display = 'none';
+  document.getElementById('explain-panel-scroll').scrollTop = 0;
+}
+
+let _currentDiagQuestion = '';
+
+function renderDiagnosticQuestion(question, questionNum) {
+  const content = document.getElementById('explain-content');
+  document.getElementById('explain-panel-title').textContent = '🏋️ Quick Assessment';
+
+  // Don't clear — append to conversation
+  // But if it's Q1, clear everything
+  if (questionNum === 1) content.innerHTML = '';
+
+  // Question bubble
+  const qWrap = document.createElement('div');
+  qWrap.style.cssText = 'padding:12px 16px 4px;animation:fadeIn 0.3s ease;';
+  qWrap.innerHTML = `
+    <div style="font-size:10px;color:#484f58;margin-bottom:4px;">Question ${questionNum}</div>
+    <div style="color:#e6edf3;font-size:14px;line-height:1.6;padding:12px 14px;background:#161b22;border:1px solid #30363d;border-radius:10px;">${question}</div>
+  `;
+  content.appendChild(qWrap);
+
+  // Answer input
+  const inputWrap = document.createElement('div');
+  inputWrap.id = 'diag-input-wrap';
+  inputWrap.style.cssText = 'padding:8px 16px 16px;display:flex;gap:8px;';
+
+  const input = document.createElement('textarea');
+  input.id = 'diag-answer-input';
+  input.placeholder = 'Type your answer...';
+  input.style.cssText = 'flex:1;background:#0d1117;color:#e6edf3;border:1px solid #30363d;border-radius:8px;padding:10px 12px;font-size:13px;font-family:inherit;resize:none;min-height:60px;outline:none;';
+  input.addEventListener('focus', () => { input.style.borderColor = '#58a6ff'; });
+  input.addEventListener('blur', () => { input.style.borderColor = '#30363d'; });
+
+  const sendBtn = document.createElement('button');
+  sendBtn.textContent = '→';
+  sendBtn.style.cssText = 'width:40px;border-radius:8px;border:1px solid #30363d;background:#21262d;color:#e6edf3;font-size:16px;cursor:pointer;transition:all 0.15s;align-self:flex-end;height:40px;';
+  sendBtn.addEventListener('mouseover', () => { sendBtn.style.borderColor = '#58a6ff'; });
+  sendBtn.addEventListener('mouseout', () => { sendBtn.style.borderColor = '#30363d'; });
+
+  function submitDiagAnswer() {
+    const answer = input.value.trim();
+    if (!answer) return;
+
+    _currentDiagQuestion = question;
+
+    // Replace input with user's answer bubble
+    inputWrap.remove();
+    const ansWrap = document.createElement('div');
+    ansWrap.style.cssText = 'padding:4px 16px 8px;display:flex;justify-content:flex-end;animation:fadeIn 0.2s ease;';
+    ansWrap.innerHTML = `<div style="color:#e6edf3;font-size:13px;line-height:1.5;padding:10px 14px;background:#1f6feb20;border:1px solid #1f6feb40;border-radius:10px;max-width:80%;">${answer.replace(/</g,'&lt;').replace(/\n/g,'<br>')}</div>`;
+    content.appendChild(ansWrap);
+
+    // Show thinking indicator
+    const thinkWrap = document.createElement('div');
+    thinkWrap.id = 'diag-thinking';
+    thinkWrap.style.cssText = 'padding:8px 16px;color:#484f58;font-size:12px;animation:blink 1s infinite;';
+    thinkWrap.textContent = '⏳ Evaluating...';
+    content.appendChild(thinkWrap);
+
+    // Scroll down
+    const scroll = document.getElementById('explain-panel-scroll');
+    scroll.scrollTop = scroll.scrollHeight;
+
+    // Send to server
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'diagnostic_answer',
+        answer: answer,
+        question: question,
+      }));
+    }
+  }
+
+  sendBtn.addEventListener('click', submitDiagAnswer);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitDiagAnswer(); }
+  });
+
+  inputWrap.appendChild(input);
+  inputWrap.appendChild(sendBtn);
+  content.appendChild(inputWrap);
+
+  // Scroll & focus
+  const scroll = document.getElementById('explain-panel-scroll');
+  scroll.scrollTop = scroll.scrollHeight;
+  setTimeout(() => input.focus(), 100);
+}
+
+function renderPracticeEditor(task, sectionMeta) {
+  const content = document.getElementById('explain-content');
+  content.innerHTML = '';
+
+  // Task description
+  const taskDiv = document.createElement('div');
+  taskDiv.style.cssText = 'padding:16px;color:#e6edf3;font-size:13px;border-bottom:1px solid #21262d;';
+  taskDiv.innerHTML = `<div style="color:#58a6ff;font-weight:600;margin-bottom:8px;">📝 Task</div><div style="line-height:1.6;">${task.replace(/\n/g,'<br>')}</div>`;
+  content.appendChild(taskDiv);
+
+  // Code editor
+  const editorWrap = document.createElement('div');
+  editorWrap.style.cssText = 'position:relative;flex:1;display:flex;flex-direction:column;';
+  const label = document.createElement('div');
+  label.style.cssText = 'padding:8px 16px;font-size:11px;color:#484f58;text-transform:uppercase;letter-spacing:0.5px;';
+  label.textContent = 'Your Code';
+  editorWrap.appendChild(label);
+
+  const practiceTA = document.createElement('textarea');
+  practiceTA.id = 'practice-editor';
+  practiceTA.spellcheck = false;
+  practiceTA.style.cssText = 'flex:1;width:100%;background:#0d1117;color:#e6edf3;border:none;outline:none;resize:none;padding:8px 16px;font-family:inherit;font-size:13px;line-height:1.6;min-height:200px;';
+  practiceTA.placeholder = 'Write your code here...';
+  editorWrap.appendChild(practiceTA);
+  content.appendChild(editorWrap);
+
+  // Submit button
+  const btnWrap = document.createElement('div');
+  btnWrap.style.cssText = 'padding:12px 16px;border-top:1px solid #21262d;display:flex;gap:8px;';
+  const submitBtn = document.createElement('button');
+  submitBtn.textContent = '✅ Submit for review';
+  submitBtn.style.cssText = 'flex:1;padding:8px;border-radius:6px;border:1px solid #3fb950;background:#0d1117;color:#3fb950;font-size:12px;font-family:inherit;cursor:pointer;';
+  submitBtn.addEventListener('mouseover', () => { submitBtn.style.background = '#3fb95020'; });
+  submitBtn.addEventListener('mouseout', () => { submitBtn.style.background = '#0d1117'; });
+  submitBtn.addEventListener('click', () => {
+    const code = practiceTA.value.trim();
+    if (!code) return;
+    submitBtn.disabled = true;
+    submitBtn.textContent = '⏳ Reviewing...';
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'practice_submit',
+        code: code,
+        task: task,
+        sectionMeta: sectionMeta,
+      }));
+    }
+  });
+  btnWrap.appendChild(submitBtn);
+  content.appendChild(btnWrap);
+
+  // Feedback area
+  const feedbackDiv = document.createElement('div');
+  feedbackDiv.id = 'practice-feedback';
+  feedbackDiv.style.cssText = 'padding:0 16px 16px;';
+  content.appendChild(feedbackDiv);
+
+  practiceTA.focus();
+}
+
+function renderDrillContent(sections, topic) {
+  const container = document.getElementById('explain-content');
+  container.innerHTML = '';
+
+  // Stagger section fade-ins
+  let sectionDelay = 0;
+
+  sections.forEach((section) => {
+    const el = document.createElement('div');
+    el.className = 'drill-section';
+    el.style.animationDelay = sectionDelay + 's';
+    sectionDelay += 0.3;
+
+    switch (section.type) {
+      case 'explanation':
+        el.innerHTML = `<div class="drill-explanation">${escapeHtml(section.text)}</div>`;
+        break;
+
+      case 'pipeline': {
+        let stepsHtml = '';
+        const steps = section.steps || [];
+        steps.forEach((step, i) => {
+          if (i > 0) {
+            stepsHtml += `<div class="pipe-arrow"><div class="arrow-line"></div>↓</div>`;
+          }
+          const status = step.status || 'ok';
+          stepsHtml += `
+            <div class="pipe-step ${status}" data-pipe-idx="${i}">
+              <div class="step-box">
+                <div class="step-label">${escapeHtml(step.label)}</div>
+                <div class="step-value">${escapeHtml(step.value || '')}</div>
+                ${step.desc ? `<div class="step-desc">${escapeHtml(step.desc)}</div>` : ''}
+              </div>
+            </div>`;
+        });
+        el.innerHTML = `
+          <div class="drill-pipeline">
+            <div class="pipe-title">${escapeHtml(section.title || 'Data Flow')}</div>
+            <div class="pipe-steps">${stepsHtml}</div>
+          </div>`;
+
+        // Animate pipeline steps sequentially after section appears
+        setTimeout(() => {
+          const pipeEl = el.querySelector('.pipe-steps');
+          if (!pipeEl) return;
+          const allNodes = pipeEl.querySelectorAll('.pipe-step, .pipe-arrow');
+          allNodes.forEach((node, i) => {
+            setTimeout(() => {
+              node.classList.add('animated');
+              // Auto-scroll to keep newly animated step visible
+              node.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, i * 400);
+          });
+        }, (sectionDelay - 0.3) * 1000 + 300);
+        break;
+      }
+
+      case 'comparison': {
+        const w = section.wrong || {};
+        const r = section.right || {};
+        el.innerHTML = `
+          <div class="drill-comparison">
+            <div class="comp-side wrong">
+              <div class="comp-label">✗ What you wrote</div>
+              <code>${escapeHtml(w.code || '')}</code>
+              <div class="comp-why">${escapeHtml(w.why || '')}</div>
+            </div>
+            <div class="comp-side right">
+              <div class="comp-label">✓ Correct approach</div>
+              <code>${escapeHtml(r.code || '')}</code>
+              <div class="comp-why">${escapeHtml(r.why || '')}</div>
+            </div>
+          </div>`;
+        break;
+      }
+
+      case 'analogy':
+        el.innerHTML = `<div class="drill-analogy">${escapeHtml(section.text)}</div>`;
+        break;
+
+      case 'code_example':
+        el.innerHTML = `
+          <div class="drill-code-example">
+            <div class="ce-title">${escapeHtml(section.title || 'Example')}</div>
+            <pre>${escapeHtml(section.code || '')}</pre>
+            ${section.output ? `<div class="ce-output">${escapeHtml(section.output)}</div>` : ''}
+          </div>`;
+        break;
+
+      default:
+        el.innerHTML = `<div class="drill-explanation">${escapeHtml(section.text || JSON.stringify(section))}</div>`;
+    }
+
+    container.appendChild(el);
+  });
+
+  // Scroll panel to top
+  document.getElementById('explain-panel-scroll').scrollTop = 0;
+}
+
+// Global listener for iframe height reports
+window.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'section-height' && e.data.height > 0) {
+    const iframe = document.querySelector(`iframe[data-section-id="${e.data.id}"]`);
+    if (iframe) iframe.style.height = (e.data.height + 8) + 'px';
+  }
+});
+
+// ── Quiz screen ──
+function showQuiz(msg) {
+  const screen = document.getElementById('quiz-screen');
+  const qImg = document.getElementById('quiz-question-img');
+  const choicesEl = document.getElementById('quiz-choices');
+  const feedbackEl = document.getElementById('quiz-feedback');
+  const timerEl = document.getElementById('quiz-timer');
+  const continueBtn = document.getElementById('quiz-continue');
+
+  // Set question image (base64 data URI)
+  qImg.src = msg.questionImg;
+  document.getElementById('quiz-label').innerHTML = msg.label || 'What comes in place of <b>?</b>';
+
+  // Build choices
+  choicesEl.innerHTML = '';
+  const labels = ['A', 'B', 'C', 'D'];
+  const correctAnswer = msg.correctAnswer || 'd';
+  let answered = false;
+  const startTime = Date.now();
+
+  // Timer display
+  let timerInterval = setInterval(() => {
+    if (answered) return;
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    timerEl.textContent = elapsed + 's';
+  }, 100);
+
+  msg.choices.forEach((choiceSrc, i) => {
+    const btn = document.createElement('div');
+    btn.className = 'quiz-choice';
+    btn.dataset.val = labels[i].toLowerCase();
+
+    const lbl = document.createElement('div');
+    lbl.className = 'quiz-choice-label';
+    lbl.textContent = labels[i];
+    btn.appendChild(lbl);
+
+    const img = document.createElement('img');
+    img.src = choiceSrc;
+    img.alt = labels[i];
+    img.style.background = '#fff';
+    img.style.borderRadius = '6px';
+    img.style.padding = '8px';
+    btn.appendChild(img);
+
+    btn.addEventListener('click', () => {
+      if (answered) return;
+      answered = true;
+      clearInterval(timerInterval);
+
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      const isCorrect = btn.dataset.val === correctAnswer;
+
+      // Highlight
+      btn.classList.add(isCorrect ? 'correct' : 'wrong');
+      if (!isCorrect) {
+        choicesEl.querySelector(`[data-val="${correctAnswer}"]`)?.classList.add('correct');
+      }
+
+      feedbackEl.innerHTML = isCorrect
+        ? '<span style="color:#3fb950;">Correct!</span> ' + elapsed + 's'
+        : '<span style="color:#f85149;">Incorrect.</span> The answer was <b>' + correctAnswer.toUpperCase() + '</b>. ' + elapsed + 's';
+
+      // Send result to server
+      ws.send(JSON.stringify({
+        type: 'quiz_answer',
+        chosen: btn.dataset.val,
+        correct: correctAnswer,
+        isCorrect: isCorrect,
+        timeMs: Date.now() - startTime,
+      }));
+
+      continueBtn.style.display = 'inline-block';
+    });
+
+    choicesEl.appendChild(btn);
+  });
+
+  continueBtn.style.display = 'none';
+  feedbackEl.textContent = '';
+  timerEl.textContent = '0.0s';
+  screen.classList.add('active');
+
+  continueBtn.onclick = () => {
+    screen.classList.remove('active');
+    // Server will send show_code_editor after this
+    ws.send(JSON.stringify({ type: 'quiz_continue' }));
+  };
+}
+
+connect();
+</script>
+</body>
+</html>
