@@ -22,7 +22,8 @@ import asyncio
 import threading
 import anthropic
 import http.server
-import websockets
+import aiohttp
+from aiohttp import web
 
 try:
     import numpy as np
@@ -124,7 +125,7 @@ def send_to_client(msg):
     if ctx and ctx.ws and ws_loop:
         data = json.dumps(msg)
         try:
-            asyncio.run_coroutine_threadsafe(ctx.ws.send(data), ws_loop)
+            asyncio.run_coroutine_threadsafe(ctx.ws.send_str(data), ws_loop)
         except Exception as e:
             print(f"  [WS] Send to client failed: {e}")
     else:
@@ -151,12 +152,16 @@ def broadcast(msg):
         print(f"  [WS] Broadcasting {msg_type} to {len(ws_clients)} client(s) ({len(data)} bytes)")
     for ws in list(ws_clients):
         try:
-            asyncio.run_coroutine_threadsafe(ws.send(data), ws_loop)
+            asyncio.run_coroutine_threadsafe(ws.send_str(data), ws_loop)
         except Exception as e:
             print(f"  [WS] Send failed: {e}")
             ws_clients.discard(ws)
 
-async def ws_handler(websocket):
+async def ws_handler(request):
+    """aiohttp WebSocket handler."""
+    websocket = web.WebSocketResponse()
+    await websocket.prepare(request)
+
     ws_clients.add(websocket)
 
     # Create per-connection context
@@ -166,14 +171,14 @@ async def ws_handler(websocket):
     # Send current state to newly connected client
     try:
         if IS_SERVER:
-            await websocket.send(json.dumps({"type": "waiting_identify"}))
+            await websocket.send_str(json.dumps({"type": "waiting_identify"}))
         else:
             # Terminal mode: use global context
             prof = _global_ctx.user_profile
             study_ctx = prof.get("studying", "") if prof else ""
-            await websocket.send(json.dumps({"type": "connected", "study_context": study_ctx}))
+            await websocket.send_str(json.dumps({"type": "connected", "study_context": study_ctx}))
             if prof:
-                await websocket.send(json.dumps({
+                await websocket.send_str(json.dumps({
                     "type": "init_settings",
                     "difficulty": prof.get("difficulty", 3),
                     "condition": prof.get("user_condition", 3),
@@ -182,73 +187,76 @@ async def ws_handler(websocket):
         pass
 
     try:
-        async for raw in websocket:
-            try:
-                msg = json.loads(raw)
-                msg_type = msg.get("type")
-                if msg_type == "identify":
-                    handle_identify(msg, websocket)
-                elif msg_type == "save_email":
-                    _spawn(handle_save_email, (msg,), websocket)
-                elif msg_type == "practice_request":
-                    _spawn(handle_practice_request, (msg.get("code", ""),), websocket)
-                elif msg_type == "practice_topic_request":
-                    _spawn(handle_practice_topic_request, (msg.get("topic", ""),), websocket)
-                elif msg_type == "practice_regenerate":
-                    _spawn(handle_practice_regenerate, (msg,), websocket)
-                elif msg_type == "grade_request":
-                    _spawn(handle_grade_request, (msg,), websocket)
-                elif msg_type == "code_answer":
-                    _spawn(handle_code_answer, (msg,), websocket)
-                elif msg_type == "code_line_check":
-                    _spawn(handle_code_line_check, (msg,), websocket)
-                elif msg_type == "code_inline_question":
-                    _spawn(handle_code_inline_question, (msg,), websocket)
-                elif msg_type == "drill_questions":
-                    _spawn(handle_drill_questions, (msg,), websocket)
-                elif msg_type == "explain_animation":
-                    _spawn(handle_explain_animation, (msg,), websocket)
-                elif msg_type == "regenerate_section":
-                    _spawn(handle_regenerate_section, (msg,), websocket)
-                elif msg_type == "practice_from_selection":
-                    _spawn(handle_practice_from_selection, (msg,), websocket)
-                elif msg_type == "diagnostic_answer":
-                    _spawn(handle_diagnostic_answer, (msg,), websocket)
-                elif msg_type == "practice_submit":
-                    _spawn(handle_practice_submit, (msg,), websocket)
-                elif msg_type == "chat_init":
-                    _set_ctx(ctx)
-                    handle_chat_init(msg)
-                elif msg_type == "chat_message":
-                    _spawn(handle_chat_message, (msg,), websocket)
-                elif msg_type == "onboarding_submit":
-                    _spawn(handle_onboarding_submit, (msg,), websocket)
-                elif msg_type == "quiz_answer":
-                    handle_quiz_answer(msg)
-                elif msg_type == "quiz_continue":
-                    _quiz_done.set()
-                    broadcast({"type": "show_code_editor"})
-                elif msg_type == "stop_followups":
-                    ctx.followups_stopped = True
-                    print("  [WS] Follow-ups stopped by user")
-                elif msg_type == "update_settings":
-                    d = msg.get("difficulty")
-                    c = msg.get("condition")
-                    prof = ctx.user_profile
-                    if d is not None:
-                        prof["difficulty"] = int(d)
-                    if c is not None:
-                        prof["user_condition"] = int(c)
-                    if prof.get("user_id"):
-                        db.set_thread_user(prof["user_id"])
-                        db.update_user_profile(
-                            prof["user_id"],
-                            difficulty=prof.get("difficulty", 3),
-                            user_condition=prof.get("user_condition", 3),
-                        )
-                    print(f"  [WS] Settings updated → difficulty={prof.get('difficulty')}, condition={prof.get('user_condition')}")
-            except json.JSONDecodeError:
-                pass
+        async for raw_msg in websocket:
+            if raw_msg.type == aiohttp.WSMsgType.TEXT:
+                try:
+                    msg = json.loads(raw_msg.data)
+                    msg_type = msg.get("type")
+                    if msg_type == "identify":
+                        handle_identify(msg, websocket)
+                    elif msg_type == "save_email":
+                        _spawn(handle_save_email, (msg,), websocket)
+                    elif msg_type == "practice_request":
+                        _spawn(handle_practice_request, (msg.get("code", ""),), websocket)
+                    elif msg_type == "practice_topic_request":
+                        _spawn(handle_practice_topic_request, (msg.get("topic", ""),), websocket)
+                    elif msg_type == "practice_regenerate":
+                        _spawn(handle_practice_regenerate, (msg,), websocket)
+                    elif msg_type == "grade_request":
+                        _spawn(handle_grade_request, (msg,), websocket)
+                    elif msg_type == "code_answer":
+                        _spawn(handle_code_answer, (msg,), websocket)
+                    elif msg_type == "code_line_check":
+                        _spawn(handle_code_line_check, (msg,), websocket)
+                    elif msg_type == "code_inline_question":
+                        _spawn(handle_code_inline_question, (msg,), websocket)
+                    elif msg_type == "drill_questions":
+                        _spawn(handle_drill_questions, (msg,), websocket)
+                    elif msg_type == "explain_animation":
+                        _spawn(handle_explain_animation, (msg,), websocket)
+                    elif msg_type == "regenerate_section":
+                        _spawn(handle_regenerate_section, (msg,), websocket)
+                    elif msg_type == "practice_from_selection":
+                        _spawn(handle_practice_from_selection, (msg,), websocket)
+                    elif msg_type == "diagnostic_answer":
+                        _spawn(handle_diagnostic_answer, (msg,), websocket)
+                    elif msg_type == "practice_submit":
+                        _spawn(handle_practice_submit, (msg,), websocket)
+                    elif msg_type == "chat_init":
+                        _set_ctx(ctx)
+                        handle_chat_init(msg)
+                    elif msg_type == "chat_message":
+                        _spawn(handle_chat_message, (msg,), websocket)
+                    elif msg_type == "onboarding_submit":
+                        _spawn(handle_onboarding_submit, (msg,), websocket)
+                    elif msg_type == "quiz_answer":
+                        handle_quiz_answer(msg)
+                    elif msg_type == "quiz_continue":
+                        _quiz_done.set()
+                        broadcast({"type": "show_code_editor"})
+                    elif msg_type == "stop_followups":
+                        ctx.followups_stopped = True
+                        print("  [WS] Follow-ups stopped by user")
+                    elif msg_type == "update_settings":
+                        d = msg.get("difficulty")
+                        c = msg.get("condition")
+                        prof = ctx.user_profile
+                        if d is not None:
+                            prof["difficulty"] = int(d)
+                        if c is not None:
+                            prof["user_condition"] = int(c)
+                        if prof.get("user_id"):
+                            db.set_thread_user(prof["user_id"])
+                            db.update_user_profile(
+                                prof["user_id"],
+                                difficulty=prof.get("difficulty", 3),
+                                user_condition=prof.get("user_condition", 3),
+                            )
+                        print(f"  [WS] Settings updated → difficulty={prof.get('difficulty')}, condition={prof.get('user_condition')}")
+                except json.JSONDecodeError:
+                    pass
+            elif raw_msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSE):
+                break
     finally:
         ws_clients.discard(websocket)
         ws_sessions.pop(websocket, None)
@@ -257,83 +265,63 @@ async def ws_handler(websocket):
             _spawn(analyze_session_and_save, (), websocket)
             threading.Thread(target=analyze_session_and_save, daemon=True).start()
 
+    return websocket
+
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-class _IndexHandler(http.server.SimpleHTTPRequestHandler):
-    """Serve index.html from the project directory."""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=PROJECT_DIR, **kwargs)
-    def log_message(self, format, *args):
-        pass  # Suppress logs
+async def _health_handler(request):
+    """Health check endpoint for Render."""
+    return web.Response(text="ok")
 
 
-def _http_handler(connection, request):
-    """Serve static files for non-WebSocket requests (same port).
-    websockets process_request(connection, request) -> Response | None
-    """
-    import mimetypes
-    from websockets.http11 import Response
-    from websockets.datastructures import Headers
-
-    path = request.path
-
-    # Health check endpoint for Render
-    if path == "/health":
-        return Response(200, "OK", Headers([("Content-Type", "text/plain")]), b"ok")
-
-    # Dedicated WebSocket path — always pass through
-    if path == "/ws":
-        return None
-
-    # Also check Upgrade header for any path
-    upgrade = request.headers.get("Upgrade", "").lower()
-    if "websocket" in upgrade:
-        return None
-
-    # Serve static files
-    if path == "/" or path == "":
-        file_path = os.path.join(PROJECT_DIR, "index.html")
-    elif "." in path.split("/")[-1]:
-        file_path = os.path.join(PROJECT_DIR, path.lstrip("/"))
-    else:
-        return None  # Unknown path → pass to WS
-
+async def _index_handler(request):
+    """Serve index.html."""
+    file_path = os.path.join(PROJECT_DIR, "index.html")
     if os.path.isfile(file_path):
-        content_type, _ = mimetypes.guess_type(file_path)
-        content_type = content_type or "application/octet-stream"
-        with open(file_path, "rb") as f:
-            body = f.read()
-        return Response(200, "OK", Headers([("Content-Type", content_type)]), body)
+        return web.FileResponse(file_path)
+    return web.Response(text="Not Found", status=404)
 
-    return Response(404, "Not Found", Headers(), b"Not Found")
+
+async def _static_handler(request):
+    """Serve static files from project directory."""
+    import mimetypes
+    rel_path = request.match_info.get("path", "")
+    file_path = os.path.join(PROJECT_DIR, rel_path)
+    if os.path.isfile(file_path):
+        return web.FileResponse(file_path)
+    return web.Response(text="Not Found", status=404)
 
 
 def start_ws_server():
-    """Start combined WebSocket + HTTP server on a single port."""
+    """Start combined WebSocket + HTTP server on a single port using aiohttp."""
     global ws_loop
     ws_loop = asyncio.new_event_loop()
 
     async def _run():
-        async with websockets.serve(
-            ws_handler,
-            BIND_HOST,
-            HTTP_PORT,
-            process_request=_http_handler,
-        ):
-            await asyncio.Future()
+        app = web.Application()
+        app.router.add_get("/health", _health_handler)
+        app.router.add_get("/ws", ws_handler)
+        app.router.add_get("/", _index_handler)
+        app.router.add_get("/{path:.*}", _static_handler)
+
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, BIND_HOST, HTTP_PORT)
+        await site.start()
+        print(f"🌐 Browser UI: http://{BIND_HOST}:{HTTP_PORT}", flush=True)
+        await asyncio.Future()  # run forever
 
     def _thread():
         try:
             asyncio.set_event_loop(ws_loop)
             ws_loop.run_until_complete(_run())
         except Exception as e:
-            print(f"❌ WebSocket server crashed: {e}", flush=True)
+            print(f"❌ Server crashed: {e}", flush=True)
             import traceback
             traceback.print_exc()
 
     threading.Thread(target=_thread, daemon=True).start()
-    print(f"🌐 Browser UI: http://{BIND_HOST}:{HTTP_PORT}", flush=True)
 
 # ─── Audio/Screen ─────────────────────────────────────────────────────
 recording = False
@@ -678,7 +666,7 @@ def handle_identify(msg, websocket):
     session_id = msg.get("session_id", "")
     if not session_id:
         asyncio.run_coroutine_threadsafe(
-            websocket.send(json.dumps({"type": "show_onboarding"})),
+            websocket.send_str(json.dumps({"type": "show_onboarding"})),
             ws_loop,
         )
         return
@@ -706,11 +694,11 @@ def handle_identify(msg, websocket):
 
         # Send state
         asyncio.run_coroutine_threadsafe(
-            websocket.send(json.dumps({"type": "connected", "study_context": study_topic})),
+            websocket.send_str(json.dumps({"type": "connected", "study_context": study_topic})),
             ws_loop,
         )
         asyncio.run_coroutine_threadsafe(
-            websocket.send(json.dumps({
+            websocket.send_str(json.dumps({
                 "type": "init_settings",
                 "difficulty": profile.get("difficulty", 3),
                 "condition": profile.get("user_condition", 3),
@@ -718,13 +706,13 @@ def handle_identify(msg, websocket):
             ws_loop,
         )
         asyncio.run_coroutine_threadsafe(
-            websocket.send(json.dumps({"type": "show_code_editor"})),
+            websocket.send_str(json.dumps({"type": "show_code_editor"})),
             ws_loop,
         )
     else:
         # No profile for this session_id — show onboarding
         asyncio.run_coroutine_threadsafe(
-            websocket.send(json.dumps({"type": "show_onboarding"})),
+            websocket.send_str(json.dumps({"type": "show_onboarding"})),
             ws_loop,
         )
 
