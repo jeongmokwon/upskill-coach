@@ -159,9 +159,15 @@ def broadcast(msg):
 
 async def ws_handler(request):
     """aiohttp WebSocket handler."""
-    print(f"[WS] New connection from {request.remote}", flush=True)
+    print(f"[WS] New connection from {request.remote}, headers={dict(request.headers)}", flush=True)
     websocket = web.WebSocketResponse()
-    await websocket.prepare(request)
+    try:
+        await websocket.prepare(request)
+    except Exception as e:
+        print(f"[WS] ❌ prepare() failed: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return web.Response(text="WebSocket upgrade failed", status=400)
     print(f"[WS] WebSocket prepared OK", flush=True)
 
     ws_clients.add(websocket)
