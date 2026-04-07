@@ -33,7 +33,10 @@ except ImportError:
     sd = None
     HAS_AUDIO = False
 
-sys.stdin.reconfigure(encoding='utf-8')
+try:
+    sys.stdin.reconfigure(encoding='utf-8')
+except Exception:
+    pass  # No stdin on Render/server environments
 
 try:
     import kg_engine as kg

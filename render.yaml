@@ -21,10 +21,7 @@ services:
         fromDatabase:
           name: upskill-coach-db
           property: connectionString
-      - key: PORT
-        value: "8765"
-      - key: WS_PORT
-        value: "8766"
+      # PORT is auto-set by Render — do not override
       - key: BIND_HOST
         value: "0.0.0.0"
       - key: PYTHON_VERSION
