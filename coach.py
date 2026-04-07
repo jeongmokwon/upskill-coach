@@ -68,6 +68,69 @@ ws_clients = set()
 _followups_stopped = False
 ws_loop = None
 
+
+# ─── Per-connection session context (multi-user support) ─────────────
+
+class ClientCtx:
+    """Per-WebSocket-connection session state."""
+    __slots__ = ("ws", "user_id", "user_profile", "study_topic",
+                 "section_id", "followups_stopped", "db_session_id")
+
+    def __init__(self, ws):
+        self.ws = ws
+        self.user_id = ""
+        self.user_profile = {}
+        self.study_topic = ""
+        self.section_id = ""
+        self.followups_stopped = False
+        self.db_session_id = ""
+
+
+# Map websocket → ClientCtx
+ws_sessions = {}
+
+# Thread-local: each handler thread gets its own ctx
+_tls = threading.local()
+
+# Global fallback for terminal mode
+_global_ctx = ClientCtx(None)
+
+
+def _set_ctx(ctx):
+    """Set the current thread's client context."""
+    _tls.ctx = ctx
+    # Also set db thread-local so db.py uses the right user/session
+    if ctx and ctx.user_id:
+        db.set_thread_user(ctx.user_id, ctx.db_session_id)
+
+
+def _ctx():
+    """Get current thread's client context (or global fallback for terminal)."""
+    return getattr(_tls, 'ctx', None) or _global_ctx
+
+
+def send_to_client(msg):
+    """Send message to the current thread's client websocket."""
+    ctx = _ctx()
+    if ctx and ctx.ws and ws_loop:
+        data = json.dumps(msg)
+        try:
+            asyncio.run_coroutine_threadsafe(ctx.ws.send(data), ws_loop)
+        except Exception as e:
+            print(f"  [WS] Send to client failed: {e}")
+    else:
+        broadcast(msg)  # fallback for terminal mode
+
+
+def _spawn(handler, args, ws):
+    """Spawn a handler thread with per-connection context."""
+    ctx = ws_sessions.get(ws)
+    def _run():
+        _set_ctx(ctx)
+        handler(*args)
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def broadcast(msg):
     """Send a JSON message to all connected browser clients."""
     if not ws_clients:
@@ -85,23 +148,26 @@ def broadcast(msg):
             ws_clients.discard(ws)
 
 async def ws_handler(websocket):
-    global _followups_stopped
     ws_clients.add(websocket)
+
+    # Create per-connection context
+    ctx = ClientCtx(websocket)
+    ws_sessions[websocket] = ctx
 
     # Send current state to newly connected client
     try:
         if IS_SERVER:
-            # Server mode: wait for client to identify via session_id
-            # Client will send {"type":"identify","session_id":"..."} immediately
             await websocket.send(json.dumps({"type": "waiting_identify"}))
         else:
-            study_ctx = user_profile.get("studying", "") if user_profile else ""
+            # Terminal mode: use global context
+            prof = _global_ctx.user_profile
+            study_ctx = prof.get("studying", "") if prof else ""
             await websocket.send(json.dumps({"type": "connected", "study_context": study_ctx}))
-            if user_profile:
+            if prof:
                 await websocket.send(json.dumps({
                     "type": "init_settings",
-                    "difficulty": user_profile.get("difficulty", 3),
-                    "condition": user_profile.get("user_condition", 3),
+                    "difficulty": prof.get("difficulty", 3),
+                    "condition": prof.get("user_condition", 3),
                 }))
     except Exception:
         pass
@@ -114,134 +180,72 @@ async def ws_handler(websocket):
                 if msg_type == "identify":
                     handle_identify(msg, websocket)
                 elif msg_type == "save_email":
-                    threading.Thread(
-                        target=handle_save_email,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_save_email, (msg,), websocket)
                 elif msg_type == "practice_request":
-                    code = msg.get("code", "")
-                    threading.Thread(
-                        target=handle_practice_request,
-                        args=(code,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_practice_request, (msg.get("code", ""),), websocket)
                 elif msg_type == "practice_topic_request":
-                    topic = msg.get("topic", "")
-                    threading.Thread(
-                        target=handle_practice_topic_request,
-                        args=(topic,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_practice_topic_request, (msg.get("topic", ""),), websocket)
                 elif msg_type == "practice_regenerate":
-                    threading.Thread(
-                        target=handle_practice_regenerate,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_practice_regenerate, (msg,), websocket)
                 elif msg_type == "grade_request":
-                    threading.Thread(
-                        target=handle_grade_request,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_grade_request, (msg,), websocket)
                 elif msg_type == "code_answer":
-                    threading.Thread(
-                        target=handle_code_answer,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_code_answer, (msg,), websocket)
                 elif msg_type == "code_line_check":
-                    threading.Thread(
-                        target=handle_code_line_check,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_code_line_check, (msg,), websocket)
                 elif msg_type == "code_inline_question":
-                    threading.Thread(
-                        target=handle_code_inline_question,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_code_inline_question, (msg,), websocket)
                 elif msg_type == "drill_questions":
-                    threading.Thread(
-                        target=handle_drill_questions,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_drill_questions, (msg,), websocket)
                 elif msg_type == "explain_animation":
-                    threading.Thread(
-                        target=handle_explain_animation,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_explain_animation, (msg,), websocket)
                 elif msg_type == "regenerate_section":
-                    threading.Thread(
-                        target=handle_regenerate_section,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_regenerate_section, (msg,), websocket)
                 elif msg_type == "practice_from_selection":
-                    threading.Thread(
-                        target=handle_practice_from_selection,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_practice_from_selection, (msg,), websocket)
                 elif msg_type == "diagnostic_answer":
-                    threading.Thread(
-                        target=handle_diagnostic_answer,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_diagnostic_answer, (msg,), websocket)
                 elif msg_type == "practice_submit":
-                    threading.Thread(
-                        target=handle_practice_submit,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_practice_submit, (msg,), websocket)
                 elif msg_type == "chat_init":
+                    _set_ctx(ctx)
                     handle_chat_init(msg)
                 elif msg_type == "chat_message":
-                    threading.Thread(
-                        target=handle_chat_message,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_chat_message, (msg,), websocket)
                 elif msg_type == "onboarding_submit":
-                    threading.Thread(
-                        target=handle_onboarding_submit,
-                        args=(msg,),
-                        daemon=True,
-                    ).start()
+                    _spawn(handle_onboarding_submit, (msg,), websocket)
                 elif msg_type == "quiz_answer":
                     handle_quiz_answer(msg)
                 elif msg_type == "quiz_continue":
                     _quiz_done.set()
                     broadcast({"type": "show_code_editor"})
                 elif msg_type == "stop_followups":
-                    _followups_stopped = True
+                    ctx.followups_stopped = True
                     print("  [WS] Follow-ups stopped by user")
                 elif msg_type == "update_settings":
                     d = msg.get("difficulty")
                     c = msg.get("condition")
+                    prof = ctx.user_profile
                     if d is not None:
-                        user_profile["difficulty"] = int(d)
+                        prof["difficulty"] = int(d)
                     if c is not None:
-                        user_profile["user_condition"] = int(c)
-                    if user_profile.get("user_id"):
+                        prof["user_condition"] = int(c)
+                    if prof.get("user_id"):
+                        db.set_thread_user(prof["user_id"])
                         db.update_user_profile(
-                            user_profile["user_id"],
-                            difficulty=user_profile.get("difficulty", 3),
-                            user_condition=user_profile.get("user_condition", 3),
+                            prof["user_id"],
+                            difficulty=prof.get("difficulty", 3),
+                            user_condition=prof.get("user_condition", 3),
                         )
-                    print(f"  [WS] Settings updated → difficulty={user_profile.get('difficulty')}, condition={user_profile.get('user_condition')}")
+                    print(f"  [WS] Settings updated → difficulty={prof.get('difficulty')}, condition={prof.get('user_condition')}")
             except json.JSONDecodeError:
                 pass
     finally:
         ws_clients.discard(websocket)
-        if not ws_clients:
-            # Last client disconnected — trigger session analysis in background
-            print("  [WS] All clients disconnected — analyzing session...")
+        ws_sessions.pop(websocket, None)
+        if ctx.user_id:
+            print(f"  [WS] Client disconnected: {ctx.user_id}")
+            _spawn(analyze_session_and_save, (), websocket)
             threading.Thread(target=analyze_session_and_save, daemon=True).start()
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -392,27 +396,29 @@ user_profile = {}  # Populated by onboarding: {user_id, user_name, goal, backgro
 
 def get_user_context_str():
     """Build an 'About the user' block for Claude system prompts."""
-    if not user_profile:
+    prof = _ctx().user_profile
+    if not prof:
         return ""
-    parts = [f"Name: {user_profile.get('user_name', 'unknown')}"]
-    if user_profile.get("studying"):
-        parts.append(f"Currently studying: {user_profile['studying']}")
-    if user_profile.get("goal"):
-        parts.append(f"Learning goal: {user_profile['goal']}")
-    if user_profile.get("background"):
-        parts.append(f"Background: {user_profile['background']}")
-    if current_study_topic and current_study_topic != user_profile.get("studying"):
-        parts.append(f"Session topic: {current_study_topic}")
+    study_topic = _ctx().study_topic
+    parts = [f"Name: {prof.get('user_name', 'unknown')}"]
+    if prof.get("studying"):
+        parts.append(f"Currently studying: {prof['studying']}")
+    if prof.get("goal"):
+        parts.append(f"Learning goal: {prof['goal']}")
+    if prof.get("background"):
+        parts.append(f"Background: {prof['background']}")
+    if study_topic and study_topic != prof.get("studying"):
+        parts.append(f"Session topic: {study_topic}")
 
     # Hint preference
-    hint_pref = user_profile.get("hint_preference", "hints")
+    hint_pref = prof.get("hint_preference", "hints")
     if hint_pref == "solo":
         parts.append("Hint preference: user prefers to figure things out on their own — do NOT give hints or corrections proactively. Only point out errors when asked.")
     else:
         parts.append("Hint preference: user wants hints — proactively guide them before they make mistakes.")
 
-    diff = user_profile.get("difficulty", 3)
-    cond = user_profile.get("user_condition", 3)
+    diff = prof.get("difficulty", 3)
+    cond = prof.get("user_condition", 3)
     parts.append(f"Difficulty setting: {diff}/5")
     parts.append(f"User condition: {cond}/5")
 
@@ -448,7 +454,7 @@ def get_user_context_str():
             quiz_insight = "Onboarding quiz: answered incorrectly → may struggle with abstract patterns. Use extra-concrete examples, go slower, more encouragement."
 
     # Hint pref → hint frequency
-    hint_pref = user_profile.get("hint_preference", "hints")
+    hint_pref = prof.get("hint_preference", "hints")
     if hint_pref == "solo":
         hint_rule = "Hint frequency: LOW. User wants to struggle and discover. Only give hints when explicitly asked. Let them make mistakes — that's how they learn."
         tone_rule = "Tone: PUSHING. Be direct, challenge them. 'Try again', 'What do you think happens if...?'. Don't coddle."
@@ -548,6 +554,8 @@ def onboard_user():
     if IS_SERVER:
         return _onboard_server()
 
+    # Terminal mode: also sync to _global_ctx for WS handlers
+
     print("\n👋 Welcome! What's your name?")
     name = input("📝 : ").strip()
     if not name:
@@ -579,6 +587,10 @@ def onboard_user():
         user_profile["difficulty"] = diff
         user_profile["user_condition"] = cond
         db.update_user_profile(profile["user_id"], difficulty=diff, user_condition=cond)
+        # Sync to global ctx for terminal mode
+        _global_ctx.user_profile = user_profile
+        _global_ctx.user_id = user_profile.get("user_id", "")
+        _global_ctx.study_topic = user_profile.get("studying", "")
         return profile
 
     # ── New user onboarding ──
@@ -620,6 +632,10 @@ def onboard_user():
         "user_condition": cond,
     }
     print(f"\n✅ Profile saved! Let's go, {name}.")
+    # Sync to global ctx for terminal mode WS handlers
+    _global_ctx.user_profile = user_profile
+    _global_ctx.user_id = user_profile.get("user_id", "")
+    _global_ctx.study_topic = user_profile.get("studying", "")
     return user_profile
 
 
@@ -633,7 +649,6 @@ def _onboard_server():
 
 def handle_identify(msg, websocket):
     """Handle identify message from browser with localStorage session_id."""
-    global user_profile, current_study_topic
     session_id = msg.get("session_id", "")
     if not session_id:
         asyncio.run_coroutine_threadsafe(
@@ -646,19 +661,26 @@ def handle_identify(msg, websocket):
     profile = db.get_user_profile_by_id(session_id)
     if profile:
         db.set_user_id(profile["user_id"])
-        user_profile = profile
-        current_study_topic = profile.get("studying", "")
+        ctx = ws_sessions.get(websocket)
+        if ctx:
+            ctx.user_profile = profile
+            ctx.study_topic = profile.get("studying", "")
+            ctx.user_id = profile["user_id"]
+            _set_ctx(ctx)
+        study_topic = profile.get("studying", "")
 
         # Start DB session
-        db.start_session(study_topic=current_study_topic)
+        db.start_session(study_topic=study_topic)
+        if ctx:
+            ctx.db_session_id = db.get_session_id()
         db.touch_activity()
         extract_teaching_style()
 
-        print(f"  [Server] Returning user: {session_id} — studying: {current_study_topic}")
+        print(f"  [Server] Returning user: {session_id} — studying: {study_topic}")
 
         # Send state
         asyncio.run_coroutine_threadsafe(
-            websocket.send(json.dumps({"type": "connected", "study_context": current_study_topic})),
+            websocket.send(json.dumps({"type": "connected", "study_context": study_topic})),
             ws_loop,
         )
         asyncio.run_coroutine_threadsafe(
@@ -683,7 +705,6 @@ def handle_identify(msg, websocket):
 
 def handle_onboarding_submit(msg):
     """Handle onboarding form submission from browser."""
-    global user_profile, current_study_topic
     session_id = msg.get("session_id", "")
     studying = msg.get("studying", "").strip() or "ML/AI"
     goal = msg.get("goal", "").strip() or "Learn and grow"
@@ -697,41 +718,43 @@ def handle_onboarding_submit(msg):
         user_condition=condition, user_id=session_id,
     )
     db.set_user_id(uid)
-    user_profile = {
+    _ctx().user_id = uid
+    _ctx().user_profile = {
         "user_id": uid, "user_name": "anonymous", "goal": goal,
         "background": "", "studying": studying,
         "hint_preference": hint_preference,
         "difficulty": difficulty, "user_condition": condition,
     }
 
-    current_study_topic = studying
+    _ctx().study_topic = studying
 
     # Start DB session
     db.start_session(study_topic=studying)
+    _ctx().db_session_id = db.get_session_id()
     db.touch_activity()
     extract_teaching_style()
 
     print(f"  [Server] Onboarded: {uid} — studying: {studying}")
 
-    # Send state to all connected clients
-    broadcast({"type": "connected", "study_context": studying})
-    broadcast({
+    # Send state to client
+    send_to_client({"type": "connected", "study_context": studying})
+    send_to_client({
         "type": "init_settings",
         "difficulty": difficulty,
         "condition": condition,
     })
-    broadcast({"type": "show_code_editor"})
+    send_to_client({"type": "show_code_editor"})
 
 
 def handle_save_email(msg):
     """Save email for the current user profile."""
     email = msg.get("email", "").strip()
-    if not email or not user_profile.get("user_id"):
+    if not email or not _ctx().user_profile.get("user_id"):
         return
-    db.update_user_profile(user_profile["user_id"], email=email)
-    user_profile["email"] = email
-    print(f"  [Server] Email saved for {user_profile['user_id']}: {email}")
-    broadcast({"type": "email_saved"})
+    db.update_user_profile(_ctx().user_profile["user_id"], email=email)
+    _ctx().user_profile["email"] = email
+    print(f"  [Server] Email saved for {_ctx().user_profile['user_id']}: {email}")
+    send_to_client({"type": "email_saved"})
 
 
 def _ask_difficulty_condition(default_diff=3, default_cond=3):
@@ -905,7 +928,7 @@ Otherwise:
         },
     ]
 
-    broadcast({"type": "streaming"})
+    send_to_client({"type": "streaming"})
     full_response = ""
     with get_client().messages.stream(
         model="claude-sonnet-4-20250514",
@@ -932,7 +955,7 @@ Otherwise:
         parsed = json.loads(cleaned)
 
         if parsed.get("mode") == "annotate":
-            broadcast({
+            send_to_client({
                 "type": "annotated_code",
                 "code": parsed["code"],
                 "highlight_line": parsed["highlight_line"],
@@ -941,15 +964,15 @@ Otherwise:
             speak_text = parsed["note"]
         else:
             content = parsed.get("content", full_json)
-            broadcast({"type": "delta", "text": content})
-            broadcast({"type": "done", "full_text": content})
+            send_to_client({"type": "delta", "text": content})
+            send_to_client({"type": "done", "full_text": content})
             speak_text = content
 
     except (json.JSONDecodeError, KeyError):
         # Fallback to plain text display
         print(f"⚠️  JSON parse failed. Raw response:\n{full_json[:200]}")
-        broadcast({"type": "delta", "text": full_json})
-        broadcast({"type": "done", "full_text": full_json})
+        send_to_client({"type": "delta", "text": full_json})
+        send_to_client({"type": "done", "full_text": full_json})
 
 
     return speak_text
@@ -958,11 +981,11 @@ Otherwise:
 def handle_practice_topic_request(topic):
     """Handle a topic-based practice question request from sidebar."""
     print(f"  [WS] Practice topic request: {topic}")
-    db.log_practice_requested(code_context=topic, study_topic=current_study_topic, tutorial_section=current_section_id)
+    db.log_practice_requested(code_context=topic, study_topic=_ctx().study_topic, tutorial_section=_ctx().section_id)
     try:
         result = generate_practice_questions(topic)
         print(f"  [WS] Practice generated: topic={result['topic']}, level={result['level']}")
-        broadcast({
+        send_to_client({
             "type": "practice_questions",
             "code": topic,
             "questions": [result["question"]],
@@ -971,7 +994,7 @@ def handle_practice_topic_request(topic):
         })
     except Exception as e:
         print(f"  [WS] Practice topic generation failed: {e}")
-        broadcast({"type": "error", "message": str(e)})
+        send_to_client({"type": "error", "message": str(e)})
 
 
 def handle_practice_regenerate(msg):
@@ -989,7 +1012,7 @@ def handle_practice_regenerate(msg):
     try:
         result = generate_practice_questions(code + extra_context)
         print(f"  [WS] Regenerated: topic={result['topic']}, level={result['level']}")
-        broadcast({
+        send_to_client({
             "type": "practice_questions",
             "code": code,
             "questions": [result["question"]],
@@ -998,19 +1021,18 @@ def handle_practice_regenerate(msg):
         })
     except Exception as e:
         print(f"  [WS] Regenerate failed: {e}")
-        broadcast({"type": "error", "message": str(e)})
+        send_to_client({"type": "error", "message": str(e)})
 
 
 def handle_practice_request(code_snippet):
     """Handle a practice question request from the browser."""
-    global _followups_stopped
-    _followups_stopped = False
+    _ctx().followups_stopped = False
     print(f"  [WS] Practice request for: {code_snippet[:60]}...")
-    db.log_practice_requested(code_context=code_snippet, study_topic=current_study_topic, tutorial_section=current_section_id)
+    db.log_practice_requested(code_context=code_snippet, study_topic=_ctx().study_topic, tutorial_section=_ctx().section_id)
     try:
         result = generate_practice_questions(code_snippet)
         print(f"  [WS] Practice generated: topic={result['topic']}, level={result['level']}")
-        broadcast({
+        send_to_client({
             "type": "practice_questions",
             "code": code_snippet,
             "questions": [result["question"]],
@@ -1019,7 +1041,7 @@ def handle_practice_request(code_snippet):
         })
     except Exception as e:
         print(f"  [WS] Practice generation failed: {e}")
-        broadcast({"type": "error", "message": str(e)})
+        send_to_client({"type": "error", "message": str(e)})
 
 
 def handle_grade_request(msg):
@@ -1035,7 +1057,7 @@ def handle_grade_request(msg):
 
     try:
         result = grade_practice_answer(question, answer, code)
-        broadcast({
+        send_to_client({
             "type": "grade_result",
             "gradeId": grade_id,
             "correct": result["correct"],
@@ -1051,8 +1073,8 @@ def handle_grade_request(msg):
                 is_correct=result["correct"],
                 time_taken_seconds=time_taken,
                 answer_text=result["feedback"],
-                study_topic=current_study_topic,
-                tutorial_section=current_section_id,
+                study_topic=_ctx().study_topic,
+                tutorial_section=_ctx().section_id,
                 difficulty=difficulty,
             )
         else:
@@ -1061,19 +1083,19 @@ def handle_grade_request(msg):
                 user_answer=answer,
                 is_correct=result["correct"],
                 time_taken_seconds=time_taken,
-                study_topic=current_study_topic,
-                tutorial_section=current_section_id,
+                study_topic=_ctx().study_topic,
+                tutorial_section=_ctx().section_id,
                 code_context=code,
                 answer_text=result["feedback"],
                 difficulty=difficulty,
                 practice_topic=practice_topic,
             )
         # Generate follow-up after every graded answer (unless stopped)
-        if not _followups_stopped:
+        if not _ctx().followups_stopped:
             generate_followup()
     except Exception as e:
         print(f"  [WS] Grading failed: {e}")
-        broadcast({
+        send_to_client({
             "type": "grade_result",
             "gradeId": grade_id,
             "correct": False,
@@ -1126,7 +1148,7 @@ def handle_code_answer(msg):
 
     try:
         result = review_code_answer(user_code, context, question)
-        broadcast({
+        send_to_client({
             "type": "code_review_result",
             "pass": result["pass"],
             "feedback": result["feedback"],
@@ -1137,14 +1159,14 @@ def handle_code_answer(msg):
             user_answer=user_code,
             is_correct=result["pass"],
             time_taken_seconds=0,
-            study_topic=current_study_topic,
-            tutorial_section=current_section_id,
+            study_topic=_ctx().study_topic,
+            tutorial_section=_ctx().section_id,
             code_context=context,
             answer_text=result["feedback"],
         )
     except Exception as e:
         print(f"  [WS] Code review failed: {e}")
-        broadcast({
+        send_to_client({
             "type": "code_review_result",
             "pass": False,
             "feedback": f"Review error: {e}",
@@ -1161,7 +1183,7 @@ def handle_code_line_check(msg):
 
     trimmed = line.strip()
     if not trimmed or trimmed.startswith('#'):
-        broadcast({
+        send_to_client({
             "type": "code_line_check_result",
             "has_error": False,
             "editorId": editor_id,
@@ -1228,14 +1250,14 @@ Rules:
             result["hole_context"] = parsed.get("hole_context", "")
             print(f"  [LineCheck] Line {line_num} MAJOR HOLE: {parsed.get('hole_topic', '')} — {parsed.get('hole_context', '')[:80]}")
 
-        broadcast(result)
+        send_to_client(result)
 
         if parsed.get("has_error"):
             print(f"  [LineCheck] Line {line_num} error: {parsed.get('correction', '')[:80]}")
 
     except Exception as e:
         print(f"  [LineCheck] Error: {e}")
-        broadcast({
+        send_to_client({
             "type": "code_line_check_result",
             "has_error": False,
             "editorId": editor_id,
@@ -1278,7 +1300,7 @@ Do NOT use markdown formatting. Plain text only."""
         answer = response.content[0].text.strip()
         print(f"  [InlineQ] Answer: {answer[:80]}")
 
-        broadcast({
+        send_to_client({
             "type": "code_inline_answer",
             "answer": answer,
             "lineNum": line_num,
@@ -1366,14 +1388,14 @@ Return ONLY a JSON object: {{"sections":[...]}}"""
         sections = parsed.get("sections", [])
         print(f"  [Drill] Generated {len(sections)} content sections")
 
-        broadcast({
+        send_to_client({
             "type": "drill_content",
             "sections": sections,
             "topic": topic,
         })
     except Exception as e:
         print(f"  [Drill] Error: {e}")
-        broadcast({
+        send_to_client({
             "type": "drill_content",
             "sections": [{"type": "explanation", "text": f"Error generating content: {e}"}],
             "topic": topic,
@@ -1495,7 +1517,7 @@ Return ONLY a JSON object:
         }
 
         # Send title
-        broadcast({
+        send_to_client({
             "type": "explain_animation_result",
             "title": title,
             "html": "<div style='color:#484f58;text-align:center;padding:40px;'>Loading sections...</div>",
@@ -1504,7 +1526,7 @@ Return ONLY a JSON object:
         # Broadcast all sections instantly (no per-section API calls!)
         for i, sec in enumerate(sections):
             print(f"  [Explain] Section {i+1}/{len(sections)}: [{sec.get('template','')}] {sec.get('purpose','')[:50]}")
-            broadcast({
+            send_to_client({
                 "type": "explain_section",
                 "index": i,
                 "total": len(sections),
@@ -1514,14 +1536,14 @@ Return ONLY a JSON object:
                 "title": title,
             })
 
-        broadcast({"type": "explain_done", "total": len(sections), "title": title})
-        print(f"  [Explain] All {len(sections)} sections broadcast")
+        send_to_client({"type": "explain_done", "total": len(sections), "title": title})
+        print(f"  [Explain] All {len(sections)} sections sent")
 
     except Exception as e:
         print(f"  [Explain] Error: {e}")
         import traceback
         traceback.print_exc()
-        broadcast({
+        send_to_client({
             "type": "explain_animation_result",
             "title": "Error",
             "html": f"<p style='color:#f85149'>Error generating explanation: {e}</p>",
@@ -1531,8 +1553,8 @@ Return ONLY a JSON object:
 def handle_regenerate_section(msg):
     """Regenerate a single section with different difficulty/condition settings."""
     idx = msg.get("sectionIndex", 0)
-    override_diff = msg.get("difficulty", user_profile.get("difficulty", 3))
-    override_cond = msg.get("condition", user_profile.get("user_condition", 3))
+    override_diff = msg.get("difficulty", _ctx().user_profile.get("difficulty", 3))
+    override_cond = msg.get("condition", _ctx().user_profile.get("user_condition", 3))
 
     if not _last_explain_plan or not _last_explain_plan.get("sections"):
         print("  [Regen] No plan stored — cannot regenerate")
@@ -1611,7 +1633,7 @@ Return ONLY the data JSON object (not wrapped in anything else). Use concrete va
         # Update stored plan
         sections[idx]["data"] = new_data
 
-        broadcast({
+        send_to_client({
             "type": "explain_section",
             "index": idx,
             "total": len(sections),
@@ -1806,11 +1828,11 @@ def handle_chat_message(msg):
             ) as stream_resp:
                 for token in stream_resp.text_stream:
                     response += token
-                    broadcast({"type": "chat_stream", "token": token})
+                    send_to_client({"type": "chat_stream", "token": token})
 
             _chat_state["messages"].append({"role": "assistant", "content": response})
             db.save_message("coach", response)
-            broadcast({"type": "chat_done"})
+            send_to_client({"type": "chat_done"})
             print(f"  [Chat] Claude: {response[:60]}")
 
 
@@ -1829,7 +1851,7 @@ def handle_chat_message(msg):
                         "context": anim_data.get("description", anim_data.get("title", "")),
                         "chatTriggered": True,
                     }
-                    broadcast({"type": "chat_animation_start"})
+                    send_to_client({"type": "chat_animation_start"})
                     threading.Thread(
                         target=handle_explain_animation,
                         args=(anim_msg,),
@@ -1847,8 +1869,8 @@ def handle_chat_message(msg):
                 _time.sleep(wait)
                 continue
             print(f"  [Chat] Error: {e}")
-            broadcast({"type": "chat_reply", "text": f"⚠️ API error: {e}"})
-            broadcast({"type": "chat_done"})
+            send_to_client({"type": "chat_reply", "text": f"⚠️ API error: {e}"})
+            send_to_client({"type": "chat_done"})
             return
 
 
@@ -2077,7 +2099,7 @@ def handle_practice_from_selection(msg):
                 "currentLevel": 1,
             })
 
-            broadcast({
+            send_to_client({
                 "type": "diagnostic_question",
                 "question": result.get("question", ""),
                 "questionNum": 1,
@@ -2091,12 +2113,12 @@ def handle_practice_from_selection(msg):
             if is_overloaded and attempt < 2:
                 wait = (attempt + 1) * 3
                 print(f"  [Diag] API overloaded, retrying in {wait}s... (attempt {attempt+1}/3)")
-                broadcast({"type": "diagnostic_status", "message": f"API busy, retrying ({attempt+1}/3)..."})
+                send_to_client({"type": "diagnostic_status", "message": f"API busy, retrying ({attempt+1}/3)..."})
                 _time.sleep(wait)
                 continue
             print(f"  [Diag] Error: {e}")
             import traceback; traceback.print_exc()
-            broadcast({
+            send_to_client({
                 "type": "diagnostic_error",
                 "message": "API is currently overloaded. Please try again in a moment.",
             })
@@ -2193,7 +2215,7 @@ def handle_diagnostic_answer(msg):
             print(f"  [Diag] Answer eval: understood={result.get('understood')}, next={next_action}")
 
             if next_action == "ask_more" and len(history) < 4:
-                broadcast({
+                send_to_client({
                     "type": "diagnostic_feedback_and_next",
                     "evaluation": evaluation,
                     "understood": result.get("understood", False),
@@ -2201,7 +2223,7 @@ def handle_diagnostic_answer(msg):
                     "questionNum": len(history) + 1,
                 })
             else:
-                broadcast({
+                send_to_client({
                     "type": "diagnostic_feedback_and_next",
                     "evaluation": evaluation,
                     "understood": result.get("understood", False),
@@ -2220,7 +2242,7 @@ def handle_diagnostic_answer(msg):
                 continue
             print(f"  [Diag] Eval error: {e}")
             import traceback; traceback.print_exc()
-            broadcast({
+            send_to_client({
                 "type": "diagnostic_error",
                 "message": "API is currently overloaded. Please try again in a moment.",
             })
@@ -2293,7 +2315,7 @@ def _generate_practice_from_diagnosis(assessed_diff):
             if end_pos > 0:
                 raw = raw[:end_pos]
             result = json.loads(raw)
-            broadcast({
+            send_to_client({
                 "type": "practice_task",
                 "task": result.get("task", "Write code that demonstrates this concept."),
                 "sectionMeta": {
@@ -2312,7 +2334,7 @@ def _generate_practice_from_diagnosis(assessed_diff):
                 _time.sleep(wait)
                 continue
             print(f"  [Practice] Task gen error: {e}")
-            broadcast({
+            send_to_client({
                 "type": "diagnostic_error",
                 "message": "API is currently overloaded. Please try again in a moment.",
             })
@@ -2354,7 +2376,7 @@ Return ONLY a JSON object:
                 response += text
 
         result = json.loads('{"passed":' + response)
-        broadcast({
+        send_to_client({
             "type": "practice_review",
             "passed": result.get("passed", False),
             "feedback": result.get("feedback", ""),
@@ -2362,7 +2384,7 @@ Return ONLY a JSON object:
         print(f"  [Practice] Review: passed={result.get('passed')}")
     except Exception as e:
         print(f"  [Practice] Review error: {e}")
-        broadcast({
+        send_to_client({
             "type": "practice_review",
             "passed": False,
             "feedback": f"Error reviewing code: {e}",
@@ -2615,7 +2637,7 @@ Return ONLY a JSON object. No other text.
 
     PREFILL = '{"topic":"'
     messages = [
-        {"role": "user", "content": f"Study topic: {current_study_topic}\n\nSession interactions:\n{interaction_text}"},
+        {"role": "user", "content": f"Study topic: {_ctx().study_topic}\n\nSession interactions:\n{interaction_text}"},
         {"role": "assistant", "content": PREFILL},
     ]
 
@@ -2641,12 +2663,12 @@ Return ONLY a JSON object. No other text.
             db.log_followup(
                 practice_question=question,
                 weak_concepts=weak,
-                study_topic=current_study_topic,
-                tutorial_section=current_section_id,
+                study_topic=_ctx().study_topic,
+                tutorial_section=_ctx().section_id,
                 difficulty=str(target_level),
             )
             # Send to browser
-            broadcast({
+            send_to_client({
                 "type": "followup_question",
                 "question": question,
                 "weak_concepts": weak,
@@ -2953,6 +2975,7 @@ def main():
     db.touch_activity()
 
     current_study_topic = study_context
+    _global_ctx.study_topic = study_context
 
     # Extract teaching style from previous sessions
     extract_teaching_style()

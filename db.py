@@ -55,7 +55,29 @@ else:
     DB_TYPE = "sqlite"
 
 
-USER_ID = "jeongmo"  # default, overridden by onboarding
+import threading as _threading
+
+USER_ID = "jeongmo"  # default fallback, overridden by onboarding
+
+# ─── Thread-local user/session context (multi-user support) ──────
+_tls = _threading.local()
+
+
+def set_thread_user(user_id, session_id=None):
+    """Set per-thread user_id and session_id (for multi-user server mode)."""
+    _tls.user_id = user_id
+    if session_id is not None:
+        _tls.session_id = session_id
+
+
+def _uid():
+    """Get current user_id: thread-local first, then global fallback."""
+    return getattr(_tls, 'user_id', None) or USER_ID
+
+
+def _sid():
+    """Get current session_id: thread-local first, then global fallback."""
+    return getattr(_tls, 'session_id', None) or _current_session_id
 
 
 def _execute(conn, sql, params=None):
@@ -232,9 +254,10 @@ def init_db():
 
 
 def set_user_id(uid):
-    """Set the active user ID for this session."""
+    """Set the active user ID (global + thread-local)."""
     global USER_ID
     USER_ID = uid
+    _tls.user_id = uid
 
 
 def get_user_profile(user_name):
@@ -324,13 +347,14 @@ def start_session(study_topic=""):
     """Start a new session. Migrate previous session times."""
     global _current_session_id
     _current_session_id = str(uuid.uuid4())[:8]
+    _tls.session_id = _current_session_id
     now = datetime.now().isoformat()
 
     conn = get_conn()
 
     # Migrate: move current → last
     cur = _execute(conn,
-        f"SELECT current_session_id FROM user_state WHERE user_id = {_P}", (USER_ID,)
+        f"SELECT current_session_id FROM user_state WHERE user_id = {_P}", (_uid(),)
     )
     row = _fetchone(cur)
 
@@ -348,25 +372,25 @@ def start_session(study_topic=""):
                     current_session_id = {_P}
                 WHERE user_id = {_P}
             """, (prev_session["start_time"], prev_session["end_time"] or now,
-                  _current_session_id, USER_ID))
+                  _current_session_id, _uid()))
     else:
         if DB_TYPE == "postgres":
             _execute(conn, f"""
                 INSERT INTO user_state (user_id, current_session_id)
                 VALUES ({_P}, {_P})
                 ON CONFLICT (user_id) DO UPDATE SET current_session_id = EXCLUDED.current_session_id
-            """, (USER_ID, _current_session_id))
+            """, (_uid(), _current_session_id))
         else:
             _execute(conn, """
                 INSERT OR REPLACE INTO user_state (user_id, current_session_id)
                 VALUES (?, ?)
-            """, (USER_ID, _current_session_id))
+            """, (_uid(), _current_session_id))
 
     # Create new session row
     _execute(conn, f"""
         INSERT INTO sessions (session_id, user_id, study_topic, start_time)
         VALUES ({_P}, {_P}, {_P}, {_P})
-    """, (_current_session_id, USER_ID, study_topic, now))
+    """, (_current_session_id, _uid(), study_topic, now))
 
     conn.commit()
     conn.close()
@@ -377,23 +401,25 @@ def start_session(study_topic=""):
 def end_session():
     """End the current session."""
     global _current_session_id
-    if not _current_session_id:
+    sid = _sid()
+    if not sid:
         return
 
     now = datetime.now().isoformat()
     conn = get_conn()
     _execute(conn,
         f"UPDATE sessions SET end_time = {_P} WHERE session_id = {_P}",
-        (now, _current_session_id)
+        (now, sid)
     )
     conn.commit()
     conn.close()
-    print(f"  [DB] Session ended: {_current_session_id}")
+    print(f"  [DB] Session ended: {sid}")
     _current_session_id = None
+    _tls.session_id = None
 
 
 def get_session_id():
-    return _current_session_id
+    return _sid()
 
 
 # ─── Idle / pause detection ───────────────────────────────────────
@@ -408,7 +434,7 @@ def touch_activity():
     global _last_activity_time
     now = datetime.now()
 
-    if _last_activity_time and _current_session_id:
+    if _last_activity_time and _sid():
         gap = (now - _last_activity_time).total_seconds()
         if gap >= IDLE_THRESHOLD_SECONDS:
             conn = get_conn()
@@ -417,7 +443,7 @@ def touch_activity():
                 (user_id, session_id, timestamp, interaction_type, source,
                  study_topic, extra_json)
                 VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
-            """, (USER_ID, _current_session_id, _last_activity_time.isoformat(),
+            """, (_uid(), _sid(), _last_activity_time.isoformat(),
                   "session_pause", "system", None,
                   json.dumps({"idle_seconds": round(gap)})))
             _execute(conn, f"""
@@ -425,7 +451,7 @@ def touch_activity():
                 (user_id, session_id, timestamp, interaction_type, source,
                  study_topic, extra_json)
                 VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
-            """, (USER_ID, _current_session_id, now.isoformat(),
+            """, (_uid(), _sid(), now.isoformat(),
                   "session_resume", "system", None,
                   json.dumps({"idle_seconds": round(gap)})))
             conn.commit()
@@ -437,7 +463,7 @@ def touch_activity():
 
 def mark_pending_followups_skipped():
     """Mark any unanswered followups as skipped."""
-    if not _current_session_id:
+    if not _sid():
         return
     conn = get_conn()
     cur = _execute(conn, f"""
@@ -453,7 +479,7 @@ def mark_pending_followups_skipped():
                 AND a.practice_question = f.practice_question
                 AND a.id > f.id
           )
-    """, (_current_session_id,))
+    """, (_sid(),))
     rows = _fetchall(cur)
 
     if rows:
@@ -481,7 +507,7 @@ def log_question(question_text, answer_text, tutorial_section=None, study_topic=
         (user_id, session_id, timestamp, interaction_type, study_topic,
          tutorial_section, question_text, answer_text)
         VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
-    """, (USER_ID, _current_session_id or "", datetime.now().isoformat(),
+    """, (_uid(), _sid() or "", datetime.now().isoformat(),
           "question", study_topic, tutorial_section, question_text, answer_text))
     conn.commit()
     conn.close()
@@ -505,7 +531,7 @@ def log_practice(practice_question, user_answer, is_correct, time_taken_seconds,
          tutorial_section, practice_question, user_answer, is_correct,
          time_taken_seconds, answer_text, difficulty, extra_json)
         VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
-    """, (USER_ID, _current_session_id or "", datetime.now().isoformat(),
+    """, (_uid(), _sid() or "", datetime.now().isoformat(),
           "practice", study_topic, tutorial_section, practice_question,
           user_answer, 1 if is_correct else 0, time_taken_seconds,
           answer_text, difficulty,
@@ -516,7 +542,7 @@ def log_practice(practice_question, user_answer, is_correct, time_taken_seconds,
 
 def get_session_interactions(session_id=None):
     """Get all interactions for a session as a list of dicts."""
-    sid = session_id or _current_session_id
+    sid = session_id or _sid()
     if not sid:
         return []
     conn = get_conn()
@@ -534,7 +560,7 @@ def get_all_user_interactions():
     conn = get_conn()
     cur = _execute(conn,
         f"SELECT * FROM interactions WHERE user_id = {_P} ORDER BY id",
-        (USER_ID,)
+        (_uid(),)
     )
     result = _fetchall(cur)
     conn.close()
@@ -553,7 +579,7 @@ def get_topic_history(topic):
           AND extra_json LIKE {_P}
         ORDER BY id DESC
         LIMIT 5
-    """, (USER_ID, like_pattern))
+    """, (_uid(), like_pattern))
     result = _fetchall(cur)
     conn.close()
     return result
@@ -570,7 +596,7 @@ def log_followup(practice_question, weak_concepts, study_topic=None,
         (user_id, session_id, timestamp, interaction_type, source, study_topic,
          tutorial_section, practice_question, difficulty, extra_json)
         VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
-    """, (USER_ID, _current_session_id or "", datetime.now().isoformat(),
+    """, (_uid(), _sid() or "", datetime.now().isoformat(),
           "followup", "system", study_topic, tutorial_section,
           practice_question, difficulty,
           json.dumps(extra) if extra else None))
@@ -589,7 +615,7 @@ def log_followup_answer(practice_question, user_answer, is_correct, time_taken_s
          tutorial_section, practice_question, user_answer, is_correct,
          time_taken_seconds, answer_text, difficulty)
         VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
-    """, (USER_ID, _current_session_id or "", datetime.now().isoformat(),
+    """, (_uid(), _sid() or "", datetime.now().isoformat(),
           "followup_answer", "user", study_topic, tutorial_section,
           practice_question, user_answer, 1 if is_correct else 0,
           time_taken_seconds, answer_text, difficulty))
@@ -607,7 +633,7 @@ def log_practice_requested(code_context, study_topic=None, tutorial_section=None
         (user_id, session_id, timestamp, interaction_type, study_topic,
          tutorial_section, practice_requested, extra_json)
         VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
-    """, (USER_ID, _current_session_id or "", datetime.now().isoformat(),
+    """, (_uid(), _sid() or "", datetime.now().isoformat(),
           "practice_request", study_topic, tutorial_section, 1,
           json.dumps(extra) if extra else None))
     conn.commit()
@@ -618,13 +644,13 @@ def log_practice_requested(code_context, study_topic=None, tutorial_section=None
 
 def save_message(role, content, session_id=None):
     """Save a coach or user message to the messages table."""
-    sid = session_id or _current_session_id
+    sid = session_id or _sid()
     if not sid:
         return
     conn = get_conn()
     _execute(conn,
         f"INSERT INTO messages (session_id, user_id, role, content) VALUES ({_P}, {_P}, {_P}, {_P})",
-        (sid, USER_ID, role, content)
+        (sid, _uid(), role, content)
     )
     conn.commit()
     conn.close()
@@ -632,7 +658,7 @@ def save_message(role, content, session_id=None):
 
 def get_session_messages(session_id=None):
     """Get all messages for a session."""
-    sid = session_id or _current_session_id
+    sid = session_id or _sid()
     if not sid:
         return []
     conn = get_conn()
@@ -647,13 +673,13 @@ def get_session_messages(session_id=None):
 
 def save_insight(analysis, session_id=None):
     """Save a session analysis insight."""
-    sid = session_id or _current_session_id
+    sid = session_id or _sid()
     if not sid:
         return
     conn = get_conn()
     _execute(conn,
         f"INSERT INTO insights (user_id, session_id, analysis) VALUES ({_P}, {_P}, {_P})",
-        (USER_ID, sid, json.dumps(analysis) if isinstance(analysis, dict) else analysis)
+        (_uid(), sid, json.dumps(analysis) if isinstance(analysis, dict) else analysis)
     )
     conn.commit()
     conn.close()
@@ -665,7 +691,7 @@ def get_recent_insights(limit=3):
     conn = get_conn()
     cur = _execute(conn,
         f"SELECT * FROM insights WHERE user_id = {_P} ORDER BY id DESC LIMIT {_P}",
-        (USER_ID, limit)
+        (_uid(), limit)
     )
     result = _fetchall(cur)
     conn.close()
@@ -674,7 +700,7 @@ def get_recent_insights(limit=3):
 
 def get_last_activity_time(session_id=None):
     """Get the timestamp of the last message in a session."""
-    sid = session_id or _current_session_id
+    sid = session_id or _sid()
     if not sid:
         return None
     conn = get_conn()
