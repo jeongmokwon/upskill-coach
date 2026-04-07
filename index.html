@@ -669,6 +669,69 @@
     from { opacity: 0; transform: translateY(-8px); }
     to { opacity: 1; transform: translateY(0); }
   }
+  /* ── Onboarding screen ── */
+  #onboarding-screen {
+    display: none;
+    position: absolute; inset: 0;
+    background: #0d1117;
+    z-index: 110;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    animation: fadeIn 0.5s ease;
+  }
+  #onboarding-screen.active { display: flex; }
+  #onboarding-screen h1 {
+    color: #e6edf3; font-size: 24px; margin-bottom: 8px; font-weight: 700;
+  }
+  #onboarding-screen .ob-subtitle {
+    color: #8b949e; font-size: 14px; margin-bottom: 32px;
+  }
+  #onboarding-screen .ob-form {
+    width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 20px;
+  }
+  #onboarding-screen .ob-field { display: flex; flex-direction: column; gap: 6px; }
+  #onboarding-screen .ob-field label {
+    color: #c9d1d9; font-size: 13px; font-weight: 600;
+  }
+  #onboarding-screen .ob-field label small {
+    font-weight: 400; color: #8b949e; margin-left: 6px;
+  }
+  #onboarding-screen .ob-field input,
+  #onboarding-screen .ob-field select {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    color: #e6edf3; padding: 10px 14px; font-size: 14px; font-family: inherit;
+    outline: none; transition: border-color 0.2s;
+  }
+  #onboarding-screen .ob-field input:focus,
+  #onboarding-screen .ob-field select:focus {
+    border-color: #1f6feb;
+  }
+  #onboarding-screen .ob-field input::placeholder { color: #484f58; }
+  #onboarding-screen .ob-gauge {
+    display: flex; gap: 6px;
+  }
+  #onboarding-screen .ob-gauge button {
+    width: 36px; height: 36px; border-radius: 8px; border: 1px solid #30363d;
+    background: #161b22; color: #8b949e; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: all 0.15s;
+  }
+  #onboarding-screen .ob-gauge button:hover { border-color: #58a6ff; color: #e6edf3; }
+  #onboarding-screen .ob-gauge button.active {
+    background: #1f6feb; border-color: #1f6feb; color: #fff;
+  }
+  #onboarding-screen .ob-row {
+    display: flex; gap: 16px;
+  }
+  #onboarding-screen .ob-row .ob-field { flex: 1; }
+  #onboarding-screen .ob-submit {
+    margin-top: 8px; padding: 12px 24px; border-radius: 10px; border: none;
+    background: #238636; color: #fff; font-size: 15px; font-weight: 600;
+    font-family: inherit; cursor: pointer; transition: background 0.2s;
+  }
+  #onboarding-screen .ob-submit:hover { background: #2ea043; }
+
   /* ── Quiz screen ── */
   #quiz-screen {
     display: none;
@@ -863,6 +926,48 @@
 </style>
 </head>
 <body>
+  <!-- Onboarding screen (shown for new users in server mode) -->
+  <div id="onboarding-screen">
+    <h1>Welcome to Upskill Coach</h1>
+    <div class="ob-subtitle">Set up your learning profile to get started</div>
+    <div class="ob-form">
+      <div class="ob-field">
+        <label>Your Name</label>
+        <input type="text" id="ob-name" placeholder="e.g., John" autocomplete="off">
+      </div>
+      <div class="ob-field">
+        <label>What are you studying? <small>e.g., Karpathy makemore, PyTorch basics</small></label>
+        <input type="text" id="ob-studying" placeholder="e.g., Karpathy's Let's Build GPT" autocomplete="off">
+      </div>
+      <div class="ob-field">
+        <label>Your Goal <small>e.g., ML 논문 읽고 구현하기</small></label>
+        <input type="text" id="ob-goal" placeholder="e.g., Build ML models from scratch" autocomplete="off">
+      </div>
+      <div class="ob-field">
+        <label>Hint Preference</label>
+        <select id="ob-hint">
+          <option value="hints">Give me hints before I get stuck</option>
+          <option value="solo">Let me figure it out myself</option>
+        </select>
+      </div>
+      <div class="ob-row">
+        <div class="ob-field">
+          <label>Difficulty <small>1 easy · 5 hard</small></label>
+          <div class="ob-gauge" id="ob-difficulty">
+            <button data-val="1">1</button><button data-val="2">2</button><button data-val="3" class="active">3</button><button data-val="4">4</button><button data-val="5">5</button>
+          </div>
+        </div>
+        <div class="ob-field">
+          <label>Condition <small>1 tired · 5 sharp</small></label>
+          <div class="ob-gauge" id="ob-condition">
+            <button data-val="1">1</button><button data-val="2">2</button><button data-val="3" class="active">3</button><button data-val="4">4</button><button data-val="5">5</button>
+          </div>
+        </div>
+      </div>
+      <button class="ob-submit" id="ob-submit">Start Learning →</button>
+    </div>
+  </div>
+
   <!-- Quiz screen (shown during onboarding) -->
   <div id="quiz-screen">
     <div id="quiz-label">What comes in place of <b>?</b></div>
@@ -910,8 +1015,7 @@
   <div id="main-layout">
     <div id="display">
       <div id="waiting">
-        Waiting for terminal...<br>
-        <code>python coach.py</code>
+        Connecting...<br>
       </div>
       <div id="question-label"><span class="q-mode"></span><span class="q-text"></span></div>
       <div id="output"><span class="text"></span><span class="cursor"></span></div>
@@ -1309,6 +1413,11 @@ function connect() {
         contextEl.textContent = msg.study_context;
         break;
 
+      case 'show_onboarding':
+        if (waitingEl) waitingEl.style.display = 'none';
+        document.getElementById('onboarding-screen').classList.add('active');
+        break;
+
       case 'show_quiz':
         if (waitingEl) waitingEl.style.display = 'none';
         showQuiz(msg);
@@ -1316,6 +1425,7 @@ function connect() {
 
       case 'show_code_editor':
         if (waitingEl) waitingEl.style.display = 'none';
+        document.getElementById('onboarding-screen').classList.remove('active');
         document.getElementById('quiz-screen').classList.remove('active');
         showCodeEditor();
         break;
@@ -3129,6 +3239,33 @@ function showQuiz(msg) {
     ws.send(JSON.stringify({ type: 'quiz_continue' }));
   };
 }
+
+// ── Onboarding gauge buttons & submit ──
+document.querySelectorAll('#onboarding-screen .ob-gauge').forEach(gauge => {
+  gauge.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      gauge.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+});
+
+document.getElementById('ob-submit').addEventListener('click', () => {
+  const diffBtn = document.querySelector('#ob-difficulty button.active');
+  const condBtn = document.querySelector('#ob-condition button.active');
+  ws.send(JSON.stringify({
+    type: 'onboarding_submit',
+    name: document.getElementById('ob-name').value.trim(),
+    studying: document.getElementById('ob-studying').value.trim(),
+    goal: document.getElementById('ob-goal').value.trim(),
+    hint_preference: document.getElementById('ob-hint').value,
+    difficulty: diffBtn ? parseInt(diffBtn.dataset.val) : 3,
+    condition: condBtn ? parseInt(condBtn.dataset.val) : 3,
+  }));
+  // Screen will be hidden when server sends show_code_editor
+  document.getElementById('ob-submit').textContent = 'Setting up...';
+  document.getElementById('ob-submit').disabled = true;
+});
 
 connect();
 </script>

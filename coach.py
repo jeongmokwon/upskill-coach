@@ -90,16 +90,20 @@ async def ws_handler(websocket):
 
     # Send current state to newly connected client
     try:
-        study_ctx = user_profile.get("studying", "") if user_profile else ""
-        await websocket.send(json.dumps({"type": "connected", "study_context": study_ctx}))
-        if user_profile:
-            await websocket.send(json.dumps({
-                "type": "init_settings",
-                "difficulty": user_profile.get("difficulty", 3),
-                "condition": user_profile.get("user_condition", 3),
-            }))
-        if IS_SERVER:
-            await websocket.send(json.dumps({"type": "show_code_editor"}))
+        if IS_SERVER and not user_profile:
+            # No profile yet — show onboarding form in browser
+            await websocket.send(json.dumps({"type": "show_onboarding"}))
+        else:
+            study_ctx = user_profile.get("studying", "") if user_profile else ""
+            await websocket.send(json.dumps({"type": "connected", "study_context": study_ctx}))
+            if user_profile:
+                await websocket.send(json.dumps({
+                    "type": "init_settings",
+                    "difficulty": user_profile.get("difficulty", 3),
+                    "condition": user_profile.get("user_condition", 3),
+                }))
+            if IS_SERVER:
+                await websocket.send(json.dumps({"type": "show_code_editor"}))
     except Exception:
         pass
 
@@ -193,6 +197,12 @@ async def ws_handler(websocket):
                 elif msg_type == "chat_message":
                     threading.Thread(
                         target=handle_chat_message,
+                        args=(msg,),
+                        daemon=True,
+                    ).start()
+                elif msg_type == "onboarding_submit":
+                    threading.Thread(
+                        target=handle_onboarding_submit,
                         args=(msg,),
                         daemon=True,
                     ).start()
@@ -607,7 +617,7 @@ def onboard_user():
 
 
 def _onboard_server():
-    """Server-mode onboarding: no terminal input, use defaults or existing profile."""
+    """Server-mode onboarding: load existing profile or wait for browser onboarding."""
     global user_profile
     default_name = os.environ.get("DEFAULT_USER", "learner")
 
@@ -618,29 +628,68 @@ def _onboard_server():
         print(f"  [Server] Loaded profile: {profile['user_name']}")
         return profile
 
-    # Create default profile
-    uid = db.create_user_profile(
-        default_name,
-        goal="Learn ML/AI",
-        background="",
-        studying="Karpathy's Let's Build GPT",
-        hint_preference="hints",
-        difficulty=3,
-        user_condition=3,
-    )
-    db.set_user_id(uid)
-    user_profile = {
-        "user_id": uid,
-        "user_name": default_name,
-        "goal": "Learn ML/AI",
-        "background": "",
-        "studying": "Karpathy's Let's Build GPT",
-        "hint_preference": "hints",
-        "difficulty": 3,
-        "user_condition": 3,
-    }
-    print(f"  [Server] Created default profile: {default_name}")
-    return user_profile
+    # No profile yet — browser will handle onboarding
+    print("  [Server] No profile found — waiting for browser onboarding")
+    user_profile = {}
+    return None
+
+
+def handle_onboarding_submit(msg):
+    """Handle onboarding form submission from browser."""
+    global user_profile, current_study_topic
+    name = msg.get("name", "").strip() or "learner"
+    studying = msg.get("studying", "").strip() or "ML/AI"
+    goal = msg.get("goal", "").strip() or "Learn and grow"
+    hint_preference = msg.get("hint_preference", "hints")
+    difficulty = int(msg.get("difficulty", 3))
+    condition = int(msg.get("condition", 3))
+
+    # Check if user already exists (returning user from another browser)
+    profile = db.get_user_profile(name)
+    if profile:
+        db.set_user_id(profile["user_id"])
+        # Update with new session settings
+        db.update_user_profile(
+            profile["user_id"],
+            studying=studying, difficulty=difficulty, user_condition=condition,
+        )
+        profile["studying"] = studying
+        profile["difficulty"] = difficulty
+        profile["user_condition"] = condition
+        user_profile = profile
+    else:
+        uid = db.create_user_profile(
+            name, goal=goal, background="", studying=studying,
+            hint_preference=hint_preference, difficulty=difficulty,
+            user_condition=condition,
+        )
+        db.set_user_id(uid)
+        user_profile = {
+            "user_id": uid, "user_name": name, "goal": goal,
+            "background": "", "studying": studying,
+            "hint_preference": hint_preference,
+            "difficulty": difficulty, "user_condition": condition,
+        }
+
+    current_study_topic = studying
+
+    # Start DB session
+    db.start_session(study_topic=studying)
+    db.touch_activity()
+
+    # Extract teaching style from previous sessions
+    extract_teaching_style()
+
+    print(f"  [Server] Onboarded: {name} — studying: {studying}")
+
+    # Send state to all connected clients
+    broadcast({"type": "connected", "study_context": studying})
+    broadcast({
+        "type": "init_settings",
+        "difficulty": difficulty,
+        "condition": condition,
+    })
+    broadcast({"type": "show_code_editor"})
 
 
 def _ask_difficulty_condition(default_diff=3, default_cond=3):
@@ -2842,6 +2891,26 @@ def main():
     # Onboarding — ask name, load/create profile, ask what they're studying
     onboard_user()
 
+    if IS_SERVER:
+        # Server mode: browser handles onboarding if no profile
+        if user_profile:
+            # Returning user — start session right away
+            study_context = user_profile.get("studying", "")
+            db.start_session(study_topic=study_context)
+            db.touch_activity()
+            global current_study_topic
+            current_study_topic = study_context
+            extract_teaching_style()
+        # else: handle_onboarding_submit() will do this when browser submits
+
+        print(f"🌐 Server mode — HTTP + WS on {BIND_HOST}:{HTTP_PORT}")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+        return
+
     study_context = user_profile.get("studying", "")
 
     broadcast({"type": "connected", "study_context": study_context})
@@ -2850,21 +2919,10 @@ def main():
     db.start_session(study_topic=study_context)
     db.touch_activity()
 
-    global current_study_topic
     current_study_topic = study_context
 
     # Extract teaching style from previous sessions
     extract_teaching_style()
-
-    if IS_SERVER:
-        # Server mode: no terminal, just serve WebSocket/HTTP and wait
-        print(f"🌐 Server mode — HTTP + WS on {BIND_HOST}:{HTTP_PORT}")
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            pass
-        return
 
     # Send onboarding quiz to browser (wait for browser connection)
     print("  [Quiz] Waiting for browser connection...")
