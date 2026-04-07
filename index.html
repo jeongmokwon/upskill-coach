@@ -1468,7 +1468,7 @@ const SESSION_ID = getSessionId();
 
 function connect() {
   const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${wsProto}//${location.host}`);
+  ws = new WebSocket(`${wsProto}//${location.host}/ws`);
 
   ws.onopen = () => { dot.classList.add('on'); };
   ws.onclose = () => { dot.classList.remove('on'); setTimeout(connect, 2000); };

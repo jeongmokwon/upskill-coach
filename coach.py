@@ -269,24 +269,24 @@ def _http_handler(connection, request):
     from websockets.http11 import Response
     from websockets.datastructures import Headers
 
-    # WebSocket upgrade detection — use .get() for safety with proxy headers
-    upgrade = request.headers.get("Upgrade", "").lower()
-    conn_header = request.headers.get("Connection", "").lower()
-    if "websocket" in upgrade or "upgrade" in conn_header:
-        return None  # Let websockets handle the upgrade
-
     path = request.path
 
-    # Only serve requests that look like static file paths
-    # (have a file extension or are explicitly "/")
+    # Dedicated WebSocket path — always pass through
+    if path == "/ws":
+        return None
+
+    # Also check Upgrade header for any path
+    upgrade = request.headers.get("Upgrade", "").lower()
+    if "websocket" in upgrade:
+        return None
+
+    # Serve static files
     if path == "/" or path == "":
         file_path = os.path.join(PROJECT_DIR, "index.html")
     elif "." in path.split("/")[-1]:
-        # Has file extension — treat as static file request
         file_path = os.path.join(PROJECT_DIR, path.lstrip("/"))
     else:
-        # No extension, not root — likely a WebSocket or unknown request
-        return None
+        return None  # Unknown path → pass to WS
 
     if os.path.isfile(file_path):
         content_type, _ = mimetypes.guess_type(file_path)
@@ -313,11 +313,16 @@ def start_ws_server():
             await asyncio.Future()
 
     def _thread():
-        asyncio.set_event_loop(ws_loop)
-        ws_loop.run_until_complete(_run())
+        try:
+            asyncio.set_event_loop(ws_loop)
+            ws_loop.run_until_complete(_run())
+        except Exception as e:
+            print(f"❌ WebSocket server crashed: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
 
     threading.Thread(target=_thread, daemon=True).start()
-    print(f"🌐 Browser UI: http://{BIND_HOST}:{HTTP_PORT}")
+    print(f"🌐 Browser UI: http://{BIND_HOST}:{HTTP_PORT}", flush=True)
 
 # ─── Audio/Screen ─────────────────────────────────────────────────────
 recording = False
