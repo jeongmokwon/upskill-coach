@@ -74,7 +74,8 @@ ws_loop = None
 class ClientCtx:
     """Per-WebSocket-connection session state."""
     __slots__ = ("ws", "user_id", "user_profile", "study_topic",
-                 "section_id", "followups_stopped", "db_session_id")
+                 "section_id", "followups_stopped", "db_session_id",
+                 "teaching_style")
 
     def __init__(self, ws):
         self.ws = ws
@@ -84,6 +85,7 @@ class ClientCtx:
         self.section_id = ""
         self.followups_stopped = False
         self.db_session_id = ""
+        self.teaching_style = {}
 
 
 # Map websocket → ClientCtx
@@ -496,9 +498,9 @@ IMPORTANT — ADAPTIVE TEACHING RULES:
 
 def _build_teaching_style_block():
     """Build teaching style block from extracted style."""
-    if not _teaching_style:
+    style = _ctx().teaching_style or _teaching_style
+    if not style:
         return ""
-    style = _teaching_style
     return f"""Based on insights, this user responds best to:
 - Explanation style: {style.get('explanation_style', 'N/A')}
 - Pacing: {style.get('pacing', 'N/A')}
@@ -1788,7 +1790,8 @@ def handle_chat_init(msg):
 
     # Teaching style block
     style_text = ""
-    if _teaching_style:
+    cur_style = _ctx().teaching_style or _teaching_style
+    if cur_style:
         style_text = "\n\n## OPTIMIZED TEACHING STYLE\n" + _build_teaching_style_block()
 
     _chat_state["system"] = (
@@ -1879,7 +1882,7 @@ _teaching_style = {}  # Extracted from previous insights at session start
 
 def extract_teaching_style():
     """At session start, fetch recent insights and extract optimal teaching style via API."""
-    global _teaching_style
+    global _teaching_style  # kept for terminal mode fallback
     recent = db.get_recent_insights(3)
     if not recent:
         print("  [Style] No previous insights found — using defaults")
@@ -1939,8 +1942,10 @@ def extract_teaching_style():
                         break
             if end_pos > 0:
                 raw = raw[:end_pos]
-            _teaching_style = json.loads(raw)
-            print(f"  [Style] Extracted: {json.dumps(_teaching_style, ensure_ascii=False)[:120]}")
+            parsed_style = json.loads(raw)
+            _teaching_style = parsed_style  # global fallback for terminal
+            _ctx().teaching_style = parsed_style  # per-connection
+            print(f"  [Style] Extracted: {json.dumps(parsed_style, ensure_ascii=False)[:120]}")
             return
         except Exception as e:
             if "overloaded" in str(e).lower() and attempt < 1:
