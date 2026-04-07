@@ -475,9 +475,15 @@ import re as _re
 
 
 
+IS_SERVER = bool(os.environ.get("RENDER") or os.environ.get("BIND_HOST") == "0.0.0.0")
+
+
 def onboard_user():
     """Ask for user name, load or create profile. Returns profile dict."""
     global user_profile
+
+    if IS_SERVER:
+        return _onboard_server()
 
     print("\n👋 Welcome! What's your name?")
     name = input("📝 : ").strip()
@@ -554,8 +560,48 @@ def onboard_user():
     return user_profile
 
 
+def _onboard_server():
+    """Server-mode onboarding: no terminal input, use defaults or existing profile."""
+    global user_profile
+    default_name = os.environ.get("DEFAULT_USER", "learner")
+
+    profile = db.get_user_profile(default_name)
+    if profile:
+        db.set_user_id(profile["user_id"])
+        user_profile = profile
+        print(f"  [Server] Loaded profile: {profile['user_name']}")
+        return profile
+
+    # Create default profile
+    uid = db.create_user_profile(
+        default_name,
+        goal="Learn ML/AI",
+        background="",
+        studying="Karpathy's Let's Build GPT",
+        hint_preference="hints",
+        difficulty=3,
+        user_condition=3,
+    )
+    db.set_user_id(uid)
+    user_profile = {
+        "user_id": uid,
+        "user_name": default_name,
+        "goal": "Learn ML/AI",
+        "background": "",
+        "studying": "Karpathy's Let's Build GPT",
+        "hint_preference": "hints",
+        "difficulty": 3,
+        "user_condition": 3,
+    }
+    print(f"  [Server] Created default profile: {default_name}")
+    return user_profile
+
+
 def _ask_difficulty_condition(default_diff=3, default_cond=3):
     """Ask user for difficulty and condition gauges at session start."""
+    if IS_SERVER:
+        return default_diff, default_cond
+
     print(f"\n📊 Set your learning preferences for this session:")
     print(f"   Difficulty (1=easy … 5=hard) [current: {default_diff}]")
     d = input("📝 : ").strip()
@@ -2763,6 +2809,17 @@ def main():
 
     # Extract teaching style from previous sessions
     extract_teaching_style()
+
+    if IS_SERVER:
+        # Server mode: no terminal, just serve WebSocket/HTTP and wait
+        print(f"🌐 Server mode — listening on {BIND_HOST}:{HTTP_PORT}")
+        print(f"   WebSocket on {BIND_HOST}:{WS_PORT}")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            pass
+        return
 
     # Send onboarding quiz to browser (wait for browser connection)
     print("  [Quiz] Waiting for browser connection...")
