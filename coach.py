@@ -271,6 +271,10 @@ def _http_handler(connection, request):
 
     path = request.path
 
+    # Health check endpoint for Render
+    if path == "/health":
+        return Response(200, "OK", Headers([("Content-Type", "text/plain")]), b"ok")
+
     # Dedicated WebSocket path — always pass through
     if path == "/ws":
         return None
