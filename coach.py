@@ -263,22 +263,30 @@ class _IndexHandler(http.server.SimpleHTTPRequestHandler):
 
 def _http_handler(connection, request):
     """Serve static files for non-WebSocket requests (same port).
-    websockets v16 signature: process_request(connection, request) -> Response | None
+    websockets process_request(connection, request) -> Response | None
     """
     import mimetypes
     from websockets.http11 import Response
     from websockets.datastructures import Headers
 
-    # WebSocket upgrade requests → return None to let websockets handle
-    if "Upgrade" in request.headers and request.headers["Upgrade"].lower() == "websocket":
-        return None
+    # WebSocket upgrade detection — use .get() for safety with proxy headers
+    upgrade = request.headers.get("Upgrade", "").lower()
+    conn_header = request.headers.get("Connection", "").lower()
+    if "websocket" in upgrade or "upgrade" in conn_header:
+        return None  # Let websockets handle the upgrade
 
     path = request.path
-    # Serve static files
+
+    # Only serve requests that look like static file paths
+    # (have a file extension or are explicitly "/")
     if path == "/" or path == "":
         file_path = os.path.join(PROJECT_DIR, "index.html")
-    else:
+    elif "." in path.split("/")[-1]:
+        # Has file extension — treat as static file request
         file_path = os.path.join(PROJECT_DIR, path.lstrip("/"))
+    else:
+        # No extension, not root — likely a WebSocket or unknown request
+        return None
 
     if os.path.isfile(file_path):
         content_type, _ = mimetypes.guess_type(file_path)

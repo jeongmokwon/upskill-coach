@@ -1,5 +1,5 @@
 anthropic
 openai
-websockets
+websockets>=14.0
 numpy
 psycopg2-binary
