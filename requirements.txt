@@ -1,0 +1,5 @@
+anthropic
+openai
+websockets
+numpy
+psycopg2-binary

@@ -1,112 +1,223 @@
 """
-SQLite database for tracking user interactions, practice results, and sessions.
+PostgreSQL/SQLite database for tracking user interactions, practice results, and sessions.
+Uses DATABASE_URL env var for PostgreSQL (Render), falls back to SQLite locally.
 """
 
-import sqlite3
 import os
 import time
 import json
 import uuid
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "upskill_coach.db")
+# ─── Connection setup ────────────────────────────────────────────────
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if DATABASE_URL:
+    # PostgreSQL (Render)
+    import psycopg2
+    import psycopg2.extras
+
+    def get_conn():
+        conn = psycopg2.connect(DATABASE_URL)
+        conn.autocommit = False
+        return conn
+
+    def _fetchone(cursor):
+        cols = [desc[0] for desc in cursor.description] if cursor.description else []
+        row = cursor.fetchone()
+        return dict(zip(cols, row)) if row else None
+
+    def _fetchall(cursor):
+        cols = [desc[0] for desc in cursor.description] if cursor.description else []
+        return [dict(zip(cols, r)) for r in cursor.fetchall()]
+
+    DB_TYPE = "postgres"
+else:
+    # SQLite (local development)
+    import sqlite3
+
+    DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "upskill_coach.db")
+
+    def get_conn():
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
+
+    def _fetchone(cursor):
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+    def _fetchall(cursor):
+        return [dict(r) for r in cursor.fetchall()]
+
+    DB_TYPE = "sqlite"
+
+
 USER_ID = "jeongmo"  # default, overridden by onboarding
 
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+def _execute(conn, sql, params=None):
+    """Execute SQL, handling syntax differences between SQLite and PostgreSQL."""
+    cur = conn.cursor()
+    cur.execute(sql, params or ())
+    return cur
 
 
 def init_db():
     """Create tables if they don't exist."""
     conn = get_conn()
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS sessions (
-            session_id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            study_topic TEXT,
-            start_time TEXT NOT NULL,
-            end_time TEXT
-        );
 
-        CREATE TABLE IF NOT EXISTS user_state (
-            user_id TEXT PRIMARY KEY,
-            last_session_start_time TEXT,
-            last_session_end_time TEXT,
-            current_session_id TEXT
-        );
+    if DB_TYPE == "postgres":
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                study_topic TEXT,
+                start_time TEXT NOT NULL,
+                end_time TEXT
+            );
 
-        CREATE TABLE IF NOT EXISTS interactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,
-            session_id TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            interaction_type TEXT NOT NULL,
-            source TEXT NOT NULL DEFAULT 'user',
-            study_topic TEXT,
-            tutorial_section TEXT,
-            question_text TEXT,
-            answer_text TEXT,
-            practice_question TEXT,
-            user_answer TEXT,
-            is_correct INTEGER,
-            time_taken_seconds REAL,
-            practice_requested INTEGER,
-            skipped INTEGER DEFAULT 0,
-            difficulty TEXT,
-            extra_json TEXT
-        );
+            CREATE TABLE IF NOT EXISTS user_state (
+                user_id TEXT PRIMARY KEY,
+                last_session_start_time TEXT,
+                last_session_end_time TEXT,
+                current_session_id TEXT
+            );
 
-        CREATE TABLE IF NOT EXISTS messages (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT NOT NULL,
-            user_id TEXT NOT NULL,
-            role TEXT NOT NULL,
-            content TEXT NOT NULL,
-            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
+            CREATE TABLE IF NOT EXISTS interactions (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                interaction_type TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'user',
+                study_topic TEXT,
+                tutorial_section TEXT,
+                question_text TEXT,
+                answer_text TEXT,
+                practice_question TEXT,
+                user_answer TEXT,
+                is_correct INTEGER,
+                time_taken_seconds REAL,
+                practice_requested INTEGER,
+                skipped INTEGER DEFAULT 0,
+                difficulty TEXT,
+                extra_json TEXT
+            );
 
-        CREATE TABLE IF NOT EXISTS insights (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id TEXT NOT NULL,
-            session_id TEXT NOT NULL,
-            analysis JSON,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        );
+            CREATE TABLE IF NOT EXISTS messages (
+                id SERIAL PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
 
-        CREATE TABLE IF NOT EXISTS user_profiles (
-            user_id TEXT PRIMARY KEY,
-            user_name TEXT NOT NULL,
-            goal TEXT DEFAULT '',
-            background TEXT DEFAULT '',
-            studying TEXT DEFAULT '',
-            hint_preference TEXT DEFAULT 'hints',
-            difficulty INTEGER DEFAULT 3,
-            user_condition INTEGER DEFAULT 3,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        );
-    """)
-    # Migrate: add columns if missing on existing DBs
-    try:
-        conn.execute("ALTER TABLE user_profiles ADD COLUMN difficulty INTEGER DEFAULT 3")
-    except Exception:
-        pass
-    try:
-        conn.execute("ALTER TABLE user_profiles ADD COLUMN user_condition INTEGER DEFAULT 3")
-    except Exception:
-        pass
-    try:
-        conn.execute("ALTER TABLE user_profiles ADD COLUMN studying TEXT DEFAULT ''")
-    except Exception:
-        pass
-    try:
-        conn.execute("ALTER TABLE user_profiles ADD COLUMN hint_preference TEXT DEFAULT 'hints'")
-    except Exception:
-        pass
+            CREATE TABLE IF NOT EXISTS insights (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                analysis TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                user_id TEXT PRIMARY KEY,
+                user_name TEXT NOT NULL,
+                goal TEXT DEFAULT '',
+                background TEXT DEFAULT '',
+                studying TEXT DEFAULT '',
+                hint_preference TEXT DEFAULT 'hints',
+                difficulty INTEGER DEFAULT 3,
+                user_condition INTEGER DEFAULT 3,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        """)
+        conn.commit()
+    else:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                study_topic TEXT,
+                start_time TEXT NOT NULL,
+                end_time TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS user_state (
+                user_id TEXT PRIMARY KEY,
+                last_session_start_time TEXT,
+                last_session_end_time TEXT,
+                current_session_id TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS interactions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                interaction_type TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'user',
+                study_topic TEXT,
+                tutorial_section TEXT,
+                question_text TEXT,
+                answer_text TEXT,
+                practice_question TEXT,
+                user_answer TEXT,
+                is_correct INTEGER,
+                time_taken_seconds REAL,
+                practice_requested INTEGER,
+                skipped INTEGER DEFAULT 0,
+                difficulty TEXT,
+                extra_json TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS insights (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                session_id TEXT NOT NULL,
+                analysis JSON,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS user_profiles (
+                user_id TEXT PRIMARY KEY,
+                user_name TEXT NOT NULL,
+                goal TEXT DEFAULT '',
+                background TEXT DEFAULT '',
+                studying TEXT DEFAULT '',
+                hint_preference TEXT DEFAULT 'hints',
+                difficulty INTEGER DEFAULT 3,
+                user_condition INTEGER DEFAULT 3,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+        """)
+        # Migrate: add columns if missing on existing SQLite DBs
+        for col, default in [
+            ("difficulty", "INTEGER DEFAULT 3"),
+            ("user_condition", "INTEGER DEFAULT 3"),
+            ("studying", "TEXT DEFAULT ''"),
+            ("hint_preference", "TEXT DEFAULT 'hints'"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {default}")
+            except Exception:
+                pass
+
     conn.commit()
     conn.close()
 
@@ -120,12 +231,14 @@ def set_user_id(uid):
 def get_user_profile(user_name):
     """Look up a user profile by name (case-insensitive). Returns dict or None."""
     conn = get_conn()
-    row = conn.execute(
-        "SELECT * FROM user_profiles WHERE LOWER(user_name) = LOWER(?)",
+    cur = _execute(conn,
+        "SELECT * FROM user_profiles WHERE LOWER(user_name) = LOWER(%s)" if DB_TYPE == "postgres"
+        else "SELECT * FROM user_profiles WHERE LOWER(user_name) = LOWER(?)",
         (user_name,)
-    ).fetchone()
+    )
+    result = _fetchone(cur)
     conn.close()
-    return dict(row) if row else None
+    return result
 
 
 def create_user_profile(user_name, goal="", background="", studying="", hint_preference="hints", difficulty=3, user_condition=3):
@@ -133,11 +246,23 @@ def create_user_profile(user_name, goal="", background="", studying="", hint_pre
     uid = user_name.lower().replace(" ", "_")
     now = datetime.now().isoformat()
     conn = get_conn()
-    conn.execute("""
-        INSERT OR REPLACE INTO user_profiles
-        (user_id, user_name, goal, background, studying, hint_preference, difficulty, user_condition, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (uid, user_name, goal, background, studying, hint_preference, difficulty, user_condition, now, now))
+    if DB_TYPE == "postgres":
+        _execute(conn, """
+            INSERT INTO user_profiles
+            (user_id, user_name, goal, background, studying, hint_preference, difficulty, user_condition, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (user_id) DO UPDATE SET
+                user_name=EXCLUDED.user_name, goal=EXCLUDED.goal, background=EXCLUDED.background,
+                studying=EXCLUDED.studying, hint_preference=EXCLUDED.hint_preference,
+                difficulty=EXCLUDED.difficulty, user_condition=EXCLUDED.user_condition,
+                updated_at=EXCLUDED.updated_at
+        """, (uid, user_name, goal, background, studying, hint_preference, difficulty, user_condition, now, now))
+    else:
+        _execute(conn, """
+            INSERT OR REPLACE INTO user_profiles
+            (user_id, user_name, goal, background, studying, hint_preference, difficulty, user_condition, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (uid, user_name, goal, background, studying, hint_preference, difficulty, user_condition, now, now))
     conn.commit()
     conn.close()
     return uid
@@ -150,12 +275,20 @@ def update_user_profile(user_id, **kwargs):
     if not updates:
         return
     updates["updated_at"] = datetime.now().isoformat()
-    set_clause = ", ".join(f"{k} = ?" for k in updates)
-    conn = get_conn()
-    conn.execute(
-        f"UPDATE user_profiles SET {set_clause} WHERE user_id = ?",
-        list(updates.values()) + [user_id]
-    )
+    if DB_TYPE == "postgres":
+        set_clause = ", ".join(f"{k} = %s" for k in updates)
+        conn = get_conn()
+        _execute(conn,
+            f"UPDATE user_profiles SET {set_clause} WHERE user_id = %s",
+            list(updates.values()) + [user_id]
+        )
+    else:
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        conn = get_conn()
+        _execute(conn,
+            f"UPDATE user_profiles SET {set_clause} WHERE user_id = ?",
+            list(updates.values()) + [user_id]
+        )
     conn.commit()
     conn.close()
 
@@ -163,6 +296,9 @@ def update_user_profile(user_id, **kwargs):
 # ─── Session management ───────────────────────────────────────────
 
 _current_session_id = None
+
+# Placeholder for parameterized queries
+_P = "%s" if DATABASE_URL else "?"
 
 
 def start_session(study_topic=""):
@@ -174,34 +310,43 @@ def start_session(study_topic=""):
     conn = get_conn()
 
     # Migrate: move current → last
-    row = conn.execute(
-        "SELECT current_session_id FROM user_state WHERE user_id = ?", (USER_ID,)
-    ).fetchone()
+    cur = _execute(conn,
+        f"SELECT current_session_id FROM user_state WHERE user_id = {_P}", (USER_ID,)
+    )
+    row = _fetchone(cur)
 
     if row and row["current_session_id"]:
         prev_sid = row["current_session_id"]
-        prev_session = conn.execute(
-            "SELECT start_time, end_time FROM sessions WHERE session_id = ?", (prev_sid,)
-        ).fetchone()
+        cur2 = _execute(conn,
+            f"SELECT start_time, end_time FROM sessions WHERE session_id = {_P}", (prev_sid,)
+        )
+        prev_session = _fetchone(cur2)
         if prev_session:
-            conn.execute("""
+            _execute(conn, f"""
                 UPDATE user_state SET
-                    last_session_start_time = ?,
-                    last_session_end_time = ?,
-                    current_session_id = ?
-                WHERE user_id = ?
+                    last_session_start_time = {_P},
+                    last_session_end_time = {_P},
+                    current_session_id = {_P}
+                WHERE user_id = {_P}
             """, (prev_session["start_time"], prev_session["end_time"] or now,
                   _current_session_id, USER_ID))
     else:
-        conn.execute("""
-            INSERT OR REPLACE INTO user_state (user_id, current_session_id)
-            VALUES (?, ?)
-        """, (USER_ID, _current_session_id))
+        if DB_TYPE == "postgres":
+            _execute(conn, f"""
+                INSERT INTO user_state (user_id, current_session_id)
+                VALUES ({_P}, {_P})
+                ON CONFLICT (user_id) DO UPDATE SET current_session_id = EXCLUDED.current_session_id
+            """, (USER_ID, _current_session_id))
+        else:
+            _execute(conn, """
+                INSERT OR REPLACE INTO user_state (user_id, current_session_id)
+                VALUES (?, ?)
+            """, (USER_ID, _current_session_id))
 
     # Create new session row
-    conn.execute("""
+    _execute(conn, f"""
         INSERT INTO sessions (session_id, user_id, study_topic, start_time)
-        VALUES (?, ?, ?, ?)
+        VALUES ({_P}, {_P}, {_P}, {_P})
     """, (_current_session_id, USER_ID, study_topic, now))
 
     conn.commit()
@@ -218,8 +363,8 @@ def end_session():
 
     now = datetime.now().isoformat()
     conn = get_conn()
-    conn.execute(
-        "UPDATE sessions SET end_time = ? WHERE session_id = ?",
+    _execute(conn,
+        f"UPDATE sessions SET end_time = {_P} WHERE session_id = {_P}",
         (now, _current_session_id)
     )
     conn.commit()
@@ -247,21 +392,20 @@ def touch_activity():
     if _last_activity_time and _current_session_id:
         gap = (now - _last_activity_time).total_seconds()
         if gap >= IDLE_THRESHOLD_SECONDS:
-            # Log a pause at the old time and resume now
             conn = get_conn()
-            conn.execute("""
+            _execute(conn, f"""
                 INSERT INTO interactions
                 (user_id, session_id, timestamp, interaction_type, source,
                  study_topic, extra_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
             """, (USER_ID, _current_session_id, _last_activity_time.isoformat(),
                   "session_pause", "system", None,
                   json.dumps({"idle_seconds": round(gap)})))
-            conn.execute("""
+            _execute(conn, f"""
                 INSERT INTO interactions
                 (user_id, session_id, timestamp, interaction_type, source,
                  study_topic, extra_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
             """, (USER_ID, _current_session_id, now.isoformat(),
                   "session_resume", "system", None,
                   json.dumps({"idle_seconds": round(gap)})))
@@ -273,15 +417,13 @@ def touch_activity():
 
 
 def mark_pending_followups_skipped():
-    """Mark any unanswered followups as skipped.
-    A followup is 'pending' if it has no matching followup_answer after it."""
+    """Mark any unanswered followups as skipped."""
     if not _current_session_id:
         return
     conn = get_conn()
-    # Find followup IDs that were never answered
-    rows = conn.execute("""
+    cur = _execute(conn, f"""
         SELECT f.id, f.practice_question FROM interactions f
-        WHERE f.session_id = ?
+        WHERE f.session_id = {_P}
           AND f.interaction_type = 'followup'
           AND f.skipped = 0
           AND f.user_answer IS NULL
@@ -292,12 +434,17 @@ def mark_pending_followups_skipped():
                 AND a.practice_question = f.practice_question
                 AND a.id > f.id
           )
-    """, (_current_session_id,)).fetchall()
+    """, (_current_session_id,))
+    rows = _fetchall(cur)
 
     if rows:
         ids = [r["id"] for r in rows]
-        conn.execute(
-            f"UPDATE interactions SET skipped = 1 WHERE id IN ({','.join('?' * len(ids))})",
+        if DB_TYPE == "postgres":
+            placeholders = ','.join(['%s'] * len(ids))
+        else:
+            placeholders = ','.join(['?'] * len(ids))
+        _execute(conn,
+            f"UPDATE interactions SET skipped = 1 WHERE id IN ({placeholders})",
             ids
         )
         conn.commit()
@@ -310,11 +457,11 @@ def mark_pending_followups_skipped():
 def log_question(question_text, answer_text, tutorial_section=None, study_topic=None):
     """Log a Q&A interaction (terminal question → Claude answer)."""
     conn = get_conn()
-    conn.execute("""
+    _execute(conn, f"""
         INSERT INTO interactions
         (user_id, session_id, timestamp, interaction_type, study_topic,
          tutorial_section, question_text, answer_text)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
     """, (USER_ID, _current_session_id or "", datetime.now().isoformat(),
           "question", study_topic, tutorial_section, question_text, answer_text))
     conn.commit()
@@ -325,7 +472,6 @@ def log_practice(practice_question, user_answer, is_correct, time_taken_seconds,
                  study_topic=None, tutorial_section=None, code_context=None,
                  answer_text=None, difficulty=None, practice_topic=None):
     """Log a practice question attempt."""
-    import json as _json
     extra = {}
     if code_context:
         extra["code_context"] = code_context
@@ -334,17 +480,17 @@ def log_practice(practice_question, user_answer, is_correct, time_taken_seconds,
     extra = extra or None
 
     conn = get_conn()
-    conn.execute("""
+    _execute(conn, f"""
         INSERT INTO interactions
         (user_id, session_id, timestamp, interaction_type, study_topic,
          tutorial_section, practice_question, user_answer, is_correct,
          time_taken_seconds, answer_text, difficulty, extra_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
     """, (USER_ID, _current_session_id or "", datetime.now().isoformat(),
           "practice", study_topic, tutorial_section, practice_question,
           user_answer, 1 if is_correct else 0, time_taken_seconds,
           answer_text, difficulty,
-          _json.dumps(extra) if extra else None))
+          json.dumps(extra) if extra else None))
     conn.commit()
     conn.close()
 
@@ -355,58 +501,60 @@ def get_session_interactions(session_id=None):
     if not sid:
         return []
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT * FROM interactions WHERE session_id = ? ORDER BY id",
+    cur = _execute(conn,
+        f"SELECT * FROM interactions WHERE session_id = {_P} ORDER BY id",
         (sid,)
-    ).fetchall()
+    )
+    result = _fetchall(cur)
     conn.close()
-    return [dict(r) for r in rows]
+    return result
 
 
 def get_all_user_interactions():
     """Get ALL interactions for the user across all sessions, ordered by id."""
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT * FROM interactions WHERE user_id = ? ORDER BY id",
+    cur = _execute(conn,
+        f"SELECT * FROM interactions WHERE user_id = {_P} ORDER BY id",
         (USER_ID,)
-    ).fetchall()
+    )
+    result = _fetchall(cur)
     conn.close()
-    return [dict(r) for r in rows]
+    return result
 
 
 def get_topic_history(topic):
-    """Get the most recent graded interactions for a topic across ALL sessions.
-    Returns list of dicts with is_correct and difficulty, most recent first."""
+    """Get the most recent graded interactions for a topic across ALL sessions."""
     conn = get_conn()
-    rows = conn.execute("""
+    like_pattern = f'%"practice_topic": "{topic}"%'
+    cur = _execute(conn, f"""
         SELECT is_correct, difficulty, extra_json FROM interactions
-        WHERE user_id = ?
+        WHERE user_id = {_P}
           AND interaction_type IN ('practice', 'followup_answer')
           AND user_answer IS NOT NULL
-          AND extra_json LIKE ?
+          AND extra_json LIKE {_P}
         ORDER BY id DESC
         LIMIT 5
-    """, (USER_ID, f'%"practice_topic": "{topic}"%')).fetchall()
+    """, (USER_ID, like_pattern))
+    result = _fetchall(cur)
     conn.close()
-    return [dict(r) for r in rows]
+    return result
 
 
 def log_followup(practice_question, weak_concepts, study_topic=None,
                  tutorial_section=None, difficulty=None):
     """Log a system-generated follow-up question."""
-    import json as _json
     extra = {"weak_concepts": weak_concepts} if weak_concepts else None
 
     conn = get_conn()
-    conn.execute("""
+    _execute(conn, f"""
         INSERT INTO interactions
         (user_id, session_id, timestamp, interaction_type, source, study_topic,
          tutorial_section, practice_question, difficulty, extra_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
     """, (USER_ID, _current_session_id or "", datetime.now().isoformat(),
           "followup", "system", study_topic, tutorial_section,
           practice_question, difficulty,
-          _json.dumps(extra) if extra else None))
+          json.dumps(extra) if extra else None))
     conn.commit()
     conn.close()
 
@@ -416,12 +564,12 @@ def log_followup_answer(practice_question, user_answer, is_correct, time_taken_s
                         difficulty=None):
     """Log user's answer to a system-generated follow-up."""
     conn = get_conn()
-    conn.execute("""
+    _execute(conn, f"""
         INSERT INTO interactions
         (user_id, session_id, timestamp, interaction_type, source, study_topic,
          tutorial_section, practice_question, user_answer, is_correct,
          time_taken_seconds, answer_text, difficulty)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
     """, (USER_ID, _current_session_id or "", datetime.now().isoformat(),
           "followup_answer", "user", study_topic, tutorial_section,
           practice_question, user_answer, 1 if is_correct else 0,
@@ -432,18 +580,17 @@ def log_followup_answer(practice_question, user_answer, is_correct, time_taken_s
 
 def log_practice_requested(code_context, study_topic=None, tutorial_section=None):
     """Log that a user requested practice questions."""
-    import json as _json
     extra = {"code_context": code_context} if code_context else None
 
     conn = get_conn()
-    conn.execute("""
+    _execute(conn, f"""
         INSERT INTO interactions
         (user_id, session_id, timestamp, interaction_type, study_topic,
          tutorial_section, practice_requested, extra_json)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})
     """, (USER_ID, _current_session_id or "", datetime.now().isoformat(),
           "practice_request", study_topic, tutorial_section, 1,
-          _json.dumps(extra) if extra else None))
+          json.dumps(extra) if extra else None))
     conn.commit()
     conn.close()
 
@@ -456,8 +603,8 @@ def save_message(role, content, session_id=None):
     if not sid:
         return
     conn = get_conn()
-    conn.execute(
-        "INSERT INTO messages (session_id, user_id, role, content) VALUES (?, ?, ?, ?)",
+    _execute(conn,
+        f"INSERT INTO messages (session_id, user_id, role, content) VALUES ({_P}, {_P}, {_P}, {_P})",
         (sid, USER_ID, role, content)
     )
     conn.commit()
@@ -470,12 +617,13 @@ def get_session_messages(session_id=None):
     if not sid:
         return []
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT * FROM messages WHERE session_id = ? ORDER BY id",
+    cur = _execute(conn,
+        f"SELECT * FROM messages WHERE session_id = {_P} ORDER BY id",
         (sid,)
-    ).fetchall()
+    )
+    result = _fetchall(cur)
     conn.close()
-    return [dict(r) for r in rows]
+    return result
 
 
 def save_insight(analysis, session_id=None):
@@ -484,8 +632,8 @@ def save_insight(analysis, session_id=None):
     if not sid:
         return
     conn = get_conn()
-    conn.execute(
-        "INSERT INTO insights (user_id, session_id, analysis) VALUES (?, ?, ?)",
+    _execute(conn,
+        f"INSERT INTO insights (user_id, session_id, analysis) VALUES ({_P}, {_P}, {_P})",
         (USER_ID, sid, json.dumps(analysis) if isinstance(analysis, dict) else analysis)
     )
     conn.commit()
@@ -496,12 +644,13 @@ def save_insight(analysis, session_id=None):
 def get_recent_insights(limit=3):
     """Get most recent N insights for the current user."""
     conn = get_conn()
-    rows = conn.execute(
-        "SELECT * FROM insights WHERE user_id = ? ORDER BY id DESC LIMIT ?",
+    cur = _execute(conn,
+        f"SELECT * FROM insights WHERE user_id = {_P} ORDER BY id DESC LIMIT {_P}",
         (USER_ID, limit)
-    ).fetchall()
+    )
+    result = _fetchall(cur)
     conn.close()
-    return [dict(r) for r in rows]
+    return result
 
 
 def get_last_activity_time(session_id=None):
@@ -510,10 +659,11 @@ def get_last_activity_time(session_id=None):
     if not sid:
         return None
     conn = get_conn()
-    row = conn.execute(
-        "SELECT MAX(timestamp) as last_ts FROM messages WHERE session_id = ?",
+    cur = _execute(conn,
+        f"SELECT MAX(timestamp) as last_ts FROM messages WHERE session_id = {_P}",
         (sid,)
-    ).fetchone()
+    )
+    row = _fetchone(cur)
     conn.close()
     return row["last_ts"] if row else None
 

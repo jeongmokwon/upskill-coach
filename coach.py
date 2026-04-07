@@ -41,8 +41,9 @@ SCREENSHOT_PATH = os.path.join(tempfile.gettempdir(), "coach_screenshot.png")
 AUDIO_PATH = os.path.join(tempfile.gettempdir(), "coach_audio.wav")
 
 client = None  # Initialized lazily when API key is available
-HTTP_PORT = 8765
-WS_PORT = 8766
+HTTP_PORT = int(os.environ.get("PORT", 8765))
+WS_PORT = int(os.environ.get("WS_PORT", 8766))
+BIND_HOST = os.environ.get("BIND_HOST", "localhost")  # "0.0.0.0" on Render
 
 def get_client():
     global client
@@ -211,18 +212,18 @@ def start_ws_server():
     global ws_loop
     ws_loop = asyncio.new_event_loop()
 
-    # WebSocket server (port 8766)
+    # WebSocket server
     async def _run_ws():
-        async with websockets.serve(ws_handler, "localhost", WS_PORT):
+        async with websockets.serve(ws_handler, BIND_HOST, WS_PORT):
             await asyncio.Future()
 
     def _ws_thread():
         asyncio.set_event_loop(ws_loop)
         ws_loop.run_until_complete(_run_ws())
 
-    # HTTP server (port 8765) for serving index.html
+    # HTTP server for serving index.html
     def _http_thread():
-        httpd = http.server.HTTPServer(("localhost", HTTP_PORT), _IndexHandler)
+        httpd = http.server.HTTPServer((BIND_HOST, HTTP_PORT), _IndexHandler)
         httpd.serve_forever()
 
     threading.Thread(target=_ws_thread, daemon=True).start()
