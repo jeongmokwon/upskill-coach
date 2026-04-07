@@ -20,16 +20,28 @@ import wave
 import json
 import asyncio
 import threading
-import numpy as np
-import sounddevice as sd
 import anthropic
 import http.server
 import websockets
 
+try:
+    import numpy as np
+    import sounddevice as sd
+    HAS_AUDIO = True
+except ImportError:
+    np = None
+    sd = None
+    HAS_AUDIO = False
+
 sys.stdin.reconfigure(encoding='utf-8')
 
-import kg_engine as kg
-import kg_claude as kgc
+try:
+    import kg_engine as kg
+    import kg_claude as kgc
+except ImportError:
+    kg = None
+    kgc = None
+
 import db
 
 
