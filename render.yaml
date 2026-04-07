@@ -29,3 +29,5 @@ services:
         value: "0.0.0.0"
       - key: PYTHON_VERSION
         value: "3.11.9"
+      - key: PYTHONUNBUFFERED
+        value: "1"
