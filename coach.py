@@ -87,6 +87,22 @@ def broadcast(msg):
 async def ws_handler(websocket):
     global _followups_stopped
     ws_clients.add(websocket)
+
+    # Send current state to newly connected client
+    try:
+        study_ctx = user_profile.get("studying", "") if user_profile else ""
+        await websocket.send(json.dumps({"type": "connected", "study_context": study_ctx}))
+        if user_profile:
+            await websocket.send(json.dumps({
+                "type": "init_settings",
+                "difficulty": user_profile.get("difficulty", 3),
+                "condition": user_profile.get("user_condition", 3),
+            }))
+        if IS_SERVER:
+            await websocket.send(json.dumps({"type": "show_code_editor"}))
+    except Exception:
+        pass
+
     try:
         async for raw in websocket:
             try:
