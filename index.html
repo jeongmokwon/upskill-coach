@@ -982,7 +982,7 @@
 <body>
   <!-- Onboarding screen (shown for new users in server mode) -->
   <div id="onboarding-screen">
-    <div class="ob-step-counter" id="ob-counter">1 / 4</div>
+    <div class="ob-step-counter" id="ob-counter">1 / 3</div>
     <div class="ob-form">
       <!-- Step 1: Studying -->
       <div class="ob-step active" data-step="0">
@@ -992,16 +992,8 @@
           <input type="text" id="ob-studying" placeholder="e.g., Karpathy's Let's Build GPT" autocomplete="off">
         </div>
       </div>
-      <!-- Step 2: Goal -->
+      <!-- Step 2: Hint preference -->
       <div class="ob-step" data-step="1">
-        <div class="ob-question">What's your goal?</div>
-        <div class="ob-hint">e.g., ML 논문 읽고 구현하기, Python 기초 마스터</div>
-        <div class="ob-field">
-          <input type="text" id="ob-goal" placeholder="e.g., Build ML models from scratch" autocomplete="off">
-        </div>
-      </div>
-      <!-- Step 3: Hint preference -->
-      <div class="ob-step" data-step="2">
         <div class="ob-question">Hint preference</div>
         <div class="ob-hint">How do you like to learn?</div>
         <div class="ob-field">
@@ -1011,8 +1003,8 @@
           </select>
         </div>
       </div>
-      <!-- Step 4: Difficulty -->
-      <div class="ob-step" data-step="3">
+      <!-- Step 3: Difficulty -->
+      <div class="ob-step" data-step="2">
         <div class="ob-question">Difficulty level</div>
         <div class="ob-hint">1 easy · 5 hard</div>
         <div class="ob-gauge" id="ob-difficulty">
@@ -3388,7 +3380,6 @@ function showQuiz(msg) {
       type: 'onboarding_submit',
       session_id: SESSION_ID,
       studying: document.getElementById('ob-studying').value.trim(),
-      goal: document.getElementById('ob-goal').value.trim(),
       hint_preference: document.getElementById('ob-hint-select').value,
       difficulty: diffBtn ? parseInt(diffBtn.dataset.val) : 3,
       condition: 3,
