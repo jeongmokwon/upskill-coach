@@ -159,8 +159,10 @@ def broadcast(msg):
 
 async def ws_handler(request):
     """aiohttp WebSocket handler."""
+    print(f"[WS] New connection from {request.remote}", flush=True)
     websocket = web.WebSocketResponse()
     await websocket.prepare(request)
+    print(f"[WS] WebSocket prepared OK", flush=True)
 
     ws_clients.add(websocket)
 
@@ -272,11 +274,13 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 async def _health_handler(request):
     """Health check endpoint for Render."""
+    print(f"[HTTP] Health check {request.method}", flush=True)
     return web.Response(text="ok")
 
 
 async def _index_handler(request):
     """Serve index.html."""
+    print(f"[HTTP] Serving index.html to {request.remote}", flush=True)
     file_path = os.path.join(PROJECT_DIR, "index.html")
     if os.path.isfile(file_path):
         return web.FileResponse(file_path)
