@@ -90,9 +90,10 @@ async def ws_handler(websocket):
 
     # Send current state to newly connected client
     try:
-        if IS_SERVER and not user_profile:
-            # No profile yet — show onboarding form in browser
-            await websocket.send(json.dumps({"type": "show_onboarding"}))
+        if IS_SERVER:
+            # Server mode: wait for client to identify via session_id
+            # Client will send {"type":"identify","session_id":"..."} immediately
+            await websocket.send(json.dumps({"type": "waiting_identify"}))
         else:
             study_ctx = user_profile.get("studying", "") if user_profile else ""
             await websocket.send(json.dumps({"type": "connected", "study_context": study_ctx}))
@@ -102,8 +103,6 @@ async def ws_handler(websocket):
                     "difficulty": user_profile.get("difficulty", 3),
                     "condition": user_profile.get("user_condition", 3),
                 }))
-            if IS_SERVER:
-                await websocket.send(json.dumps({"type": "show_code_editor"}))
     except Exception:
         pass
 
@@ -112,7 +111,15 @@ async def ws_handler(websocket):
             try:
                 msg = json.loads(raw)
                 msg_type = msg.get("type")
-                if msg_type == "practice_request":
+                if msg_type == "identify":
+                    handle_identify(msg, websocket)
+                elif msg_type == "save_email":
+                    threading.Thread(
+                        target=handle_save_email,
+                        args=(msg,),
+                        daemon=True,
+                    ).start()
+                elif msg_type == "practice_request":
                     code = msg.get("code", "")
                     threading.Thread(
                         target=handle_practice_request,
@@ -617,70 +624,94 @@ def onboard_user():
 
 
 def _onboard_server():
-    """Server-mode onboarding: load existing profile or wait for browser onboarding."""
+    """Server-mode: skip terminal onboarding. Browser handles it via identify/onboarding_submit."""
     global user_profile
-    default_name = os.environ.get("DEFAULT_USER", "learner")
+    user_profile = {}
+    print("  [Server] Waiting for browser sessions (localStorage-based)")
+    return None
 
-    profile = db.get_user_profile(default_name)
+
+def handle_identify(msg, websocket):
+    """Handle identify message from browser with localStorage session_id."""
+    global user_profile, current_study_topic
+    session_id = msg.get("session_id", "")
+    if not session_id:
+        asyncio.run_coroutine_threadsafe(
+            websocket.send(json.dumps({"type": "show_onboarding"})),
+            ws_loop,
+        )
+        return
+
+    # Look up existing profile by session_id
+    profile = db.get_user_profile_by_id(session_id)
     if profile:
         db.set_user_id(profile["user_id"])
         user_profile = profile
-        print(f"  [Server] Loaded profile: {profile['user_name']}")
-        return profile
+        current_study_topic = profile.get("studying", "")
 
-    # No profile yet — browser will handle onboarding
-    print("  [Server] No profile found — waiting for browser onboarding")
-    user_profile = {}
-    return None
+        # Start DB session
+        db.start_session(study_topic=current_study_topic)
+        db.touch_activity()
+        extract_teaching_style()
+
+        print(f"  [Server] Returning user: {session_id} — studying: {current_study_topic}")
+
+        # Send state
+        asyncio.run_coroutine_threadsafe(
+            websocket.send(json.dumps({"type": "connected", "study_context": current_study_topic})),
+            ws_loop,
+        )
+        asyncio.run_coroutine_threadsafe(
+            websocket.send(json.dumps({
+                "type": "init_settings",
+                "difficulty": profile.get("difficulty", 3),
+                "condition": profile.get("user_condition", 3),
+            })),
+            ws_loop,
+        )
+        asyncio.run_coroutine_threadsafe(
+            websocket.send(json.dumps({"type": "show_code_editor"})),
+            ws_loop,
+        )
+    else:
+        # No profile for this session_id — show onboarding
+        asyncio.run_coroutine_threadsafe(
+            websocket.send(json.dumps({"type": "show_onboarding"})),
+            ws_loop,
+        )
 
 
 def handle_onboarding_submit(msg):
     """Handle onboarding form submission from browser."""
     global user_profile, current_study_topic
-    name = msg.get("name", "").strip() or "learner"
+    session_id = msg.get("session_id", "")
     studying = msg.get("studying", "").strip() or "ML/AI"
     goal = msg.get("goal", "").strip() or "Learn and grow"
     hint_preference = msg.get("hint_preference", "hints")
     difficulty = int(msg.get("difficulty", 3))
     condition = int(msg.get("condition", 3))
 
-    # Check if user already exists (returning user from another browser)
-    profile = db.get_user_profile(name)
-    if profile:
-        db.set_user_id(profile["user_id"])
-        # Update with new session settings
-        db.update_user_profile(
-            profile["user_id"],
-            studying=studying, difficulty=difficulty, user_condition=condition,
-        )
-        profile["studying"] = studying
-        profile["difficulty"] = difficulty
-        profile["user_condition"] = condition
-        user_profile = profile
-    else:
-        uid = db.create_user_profile(
-            name, goal=goal, background="", studying=studying,
-            hint_preference=hint_preference, difficulty=difficulty,
-            user_condition=condition,
-        )
-        db.set_user_id(uid)
-        user_profile = {
-            "user_id": uid, "user_name": name, "goal": goal,
-            "background": "", "studying": studying,
-            "hint_preference": hint_preference,
-            "difficulty": difficulty, "user_condition": condition,
-        }
+    uid = db.create_user_profile(
+        "anonymous", goal=goal, background="", studying=studying,
+        hint_preference=hint_preference, difficulty=difficulty,
+        user_condition=condition, user_id=session_id,
+    )
+    db.set_user_id(uid)
+    user_profile = {
+        "user_id": uid, "user_name": "anonymous", "goal": goal,
+        "background": "", "studying": studying,
+        "hint_preference": hint_preference,
+        "difficulty": difficulty, "user_condition": condition,
+    }
 
     current_study_topic = studying
 
     # Start DB session
     db.start_session(study_topic=studying)
     db.touch_activity()
-
-    # Extract teaching style from previous sessions
     extract_teaching_style()
 
-    print(f"  [Server] Onboarded: {name} — studying: {studying}")
+    print(f"  [Server] Onboarded: {uid} — studying: {studying}")
 
     # Send state to all connected clients
     broadcast({"type": "connected", "study_context": studying})
@@ -690,6 +721,17 @@ def handle_onboarding_submit(msg):
         "condition": condition,
     })
     broadcast({"type": "show_code_editor"})
+
+
+def handle_save_email(msg):
+    """Save email for the current user profile."""
+    email = msg.get("email", "").strip()
+    if not email or not user_profile.get("user_id"):
+        return
+    db.update_user_profile(user_profile["user_id"], email=email)
+    user_profile["email"] = email
+    print(f"  [Server] Email saved for {user_profile['user_id']}: {email}")
+    broadcast({"type": "email_saved"})
 
 
 def _ask_difficulty_condition(default_diff=3, default_cond=3):
@@ -2892,17 +2934,8 @@ def main():
     onboard_user()
 
     if IS_SERVER:
-        # Server mode: browser handles onboarding if no profile
-        if user_profile:
-            # Returning user — start session right away
-            study_context = user_profile.get("studying", "")
-            db.start_session(study_topic=study_context)
-            db.touch_activity()
-            global current_study_topic
-            current_study_topic = study_context
-            extract_teaching_style()
-        # else: handle_onboarding_submit() will do this when browser submits
-
+        # Server mode: each browser client identifies via localStorage session_id
+        # handle_identify() and handle_onboarding_submit() manage per-user state
         print(f"🌐 Server mode — HTTP + WS on {BIND_HOST}:{HTTP_PORT}")
         try:
             while True:

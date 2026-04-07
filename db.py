@@ -133,10 +133,17 @@ def init_db():
                 hint_preference TEXT DEFAULT 'hints',
                 difficulty INTEGER DEFAULT 3,
                 user_condition INTEGER DEFAULT 3,
+                email TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
         """)
+        # Migrate: add email column if missing
+        try:
+            conn.cursor().execute("ALTER TABLE user_profiles ADD COLUMN email TEXT DEFAULT ''")
+            conn.commit()
+        except Exception:
+            pass
         conn.commit()
     else:
         conn.executescript("""
@@ -202,6 +209,7 @@ def init_db():
                 hint_preference TEXT DEFAULT 'hints',
                 difficulty INTEGER DEFAULT 3,
                 user_condition INTEGER DEFAULT 3,
+                email TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -212,6 +220,7 @@ def init_db():
             ("user_condition", "INTEGER DEFAULT 3"),
             ("studying", "TEXT DEFAULT ''"),
             ("hint_preference", "TEXT DEFAULT 'hints'"),
+            ("email", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {default}")
@@ -241,9 +250,19 @@ def get_user_profile(user_name):
     return result
 
 
-def create_user_profile(user_name, goal="", background="", studying="", hint_preference="hints", difficulty=3, user_condition=3):
+def get_user_profile_by_id(user_id):
+    """Look up a user profile by user_id. Returns dict or None."""
+    conn = get_conn()
+    _p = "%s" if DB_TYPE == "postgres" else "?"
+    cur = _execute(conn, f"SELECT * FROM user_profiles WHERE user_id = {_p}", (user_id,))
+    result = _fetchone(cur)
+    conn.close()
+    return result
+
+
+def create_user_profile(user_name, goal="", background="", studying="", hint_preference="hints", difficulty=3, user_condition=3, user_id=None):
     """Create a new user profile. Returns the user_id."""
-    uid = user_name.lower().replace(" ", "_")
+    uid = user_id or user_name.lower().replace(" ", "_")
     now = datetime.now().isoformat()
     conn = get_conn()
     if DB_TYPE == "postgres":
@@ -270,7 +289,7 @@ def create_user_profile(user_name, goal="", background="", studying="", hint_pre
 
 def update_user_profile(user_id, **kwargs):
     """Update specific fields of a user profile."""
-    allowed = {"goal", "background", "user_name", "studying", "hint_preference", "difficulty", "user_condition"}
+    allowed = {"goal", "background", "user_name", "studying", "hint_preference", "difficulty", "user_condition", "email"}
     updates = {k: v for k, v in kwargs.items() if k in allowed}
     if not updates:
         return
