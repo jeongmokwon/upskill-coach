@@ -1466,13 +1466,22 @@ function getSessionId() {
 }
 const SESSION_ID = getSessionId();
 
+let wsPath = '/ws';
 function connect() {
   const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${wsProto}//${location.host}/ws`);
+  const wsUrl = `${wsProto}//${location.host}${wsPath}`;
+  console.log('[WS] Connecting to', wsUrl);
+  ws = new WebSocket(wsUrl);
 
   ws.onopen = () => { dot.classList.add('on'); };
-  ws.onclose = () => { dot.classList.remove('on'); setTimeout(connect, 2000); };
-  ws.onerror = () => ws.close();
+  ws.onclose = () => {
+    dot.classList.remove('on');
+    // If /ws fails, try root path (some proxies don't forward sub-paths for WS)
+    if (wsPath === '/ws') { wsPath = '/'; }
+    else { wsPath = '/ws'; }
+    setTimeout(connect, 2000);
+  };
+  ws.onerror = (e) => { console.error('[WS] Error', e); ws.close(); };
 
   ws.onmessage = (e) => {
     const msg = JSON.parse(e.data);

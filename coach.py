@@ -284,8 +284,13 @@ async def _health_handler(request):
     return web.Response(text="ok")
 
 
-async def _index_handler(request):
-    """Serve index.html."""
+async def _root_handler(request):
+    """Handle root path — WebSocket upgrade or serve index.html."""
+    # Check if this is a WebSocket upgrade request
+    if request.headers.get("Upgrade", "").lower() == "websocket":
+        print(f"[WS] Upgrade on / from {request.remote}", flush=True)
+        return await ws_handler(request)
+
     print(f"[HTTP] Serving index.html to {request.remote}", flush=True)
     file_path = os.path.join(PROJECT_DIR, "index.html")
     if os.path.isfile(file_path):
@@ -295,12 +300,19 @@ async def _index_handler(request):
 
 async def _static_handler(request):
     """Serve static files from project directory."""
-    import mimetypes
     rel_path = request.match_info.get("path", "")
     file_path = os.path.join(PROJECT_DIR, rel_path)
     if os.path.isfile(file_path):
         return web.FileResponse(file_path)
     return web.Response(text="Not Found", status=404)
+
+
+@web.middleware
+async def _log_middleware(request, handler):
+    """Log every incoming request for debugging."""
+    upgrade = request.headers.get("Upgrade", "")
+    print(f"[REQ] {request.method} {request.path} from={request.remote} upgrade={upgrade}", flush=True)
+    return await handler(request)
 
 
 def start_ws_server():
@@ -309,10 +321,10 @@ def start_ws_server():
     ws_loop = asyncio.new_event_loop()
 
     async def _run():
-        app = web.Application()
+        app = web.Application(middlewares=[_log_middleware])
         app.router.add_get("/health", _health_handler)
         app.router.add_get("/ws", ws_handler)
-        app.router.add_get("/", _index_handler)
+        app.router.add_get("/", _root_handler)
         app.router.add_get("/{path:.*}", _static_handler)
 
         runner = web.AppRunner(app)
