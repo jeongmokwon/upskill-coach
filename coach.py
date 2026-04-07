@@ -33,6 +33,8 @@ except ImportError:
     sd = None
     HAS_AUDIO = False
 
+print("[BOOT] coach.py starting...", flush=True)
+
 try:
     sys.stdin.reconfigure(encoding='utf-8')
 except Exception:
@@ -45,7 +47,9 @@ except ImportError:
     kg = None
     kgc = None
 
+print("[BOOT] importing db...", flush=True)
 import db
+print("[BOOT] db imported OK", flush=True)
 
 
 

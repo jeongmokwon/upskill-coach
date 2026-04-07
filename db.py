@@ -714,4 +714,10 @@ def get_last_activity_time(session_id=None):
 
 
 # Initialize on import
-init_db()
+try:
+    init_db()
+    print("[DB] init_db() OK", flush=True)
+except Exception as e:
+    print(f"[DB] ❌ init_db() failed: {e}", flush=True)
+    import traceback
+    traceback.print_exc()
