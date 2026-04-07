@@ -682,27 +682,28 @@
     animation: fadeIn 0.5s ease;
   }
   #onboarding-screen.active { display: flex; }
-  #onboarding-screen h1 {
-    color: #e6edf3; font-size: 24px; margin-bottom: 8px; font-weight: 700;
+  #onboarding-screen .ob-step-counter {
+    color: #484f58; font-size: 12px; margin-bottom: 12px; letter-spacing: 1px;
   }
-  #onboarding-screen .ob-subtitle {
-    color: #8b949e; font-size: 14px; margin-bottom: 32px;
+  #onboarding-screen .ob-question {
+    color: #e6edf3; font-size: 22px; font-weight: 700; margin-bottom: 8px;
+    text-align: center;
+  }
+  #onboarding-screen .ob-hint {
+    color: #8b949e; font-size: 13px; margin-bottom: 28px; text-align: center;
   }
   #onboarding-screen .ob-form {
     width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 20px;
+    align-items: center;
   }
-  #onboarding-screen .ob-field { display: flex; flex-direction: column; gap: 6px; }
-  #onboarding-screen .ob-field label {
-    color: #c9d1d9; font-size: 13px; font-weight: 600;
-  }
-  #onboarding-screen .ob-field label small {
-    font-weight: 400; color: #8b949e; margin-left: 6px;
-  }
+  #onboarding-screen .ob-step { display: none; width: 100%; flex-direction: column; align-items: center; gap: 20px; }
+  #onboarding-screen .ob-step.active { display: flex; }
+  #onboarding-screen .ob-field { display: flex; flex-direction: column; gap: 6px; width: 100%; }
   #onboarding-screen .ob-field input,
   #onboarding-screen .ob-field select {
     background: #161b22; border: 1px solid #30363d; border-radius: 8px;
-    color: #e6edf3; padding: 10px 14px; font-size: 14px; font-family: inherit;
-    outline: none; transition: border-color 0.2s;
+    color: #e6edf3; padding: 12px 16px; font-size: 15px; font-family: inherit;
+    outline: none; transition: border-color 0.2s; width: 100%; box-sizing: border-box;
   }
   #onboarding-screen .ob-field input:focus,
   #onboarding-screen .ob-field select:focus {
@@ -710,25 +711,35 @@
   }
   #onboarding-screen .ob-field input::placeholder { color: #484f58; }
   #onboarding-screen .ob-gauge {
-    display: flex; gap: 6px;
+    display: flex; gap: 8px; justify-content: center;
   }
   #onboarding-screen .ob-gauge button {
-    width: 36px; height: 36px; border-radius: 8px; border: 1px solid #30363d;
-    background: #161b22; color: #8b949e; font-size: 14px; font-weight: 600;
+    width: 48px; height: 48px; border-radius: 10px; border: 1px solid #30363d;
+    background: #161b22; color: #8b949e; font-size: 16px; font-weight: 600;
     cursor: pointer; transition: all 0.15s;
   }
   #onboarding-screen .ob-gauge button:hover { border-color: #58a6ff; color: #e6edf3; }
   #onboarding-screen .ob-gauge button.active {
     background: #1f6feb; border-color: #1f6feb; color: #fff;
   }
-  #onboarding-screen .ob-row {
-    display: flex; gap: 16px;
+  #onboarding-screen .ob-nav {
+    display: flex; gap: 12px; margin-top: 8px;
   }
-  #onboarding-screen .ob-row .ob-field { flex: 1; }
+  #onboarding-screen .ob-nav button {
+    padding: 10px 28px; border-radius: 8px; border: 1px solid #30363d;
+    background: #161b22; color: #c9d1d9; font-size: 14px; font-weight: 500;
+    font-family: inherit; cursor: pointer; transition: all 0.15s;
+  }
+  #onboarding-screen .ob-nav button:hover { border-color: #58a6ff; color: #e6edf3; }
+  #onboarding-screen .ob-nav button.ob-next {
+    background: #1f6feb; border-color: #1f6feb; color: #fff;
+  }
+  #onboarding-screen .ob-nav button.ob-next:hover { background: #388bfd; }
   #onboarding-screen .ob-submit {
-    margin-top: 8px; padding: 12px 24px; border-radius: 10px; border: none;
-    background: #238636; color: #fff; font-size: 15px; font-weight: 600;
+    padding: 14px 36px; border-radius: 10px; border: none;
+    background: #238636; color: #fff; font-size: 16px; font-weight: 600;
     font-family: inherit; cursor: pointer; transition: background 0.2s;
+    display: none;
   }
   #onboarding-screen .ob-submit:hover { background: #2ea043; }
 
@@ -928,41 +939,63 @@
 <body>
   <!-- Onboarding screen (shown for new users in server mode) -->
   <div id="onboarding-screen">
-    <h1>Welcome to Upskill Coach</h1>
-    <div class="ob-subtitle">Set up your learning profile to get started</div>
+    <div class="ob-step-counter" id="ob-counter">1 / 6</div>
     <div class="ob-form">
-      <div class="ob-field">
-        <label>Your Name</label>
-        <input type="text" id="ob-name" placeholder="e.g., John" autocomplete="off">
-      </div>
-      <div class="ob-field">
-        <label>What are you studying? <small>e.g., Karpathy makemore, PyTorch basics</small></label>
-        <input type="text" id="ob-studying" placeholder="e.g., Karpathy's Let's Build GPT" autocomplete="off">
-      </div>
-      <div class="ob-field">
-        <label>Your Goal <small>e.g., ML 논문 읽고 구현하기</small></label>
-        <input type="text" id="ob-goal" placeholder="e.g., Build ML models from scratch" autocomplete="off">
-      </div>
-      <div class="ob-field">
-        <label>Hint Preference</label>
-        <select id="ob-hint">
-          <option value="hints">Give me hints before I get stuck</option>
-          <option value="solo">Let me figure it out myself</option>
-        </select>
-      </div>
-      <div class="ob-row">
+      <!-- Step 1: Name -->
+      <div class="ob-step active" data-step="0">
+        <div class="ob-question">What's your name?</div>
+        <div class="ob-hint">We'll use this to personalize your experience</div>
         <div class="ob-field">
-          <label>Difficulty <small>1 easy · 5 hard</small></label>
-          <div class="ob-gauge" id="ob-difficulty">
-            <button data-val="1">1</button><button data-val="2">2</button><button data-val="3" class="active">3</button><button data-val="4">4</button><button data-val="5">5</button>
-          </div>
+          <input type="text" id="ob-name" placeholder="e.g., John" autocomplete="off">
         </div>
+      </div>
+      <!-- Step 2: Studying -->
+      <div class="ob-step" data-step="1">
+        <div class="ob-question">What are you studying?</div>
+        <div class="ob-hint">e.g., Karpathy makemore, PyTorch basics, transformer from scratch</div>
         <div class="ob-field">
-          <label>Condition <small>1 tired · 5 sharp</small></label>
-          <div class="ob-gauge" id="ob-condition">
-            <button data-val="1">1</button><button data-val="2">2</button><button data-val="3" class="active">3</button><button data-val="4">4</button><button data-val="5">5</button>
-          </div>
+          <input type="text" id="ob-studying" placeholder="e.g., Karpathy's Let's Build GPT" autocomplete="off">
         </div>
+      </div>
+      <!-- Step 3: Goal -->
+      <div class="ob-step" data-step="2">
+        <div class="ob-question">What's your goal?</div>
+        <div class="ob-hint">e.g., ML 논문 읽고 구현하기, Python 기초 마스터</div>
+        <div class="ob-field">
+          <input type="text" id="ob-goal" placeholder="e.g., Build ML models from scratch" autocomplete="off">
+        </div>
+      </div>
+      <!-- Step 4: Hint preference -->
+      <div class="ob-step" data-step="3">
+        <div class="ob-question">Hint preference</div>
+        <div class="ob-hint">How do you like to learn?</div>
+        <div class="ob-field">
+          <select id="ob-hint-select">
+            <option value="hints">Give me hints before I get stuck</option>
+            <option value="solo">Let me figure it out myself</option>
+          </select>
+        </div>
+      </div>
+      <!-- Step 5: Difficulty -->
+      <div class="ob-step" data-step="4">
+        <div class="ob-question">Difficulty level</div>
+        <div class="ob-hint">1 easy · 5 hard</div>
+        <div class="ob-gauge" id="ob-difficulty">
+          <button data-val="1">1</button><button data-val="2">2</button><button data-val="3" class="active">3</button><button data-val="4">4</button><button data-val="5">5</button>
+        </div>
+      </div>
+      <!-- Step 6: Condition -->
+      <div class="ob-step" data-step="5">
+        <div class="ob-question">How are you feeling?</div>
+        <div class="ob-hint">1 tired · 5 sharp</div>
+        <div class="ob-gauge" id="ob-condition">
+          <button data-val="1">1</button><button data-val="2">2</button><button data-val="3" class="active">3</button><button data-val="4">4</button><button data-val="5">5</button>
+        </div>
+      </div>
+      <!-- Nav buttons -->
+      <div class="ob-nav" id="ob-nav">
+        <button class="ob-prev" id="ob-prev">← Prev</button>
+        <button class="ob-next" id="ob-next">Next →</button>
       </div>
       <button class="ob-submit" id="ob-submit">Start Learning →</button>
     </div>
@@ -3240,32 +3273,70 @@ function showQuiz(msg) {
   };
 }
 
-// ── Onboarding gauge buttons & submit ──
-document.querySelectorAll('#onboarding-screen .ob-gauge').forEach(gauge => {
-  gauge.querySelectorAll('button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      gauge.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+// ── Onboarding wizard ──
+{
+  const steps = document.querySelectorAll('#onboarding-screen .ob-step');
+  const totalSteps = steps.length;
+  let obStep = 0;
+  const prevBtn = document.getElementById('ob-prev');
+  const nextBtn = document.getElementById('ob-next');
+  const submitBtn = document.getElementById('ob-submit');
+  const navEl = document.getElementById('ob-nav');
+  const counterEl = document.getElementById('ob-counter');
+
+  function obGoTo(idx) {
+    obStep = idx;
+    steps.forEach((s, i) => s.classList.toggle('active', i === idx));
+    counterEl.textContent = `${idx + 1} / ${totalSteps}`;
+    prevBtn.style.display = idx > 0 ? '' : 'none';
+    const isLast = idx === totalSteps - 1;
+    navEl.style.display = isLast ? 'none' : '';
+    submitBtn.style.display = isLast ? '' : 'none';
+    // Auto-focus input on current step
+    const input = steps[idx].querySelector('input, select');
+    if (input) setTimeout(() => input.focus(), 100);
+  }
+
+  prevBtn.addEventListener('click', () => { if (obStep > 0) obGoTo(obStep - 1); });
+  nextBtn.addEventListener('click', () => { if (obStep < totalSteps - 1) obGoTo(obStep + 1); });
+
+  // Enter key advances to next step (or submits on last)
+  document.getElementById('onboarding-screen').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (obStep < totalSteps - 1) obGoTo(obStep + 1);
+      else submitBtn.click();
+    }
+  });
+
+  // Gauge button toggles
+  document.querySelectorAll('#onboarding-screen .ob-gauge').forEach(gauge => {
+    gauge.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        gauge.querySelectorAll('button').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      });
     });
   });
-});
 
-document.getElementById('ob-submit').addEventListener('click', () => {
-  const diffBtn = document.querySelector('#ob-difficulty button.active');
-  const condBtn = document.querySelector('#ob-condition button.active');
-  ws.send(JSON.stringify({
-    type: 'onboarding_submit',
-    name: document.getElementById('ob-name').value.trim(),
-    studying: document.getElementById('ob-studying').value.trim(),
-    goal: document.getElementById('ob-goal').value.trim(),
-    hint_preference: document.getElementById('ob-hint').value,
-    difficulty: diffBtn ? parseInt(diffBtn.dataset.val) : 3,
-    condition: condBtn ? parseInt(condBtn.dataset.val) : 3,
-  }));
-  // Screen will be hidden when server sends show_code_editor
-  document.getElementById('ob-submit').textContent = 'Setting up...';
-  document.getElementById('ob-submit').disabled = true;
-});
+  submitBtn.addEventListener('click', () => {
+    const diffBtn = document.querySelector('#ob-difficulty button.active');
+    const condBtn = document.querySelector('#ob-condition button.active');
+    ws.send(JSON.stringify({
+      type: 'onboarding_submit',
+      name: document.getElementById('ob-name').value.trim(),
+      studying: document.getElementById('ob-studying').value.trim(),
+      goal: document.getElementById('ob-goal').value.trim(),
+      hint_preference: document.getElementById('ob-hint-select').value,
+      difficulty: diffBtn ? parseInt(diffBtn.dataset.val) : 3,
+      condition: condBtn ? parseInt(condBtn.dataset.val) : 3,
+    }));
+    submitBtn.textContent = 'Setting up...';
+    submitBtn.disabled = true;
+  });
+
+  obGoTo(0); // Initialize
+}
 
 connect();
 </script>
