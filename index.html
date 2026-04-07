@@ -3400,19 +3400,21 @@ function showQuiz(msg) {
   obGoTo(0); // Initialize
 }
 
-// ── Email prompt handlers ──
-document.getElementById('ep-save').addEventListener('click', () => {
-  const email = document.getElementById('ep-email').value.trim();
-  if (!email) return;
-  ws.send(JSON.stringify({ type: 'save_email', email }));
-  localStorage.setItem('upskill_email', email);
-  document.getElementById('email-prompt').classList.remove('active');
-});
-document.getElementById('ep-dismiss').addEventListener('click', () => {
-  document.getElementById('email-prompt').classList.remove('active');
-});
-document.getElementById('ep-email').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') document.getElementById('ep-save').click();
+// ── Email prompt handlers (deferred — elements are below script) ──
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('ep-save')?.addEventListener('click', () => {
+    const email = document.getElementById('ep-email').value.trim();
+    if (!email) return;
+    ws.send(JSON.stringify({ type: 'save_email', email }));
+    localStorage.setItem('upskill_email', email);
+    document.getElementById('email-prompt').classList.remove('active');
+  });
+  document.getElementById('ep-dismiss')?.addEventListener('click', () => {
+    document.getElementById('email-prompt').classList.remove('active');
+  });
+  document.getElementById('ep-email')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('ep-save').click();
+  });
 });
 
 connect();
