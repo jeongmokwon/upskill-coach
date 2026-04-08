@@ -1,6 +1,7 @@
 databases:
   - name: upskill-coach-db
-    plan: free
+    plan: basic-256mb
+    region: virginia
     databaseName: upskill_coach
     user: upskill_coach_user
 
@@ -8,7 +9,8 @@ services:
   - type: web
     name: upskill-coach
     runtime: python
-    plan: free
+    plan: starter
+    region: virginia
     buildCommand: pip install -r requirements.txt
     startCommand: python coach.py
     healthCheckPath: /health
