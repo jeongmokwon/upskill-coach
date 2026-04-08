@@ -1563,10 +1563,18 @@ Return ONLY a JSON object:
                 plan_response += text
 
         plan_json = '{"title":"' + plan_response
-        plan = json.loads(plan_json.strip())
+        try:
+            plan = json.loads(plan_json.strip())
+        except json.JSONDecodeError as _je:
+            print(f"  [Explain] ❌ JSON parse failed: {_je}")
+            print(f"  [Explain] Raw plan_json (first 500 chars): {plan_json[:500]}")
+            raise
         title = plan.get("title", "Explanation")
         sections = plan.get("sections", [])
         print(f"  [Explain] Plan: {title} — {len(sections)} sections")
+        if len(sections) < 2:
+            print(f"  [Explain] ⚠️ Only {len(sections)} section(s) in plan — Claude returned a short response")
+            print(f"  [Explain] Raw plan (first 800 chars): {plan_json[:800]}")
 
         # Store plan for regeneration
         _last_explain_plan = {
@@ -1585,19 +1593,24 @@ Return ONLY a JSON object:
 
         # Broadcast all sections instantly (no per-section API calls!)
         for i, sec in enumerate(sections):
-            print(f"  [Explain] Section {i+1}/{len(sections)}: [{sec.get('template','')}] {sec.get('purpose','')[:50]}")
-            send_to_client({
-                "type": "explain_section",
-                "index": i,
-                "total": len(sections),
-                "template": sec.get("template", "linear_sequence"),
-                "data": sec.get("data", {}),
-                "purpose": sec.get("purpose", ""),
-                "title": title,
-            })
+            try:
+                print(f"  [Explain] Section {i+1}/{len(sections)}: [{sec.get('template','')}] {sec.get('purpose','')[:50]}", flush=True)
+                send_to_client({
+                    "type": "explain_section",
+                    "index": i,
+                    "total": len(sections),
+                    "template": sec.get("template", "linear_sequence"),
+                    "data": sec.get("data", {}),
+                    "purpose": sec.get("purpose", ""),
+                    "title": title,
+                })
+            except Exception as _se:
+                print(f"  [Explain] ❌ Failed to send section {i}: {_se}", flush=True)
+                import traceback as _tb
+                _tb.print_exc()
 
         send_to_client({"type": "explain_done", "total": len(sections), "title": title})
-        print(f"  [Explain] All {len(sections)} sections sent")
+        print(f"  [Explain] All {len(sections)} sections sent", flush=True)
 
     except Exception as e:
         print(f"  [Explain] Error: {e}")

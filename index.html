@@ -1913,10 +1913,18 @@ function connect() {
         // Store section data for paginated display
         if (!window._explainSections) window._explainSections = [];
 
+        console.log('[explain_section] recv index=' + msg.index + ' total=' + msg.total + ' template=' + msg.template + ' beforeLen=' + window._explainSections.length);
+
         // Generate HTML from template+data (or use raw html as fallback)
-        const secHtml = msg.template
-          ? renderTemplate(msg.template, msg.data || {})
-          : (msg.html || '');
+        let secHtml = '';
+        try {
+          secHtml = msg.template
+            ? renderTemplate(msg.template, msg.data || {})
+            : (msg.html || '');
+        } catch (e) {
+          console.error('[explain_section] renderTemplate threw for template=' + msg.template, e);
+          secHtml = '<div style="padding:20px;color:#f85149">Failed to render template: ' + msg.template + '</div>';
+        }
 
         // Regeneration: replace existing section
         const existing = window._explainSections.find(s => s.index === msg.index);
@@ -1932,6 +1940,8 @@ function connect() {
         }
 
         window._explainSections.push({ index: msg.index, total: msg.total, html: secHtml, template: msg.template, data: msg.data, title: msg.title });
+
+        console.log('[explain_section] stored. now len=' + window._explainSections.length + ' currentPage=' + window._explainCurrentPage);
 
         document.getElementById('explain-panel-title').textContent = '✨ ' + (msg.title || 'Explanation');
 
@@ -1953,6 +1963,7 @@ function connect() {
       case 'explain_done': {
         // Final total correction — update sections with actual total (do NOT re-render iframe)
         const finalTotal = msg.total;
+        console.log('[explain_done] finalTotal=' + finalTotal + ' loaded=' + (window._explainSections ? window._explainSections.length : 0));
         if (window._explainSections) {
           window._explainSections.forEach(s => { s.total = finalTotal; });
           _updateExplainNav();
@@ -3106,9 +3117,10 @@ function _renderExplainPage(pageIdx) {
   prevBtn.addEventListener('mouseover', () => { if (!prevBtn.disabled) prevBtn.style.borderColor = '#58a6ff'; });
   prevBtn.addEventListener('mouseout', () => { prevBtn.style.borderColor = '#30363d'; });
   prevBtn.addEventListener('click', () => {
-    if (pageIdx > 0) {
-      window._explainCurrentPage = pageIdx - 1;
-      _renderExplainPage(pageIdx - 1);
+    const curIdx = (typeof window._explainCurrentPage === 'number') ? window._explainCurrentPage : pageIdx;
+    if (curIdx > 0) {
+      window._explainCurrentPage = curIdx - 1;
+      _renderExplainPage(curIdx - 1);
     }
   });
 
@@ -3120,22 +3132,30 @@ function _renderExplainPage(pageIdx) {
   }
 
   const nextBtn = document.createElement('button');
-  const isLast = pageIdx >= totalExpected - 1;
-  const nextAvailable = pageIdx < loaded - 1;
-  nextBtn.textContent = isLast ? '✓ Done' : 'Next →';
-  nextBtn.style.cssText = 'padding:8px 18px;border-radius:8px;border:1px solid ' + (isLast ? '#3fb950' : '#58a6ff') + ';background:' + (isLast ? '#3fb95020' : '#1f6feb20') + ';color:' + (isLast ? '#3fb950' : '#58a6ff') + ';font-size:13px;font-family:inherit;font-weight:600;cursor:pointer;transition:all 0.15s;';
-  if (!nextAvailable && !isLast) {
+  const isLastInitial = pageIdx >= totalExpected - 1;
+  const nextAvailableInitial = pageIdx < loaded - 1;
+  nextBtn.textContent = isLastInitial ? '✓ Done' : 'Next →';
+  nextBtn.style.cssText = 'padding:8px 18px;border-radius:8px;border:1px solid ' + (isLastInitial ? '#3fb950' : '#58a6ff') + ';background:' + (isLastInitial ? '#3fb95020' : '#1f6feb20') + ';color:' + (isLastInitial ? '#3fb950' : '#58a6ff') + ';font-size:13px;font-family:inherit;font-weight:600;cursor:pointer;transition:all 0.15s;';
+  if (!nextAvailableInitial && !isLastInitial) {
     nextBtn.disabled = true;
     nextBtn.style.opacity = '0.3';
     nextBtn.textContent = 'Loading...';
   }
+  // IMPORTANT: read live state at click time, not render time (sections stream in)
   nextBtn.addEventListener('click', () => {
-    if (isLast) {
-      // Done — dismiss
+    const secs = window._explainSections || [];
+    const curIdx = (typeof window._explainCurrentPage === 'number') ? window._explainCurrentPage : pageIdx;
+    const curSec = secs.find(s => s.index === curIdx) || sec;
+    const totalNow = curSec.total;
+    const loadedNow = secs.length;
+    const isLastNow = curIdx >= totalNow - 1;
+    const canAdvance = curIdx < loadedNow - 1;
+    console.log('[Next click] curIdx=' + curIdx + ' totalNow=' + totalNow + ' loadedNow=' + loadedNow + ' isLast=' + isLastNow + ' canAdvance=' + canAdvance);
+    if (isLastNow) {
       document.getElementById('explain-dismiss').click();
-    } else if (nextAvailable) {
-      window._explainCurrentPage = pageIdx + 1;
-      _renderExplainPage(pageIdx + 1);
+    } else if (canAdvance) {
+      window._explainCurrentPage = curIdx + 1;
+      _renderExplainPage(curIdx + 1);
     }
   });
 
@@ -3153,9 +3173,13 @@ function _updateExplainNav() {
   const pageIdx = window._explainCurrentPage || 0;
   const sections = window._explainSections || [];
   const sec = sections.find(s => s.index === pageIdx);
-  if (!sec) return;
+  if (!sec) {
+    console.log('[_updateExplainNav] no sec for pageIdx=' + pageIdx);
+    return;
+  }
   const totalExpected = sec.total;
   const loaded = sections.length;
+  console.log('[_updateExplainNav] pageIdx=' + pageIdx + ' loaded=' + loaded + ' totalExpected=' + totalExpected);
 
   // Update page counter
   const counter = document.getElementById('explain-page-counter');
