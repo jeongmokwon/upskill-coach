@@ -201,7 +201,21 @@ async def ws_handler(request):
                     msg = json.loads(raw_msg.data)
                     msg_type = msg.get("type")
                     if msg_type == "identify":
-                        handle_identify(msg, websocket)
+                        try:
+                            handle_identify(msg, websocket)
+                        except Exception as _e:
+                            import traceback as _tb
+                            print(f"[WS] ❌ handle_identify EXCEPTION: {_e}", flush=True)
+                            _tb.print_exc()
+                            # Don't break the WS — try to send a fallback so the UI moves on
+                            try:
+                                await websocket.send_str(json.dumps({
+                                    "type": "error",
+                                    "message": f"server identify failed: {_e}",
+                                }))
+                                await websocket.send_str(json.dumps({"type": "show_onboarding"}))
+                            except Exception:
+                                pass
                     elif msg_type == "save_email":
                         _spawn(handle_save_email, (msg,), websocket)
                     elif msg_type == "practice_request":
@@ -263,8 +277,17 @@ async def ws_handler(request):
                         print(f"  [WS] Settings updated → difficulty={prof.get('difficulty')}, condition={prof.get('user_condition')}")
                 except json.JSONDecodeError:
                     pass
+                except Exception as _outer_e:
+                    import traceback as _tb2
+                    print(f"[WS] ❌ message handler EXCEPTION ({msg_type}): {_outer_e}", flush=True)
+                    _tb2.print_exc()
+                    # Keep the connection alive; do not re-raise
             elif raw_msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSE):
                 break
+    except Exception as _ws_e:
+        import traceback as _tb3
+        print(f"[WS] ❌ ws_handler loop EXCEPTION: {_ws_e}", flush=True)
+        _tb3.print_exc()
     finally:
         ws_clients.discard(websocket)
         ws_sessions.pop(websocket, None)
