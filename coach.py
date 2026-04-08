@@ -1953,10 +1953,19 @@ def handle_chat_message(msg):
     if not text:
         return
 
+    # SAFETY: if the chat state is missing a system prompt (e.g. server
+    # restarted mid-conversation, or the browser sent chat_message without
+    # ever calling chat_init first), auto-initialize it. Without this, the
+    # model receives an empty system string and tends to refuse tutor tasks
+    # like "make an animation" because it has no context that it is a tutor.
+    if not _chat_state.get("system"):
+        print("  [Chat] ⚠️ system prompt empty — auto-initializing chat state", flush=True)
+        handle_chat_init({"selectedCode": "", "fullCode": ""})
+
     _chat_state["messages"].append({"role": "user", "content": text})
     db.save_message("user", text)
 
-    print(f"  [Chat] User: {text[:60]}")
+    print(f"  [Chat] User: {text[:60]} | system len={len(_chat_state.get('system',''))} history={len(_chat_state['messages'])}", flush=True)
 
     import time as _time
     for attempt in range(3):
