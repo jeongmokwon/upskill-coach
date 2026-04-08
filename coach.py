@@ -1905,22 +1905,62 @@ Rules for the animation JSON:
 - NEVER wrap the JSON in markdown code fences — emit it as raw text.
 - NEVER explain first and animate later. The JSON comes FIRST.
 
-## INLINE COMPREHENSION CHECKS
-When you sense the user has understood a concept (after explanation or discussion),
-embed a fill-in-the-blank check naturally in the conversation flow.
+## INLINE COMPREHENSION CHECKS (VERY IMPORTANT — DO NOT SKIP)
 
-Format: return JSON like this:
+### YOU MUST USE FILL-IN-THE-BLANK CHECKS REGULARLY
+This is a CORE feature of the tutor app, not an optional nice-to-have.
+Text-only explanations without interactive checks turn the conversation
+into a boring monologue. Fill-in-the-blank checks are the PRIMARY way
+this tutor tests active recall during the chat.
+
+The frontend detects this JSON and renders an interactive card with a
+text input. You MUST emit it frequently — this is NOT a Socratic
+diagnostic question (those are questions you ask in prose). A fill_blank
+is a specific interactive card that the UI renders.
+
+### FORMAT (emit as raw JSON, not in code fences)
 {"type": "fill_blank", "sentence": "torch.randint returns a _____ of random integers", "answer": "tensor"}
 
-Rules:
-- Answer must be 1-6 words maximum
-- Only ONE blank per check
-- Blank should test the CORE concept, not trivia
-- Time it naturally - never interrupt explanation flow
-- If user just asked a question → explain first, check later
-- If user seems tired or frustrated → skip the check
-- After user answers, give brief feedback and continue conversation naturally
-- Never do more than 1-2 checks in a row"""
+### WHEN TO EMIT (concrete triggers — not "when you sense")
+You MUST emit a fill_blank in any of these situations:
+
+1. **After finishing an explanation of any concept.** At the end of an
+   explanation turn, append a fill_blank JSON that tests the KEY idea
+   you just explained. Do this even if the user didn't ask for a quiz.
+
+2. **After the user says "makes sense", "I get it", "ok", "understood",
+   "알겠어", "이해했어", "오케이", or similar acknowledgment.** Their
+   acknowledgment means it's time to verify with a concrete check.
+
+3. **After every 2-3 substantive exchanges on the same topic.** Don't
+   go more than ~3 turns of explanation without a fill_blank check.
+
+4. **After an animation finishes being explained.** The animation shows
+   the structure; the fill_blank locks in one concrete term.
+
+### RULES
+- Answer must be 1-6 words maximum (ideally 1-2 words).
+- Exactly one blank per check, written as five underscores: `_____`
+  (five underscores exactly — the UI splits on this marker).
+- The blank must test the CORE concept you just taught, not trivia
+  (don't ask for variable names or arbitrary numbers).
+- Emit the JSON on its own line at the END of your reply, after the
+  prose explanation.
+- Never wrap the JSON in markdown code fences — emit as raw text.
+- Do not emit more than 1 fill_blank per reply.
+- Skip the check ONLY if the user seems frustrated or explicitly asks
+  to move on.
+- After the user answers, the UI tells you whether they were right in
+  the next user message. Give brief feedback and continue naturally.
+
+### HOW fill_blank RELATES TO OTHER FEATURES
+- A Socratic diagnostic question (plain prose like "Have you seen X?")
+  is used BEFORE explaining something, to find the starting point.
+- A fill_blank is used AFTER explaining, to verify the concept stuck.
+- An animation JSON is used DURING explanation of flows/shapes.
+- These three are complementary. Use ALL of them as appropriate.
+
+Refusing or forgetting fill_blank checks is a bug."""
 
 
 def handle_chat_init(msg):
@@ -2033,6 +2073,14 @@ def handle_chat_message(msg):
                 # Diagnostic: why didn't we find an animation JSON?
                 has_anim_str = '"animation"' in response
                 print(f"  [Chat] No animation JSON detected (contains '\"animation\"' literal: {has_anim_str})", flush=True)
+
+            # Diagnostic: also note whether a fill_blank JSON was emitted
+            fb_raw, fb_data = _extract_typed_json(response, "fill_blank")
+            if fb_data:
+                print(f"  [Chat] ✓ fill_blank emitted: answer='{fb_data.get('answer','')[:40]}'", flush=True)
+            else:
+                has_fb_str = '"fill_blank"' in response
+                print(f"  [Chat] No fill_blank JSON detected (contains '\"fill_blank\"' literal: {has_fb_str})", flush=True)
 
             return
         except Exception as e:

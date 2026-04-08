@@ -2181,7 +2181,9 @@ function connect() {
                 // Render fill-in-the-blank card
                 const card = document.createElement('div');
                 card.className = 'fill-blank-card';
-                const parts = fb.sentence.split('_____');
+                // Tolerate 3+ underscores as the blank marker (model
+                // sometimes emits ___ or ____ instead of exactly _____).
+                const parts = fb.sentence.split(/_{3,}/);
                 card.innerHTML = `
                   <div class="fb-sentence">${parts[0]}<span class="fb-slot"><input type="text" class="fb-input" placeholder="?" autocomplete="off"></span>${parts[1] || ''}</div>
                   <button class="fb-check">Check</button>
