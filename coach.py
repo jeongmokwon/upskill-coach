@@ -289,12 +289,28 @@ async def ws_handler(request):
         print(f"[WS] ❌ ws_handler loop EXCEPTION: {_ws_e}", flush=True)
         _tb3.print_exc()
     finally:
+        # Capture context BEFORE removing from ws_sessions so the analyzer
+        # thread below can still use it.
+        final_ctx = ws_sessions.pop(websocket, None)
         ws_clients.discard(websocket)
-        ws_sessions.pop(websocket, None)
-        if ctx.user_id:
-            print(f"  [WS] Client disconnected: {ctx.user_id}")
-            _spawn(analyze_session_and_save, (), websocket)
-            threading.Thread(target=analyze_session_and_save, daemon=True).start()
+        if final_ctx and final_ctx.user_id:
+            print(f"  [WS] Client disconnected: {final_ctx.user_id} — running session analyzer", flush=True)
+
+            def _run_session_analyzer(_c=final_ctx):
+                # Rehydrate per-thread context so db.py uses the right
+                # user_id / session_id when writing insights.
+                _set_ctx(_c)
+                try:
+                    analyze_session_and_save()
+                except Exception as _ae:
+                    print(f"  [Insight] Analyzer thread failed: {_ae}", flush=True)
+                try:
+                    db.end_session()
+                    print(f"  [WS] Session closed for {_c.user_id}", flush=True)
+                except Exception as _ee:
+                    print(f"  [WS] end_session failed: {_ee}", flush=True)
+
+            threading.Thread(target=_run_session_analyzer, daemon=True).start()
 
     return websocket
 
@@ -733,10 +749,17 @@ def handle_identify(msg, websocket):
         if ctx:
             ctx.db_session_id = db.get_session_id()
         db.touch_activity()
-        if db.get_recent_insights(1):
-            extract_teaching_style()
 
-        print(f"  [Server] Returning user: {session_id} — studying: {study_topic}")
+        _recent = db.get_recent_insights(3)
+        print(f"  [Server] Returning user: {session_id} — studying: {study_topic} — recent insights: {len(_recent)}", flush=True)
+        if _recent:
+            extract_teaching_style()
+            if ctx and ctx.teaching_style:
+                print(f"  [Style] Applied to session for {profile['user_id']}: keys={list(ctx.teaching_style.keys())}", flush=True)
+            else:
+                print(f"  [Style] extract_teaching_style() ran but ctx.teaching_style is empty", flush=True)
+        else:
+            print(f"  [Style] Skipping — no previous insights for this user", flush=True)
 
         # Send state
         asyncio.run_coroutine_threadsafe(
