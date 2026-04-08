@@ -1727,6 +1727,53 @@ _chat_state = {
     "code_context": "",
 }
 
+
+def _extract_typed_json(text, type_value):
+    """Extract the first balanced-brace JSON object in ``text`` whose top-level
+    ``type`` field equals ``type_value``. Handles nested braces, string
+    escapes, and fenced code blocks. Returns (match_str, parsed_dict) or
+    (None, None) if not found.
+    """
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] != '{':
+            i += 1
+            continue
+        depth = 0
+        start = i
+        in_str = False
+        esc = False
+        while i < n:
+            c = text[i]
+            if esc:
+                esc = False
+            elif c == '\\':
+                esc = True
+            elif in_str:
+                if c == '"':
+                    in_str = False
+            elif c == '"':
+                in_str = True
+            elif c == '{':
+                depth += 1
+            elif c == '}':
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start:i + 1]
+                    try:
+                        obj = json.loads(candidate)
+                        if isinstance(obj, dict) and obj.get("type") == type_value:
+                            return candidate, obj
+                    except Exception:
+                        pass
+                    i += 1
+                    break
+            i += 1
+        else:
+            # Unbalanced — stop scanning
+            break
+    return None, None
+
 TUTOR_SYSTEM_PROMPT = """You are a world-class personal tutor coaching a user through technical learning (currently: Karpathy's "Let's Build GPT" tutorial). Your teaching philosophy is based on these core principles:
 
 ## CORE PRINCIPLES
@@ -1793,30 +1840,44 @@ TUTOR_SYSTEM_PROMPT = """You are a world-class personal tutor coaching a user th
 - Natural conversation, not rigid Q&A format
 - Korean or English based on what user writes
 
-## WHEN TO USE ANIMATIONS
+## WHEN TO USE ANIMATIONS (VERY IMPORTANT — DO NOT SKIP)
 Before explaining ANY concept, ask yourself:
-"Is this concept inherently a flow or transformation?
-Would explaining it in text force the user to hold
-multiple things in working memory simultaneously?"
+"Is this concept inherently a flow, transformation, or multi-step process?
+Would explaining it in text force the user to hold multiple things in
+working memory simultaneously?"
 
-If YES → show animation FIRST, before any text explanation.
+If YES → **emit the animation JSON FIRST, before any prose explanation.**
 If NO → text is fine.
 
-Concepts that are almost always YES:
+Concepts that are almost always YES (emit animation JSON):
 - Data flowing through layers (B, T, C transformations)
 - Dimension changes (embedding → logits → softmax)
 - Sequential processes (how attention scores are computed)
 - "Before and after" state changes in tensors
+- Any question that starts with "how does X work" / "how is X computed"
+- Any explanation that would mention more than 2 tensor shapes
 
 Concepts that are usually NO:
 - Definitions ("what is vocab_size")
 - Variable names or purposes
 - Conceptual relationships that can be stated in one sentence
 
-When YES, return JSON before explaining:
+### HOW TO EMIT THE ANIMATION
+When YES, the FIRST thing you output must be a JSON object on its own line:
 {"type": "animation", "title": "<short title>", "description": "<what to animate>", "code_context": "<relevant code snippet>"}
-Then explain in text AFTER the animation. Never explain first and animate later.
-The UI will detect this JSON, generate the animation, and show it in a full-screen panel.
+
+Rules for the animation JSON:
+- It MUST be a single valid JSON object (no comments, no trailing commas).
+- Put it at the START of your reply, before any prose.
+- `code_context` is a short code snippet (can be empty string if no code available).
+- Keep `code_context` SHORT and avoid raw unescaped `{` `}` inside it —
+  prefer simple one-line expressions or pseudocode over full multi-line
+  code blocks. Escape any necessary quotes with `\"`.
+- After the JSON, add a short (1-2 sentence) prose preamble and then the
+  actual explanation. The UI detects the JSON, opens a full-screen
+  animated panel, and shows your prose alongside.
+- NEVER wrap the JSON in markdown code fences — emit it as raw text.
+- NEVER explain first and animate later. The JSON comes FIRST.
 
 ## INLINE COMPREHENSION CHECKS
 When you sense the user has understood a concept (after explanation or discussion),
@@ -1914,33 +1975,29 @@ def handle_chat_message(msg):
             _chat_state["messages"].append({"role": "assistant", "content": response})
             db.save_message("coach", response)
             send_to_client({"type": "chat_done"})
-            print(f"  [Chat] Claude: {response[:60]}")
+            print(f"  [Chat] Claude ({len(response)} chars): {response[:200]}{'...' if len(response) > 200 else ''}", flush=True)
 
-
-
-
-            # Check for animation JSON in response
-            anim_match = _re.search(r'\{[^{}]*"type"\s*:\s*"animation"[^{}]*\}', response)
-            if anim_match:
-                try:
-                    anim_data = json.loads(anim_match.group())
-                    print(f"  [Chat] Animation requested: {anim_data.get('title', '')}")
-                    # Trigger explain animation pipeline with the animation request
-                    anim_msg = {
-                        "selectedCode": anim_data.get("code_context", _chat_state.get("code_context", "")),
-                        "fullCode": anim_data.get("code_context", ""),
-                        "context": anim_data.get("description", anim_data.get("title", "")),
-                        "chatTriggered": True,
-                    }
-                    send_to_client({"type": "chat_animation_start"})
-                    # Preserve the current per-connection context in the child thread
-                    _cur_ctx = _ctx()
-                    def _run_anim(_msg=anim_msg, _c=_cur_ctx):
-                        _set_ctx(_c)
-                        handle_explain_animation(_msg)
-                    threading.Thread(target=_run_anim, daemon=True).start()
-                except json.JSONDecodeError:
-                    pass
+            # Check for animation JSON in response (balanced-brace parser)
+            anim_raw, anim_data = _extract_typed_json(response, "animation")
+            if anim_data:
+                print(f"  [Chat] ✨ Animation requested: {anim_data.get('title', '')[:80]}", flush=True)
+                anim_msg = {
+                    "selectedCode": anim_data.get("code_context", _chat_state.get("code_context", "")),
+                    "fullCode": anim_data.get("code_context", ""),
+                    "context": anim_data.get("description", anim_data.get("title", "")),
+                    "chatTriggered": True,
+                }
+                send_to_client({"type": "chat_animation_start"})
+                # Preserve the current per-connection context in the child thread
+                _cur_ctx = _ctx()
+                def _run_anim(_msg=anim_msg, _c=_cur_ctx):
+                    _set_ctx(_c)
+                    handle_explain_animation(_msg)
+                threading.Thread(target=_run_anim, daemon=True).start()
+            else:
+                # Diagnostic: why didn't we find an animation JSON?
+                has_anim_str = '"animation"' in response
+                print(f"  [Chat] No animation JSON detected (contains '\"animation\"' literal: {has_anim_str})", flush=True)
 
             return
         except Exception as e:

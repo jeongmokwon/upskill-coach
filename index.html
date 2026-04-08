@@ -1271,6 +1271,44 @@ const TMPL_COLORS = {
   border: '#30363d', palette: ['#58a6ff','#3fb950','#f0883e','#f85149','#bc8cff','#56d4dd','#f778ba']
 };
 
+// Extract the first balanced-brace JSON object whose top-level "type" equals
+// `typeValue`. Handles nested braces and string escapes (unlike a naive regex).
+// Returns { raw, obj } or null.
+function extractTypedJson(text, typeValue) {
+  if (!text || typeof text !== 'string') return null;
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    if (text[i] !== '{') { i++; continue; }
+    let depth = 0, start = i, inStr = false, esc = false;
+    while (i < n) {
+      const c = text[i];
+      if (esc) { esc = false; }
+      else if (c === '\\') { esc = true; }
+      else if (inStr) { if (c === '"') inStr = false; }
+      else if (c === '"') { inStr = true; }
+      else if (c === '{') { depth++; }
+      else if (c === '}') {
+        depth--;
+        if (depth === 0) {
+          const candidate = text.substring(start, i + 1);
+          try {
+            const obj = JSON.parse(candidate);
+            if (obj && typeof obj === 'object' && obj.type === typeValue) {
+              return { raw: candidate, obj };
+            }
+          } catch (_e) { /* not valid JSON, keep scanning */ }
+          i++;
+          break;
+        }
+      }
+      i++;
+    }
+    if (i >= n) break;
+  }
+  return null;
+}
+
 function renderTemplate(template, data) {
   const sid = 'tmpl-' + Math.random().toString(36).slice(2,8);
   const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -2075,11 +2113,12 @@ function connect() {
             delete sEl.dataset.streaming;
             // Strip animation JSON from display — it's handled separately via chat_animation_start
             const rawA = sEl.textContent;
-            const animMatch = rawA.match(/\{[^{}]*"type"\s*:\s*"animation"[^{}]*\}/);
-            if (animMatch) {
-              const idxA = rawA.indexOf(animMatch[0]);
+            const animHit = extractTypedJson(rawA, 'animation');
+            if (animHit) {
+              const animRaw = animHit.raw;
+              const idxA = rawA.indexOf(animRaw);
               const beforeA = rawA.substring(0, idxA).trim();
-              const afterA = rawA.substring(idxA + animMatch[0].length).trim();
+              const afterA = rawA.substring(idxA + animRaw.length).trim();
               sEl.innerHTML = '';
               if (beforeA) {
                 const beforeDiv = document.createElement('div');
@@ -2099,14 +2138,15 @@ function connect() {
             }
             // Check for fill_blank JSON in the streamed text
             const raw = sEl.textContent;
-            const jsonMatch = raw.match(/\{[^{}]*"type"\s*:\s*"fill_blank"[^{}]*\}/);
-            if (jsonMatch) {
+            const fbHit = extractTypedJson(raw, 'fill_blank');
+            if (fbHit) {
               try {
-                const fb = JSON.parse(jsonMatch[0]);
+                const fb = fbHit.obj;
+                const fbRaw = fbHit.raw;
                 // Split text: before JSON and after JSON
-                const idx = raw.indexOf(jsonMatch[0]);
+                const idx = raw.indexOf(fbRaw);
                 const before = raw.substring(0, idx).trim();
-                const after = raw.substring(idx + jsonMatch[0].length).trim();
+                const after = raw.substring(idx + fbRaw.length).trim();
                 sEl.innerHTML = '';
                 if (before) sEl.innerHTML = before.replace(/\n/g, '<br>') + '<br><br>';
                 // Render fill-in-the-blank card
