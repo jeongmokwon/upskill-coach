@@ -153,6 +153,35 @@
     z-index: 200;
     border-left: none;
   }
+  /* Side-column overlay used when animation is triggered from chat-screen.
+     The chat-screen stays visible on the left; the explain-panel is fixed
+     to the right half so both can be seen simultaneously. */
+  #explain-panel.chat-side-overlay {
+    position: absolute;
+    top: 0; right: 0; bottom: 0;
+    width: 560px !important;
+    z-index: 150;
+    border-left: 1px solid #21262d;
+    box-shadow: -8px 0 24px rgba(0,0,0,0.4);
+  }
+  /* When the side overlay is active, shrink the chat-screen content area so
+     its messages and input stay visible to the left of the panel. */
+  #chat-screen.with-explain #chat-screen-messages,
+  #chat-screen.with-explain .chat-input-bar {
+    max-width: calc(100% - 560px);
+    margin: 0;
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  @media (max-width: 900px) {
+    #explain-panel.chat-side-overlay {
+      width: 100% !important;
+    }
+    #chat-screen.with-explain #chat-screen-messages,
+    #chat-screen.with-explain .chat-input-bar {
+      display: none;
+    }
+  }
   #explain-panel-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 14px 20px; border-bottom: 1px solid #21262d;
@@ -2219,10 +2248,11 @@ function connect() {
         caContent.innerHTML = '<div data-loading="1" style="color:#484f58;font-size:14px;padding:40px 20px;text-align:center;">✨ Generating animation from conversation...</div>';
 
         if (fromChatScreen) {
-          // Hide full-screen chat; show explain-panel as a fullscreen overlay on top
-          chatScreenEl.classList.remove('active');
+          // Keep chat-screen visible on the left, open explain-panel as a
+          // fixed side column on the right so both are visible at once.
+          chatScreenEl.classList.add('with-explain');
           caPanel.classList.add('open');
-          caPanel.classList.add('fullscreen-overlay');
+          caPanel.classList.add('chat-side-overlay');
         } else {
           // Legacy code-editor flow
           const caDisplay = document.getElementById('display');
@@ -2974,16 +3004,21 @@ document.getElementById('explain-dismiss').addEventListener('click', () => {
     document.getElementById('explain-dismiss').textContent = 'Dismiss';
 
     if (window._chatAnimationFromScreen) {
-      // Restore the new full-screen chat view
+      // Close the side-column explain overlay; keep chat-screen visible.
       window._chatAnimationFromScreen = false;
       panel.classList.remove('fullscreen-overlay');
+      panel.classList.remove('chat-side-overlay');
       panel.classList.remove('open');
       panel.style.width = '';
       const content = document.getElementById('explain-content');
       content.innerHTML = '';
       content.style.cssText = '';
       const chatScreenEl = document.getElementById('chat-screen');
-      if (chatScreenEl) chatScreenEl.classList.add('active');
+      if (chatScreenEl) {
+        chatScreenEl.classList.remove('with-explain');
+        // chat-screen was never deactivated, but make sure it's active
+        chatScreenEl.classList.add('active');
+      }
       const csInput = document.getElementById('chat-screen-input');
       const csSend = document.getElementById('chat-screen-send');
       if (csInput) { csInput.disabled = false; csInput.focus(); }
