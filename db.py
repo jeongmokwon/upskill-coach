@@ -160,13 +160,20 @@ def init_db():
                 updated_at TEXT NOT NULL
             );
         """)
-        # Migrate: add email column if missing
+        # IMPORTANT: commit the CREATE TABLEs BEFORE attempting any ALTER
+        # migration. Otherwise, if an ALTER raises (e.g. column already
+        # exists on a fresh DB), psycopg2 marks the transaction as aborted
+        # and the final commit becomes a rollback, wiping out the tables
+        # we just created.
+        conn.commit()
+
+        # Migrate: add email column if missing (separate transaction so a
+        # failure here does not poison the CREATE TABLE commit above).
         try:
             conn.cursor().execute("ALTER TABLE user_profiles ADD COLUMN email TEXT DEFAULT ''")
             conn.commit()
         except Exception:
-            pass
-        conn.commit()
+            conn.rollback()  # clear aborted-transaction state
     else:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS sessions (
