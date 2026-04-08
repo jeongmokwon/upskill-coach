@@ -1829,14 +1829,21 @@ def handle_chat_init(msg):
     if cur_style:
         style_text = "\n\n## OPTIMIZED TEACHING STYLE\n" + _build_teaching_style_block()
 
+    # Only include code context block if there's actual code to show
+    code_ctx_text = ""
+    if selected_code.strip() or full_code.strip():
+        code_ctx_text = (
+            "\n\n## CURRENT CODE CONTEXT\n"
+            "The student selected the following code and opened a free chat about it:\n"
+            "```\n" + selected_code + "\n```\n\n"
+            "Full file:\n```python\n" + full_code[:2000] + "\n```"
+        )
+
     _chat_state["system"] = (
         TUTOR_SYSTEM_PROMPT + "\n\n"
-        + user_ctx + "\n\n"
-        "## CURRENT CODE CONTEXT\n"
-        "The student selected the following code and opened a free chat about it:\n"
-        "```\n" + selected_code + "\n```\n\n"
-        "Full file:\n```python\n" + full_code[:2000] + "\n```\n\n"
-        "Start by understanding what the student wants to know. Don't lecture — ask what they're curious about or stuck on."
+        + user_ctx
+        + code_ctx_text
+        + "\n\nStart by understanding what the student wants to know. Don't lecture — ask what they're curious about or stuck on."
         + insights_text
         + style_text
     )
@@ -1890,11 +1897,12 @@ def handle_chat_message(msg):
                         "chatTriggered": True,
                     }
                     send_to_client({"type": "chat_animation_start"})
-                    threading.Thread(
-                        target=handle_explain_animation,
-                        args=(anim_msg,),
-                        daemon=True,
-                    ).start()
+                    # Preserve the current per-connection context in the child thread
+                    _cur_ctx = _ctx()
+                    def _run_anim(_msg=anim_msg, _c=_cur_ctx):
+                        _set_ctx(_c)
+                        handle_explain_animation(_msg)
+                    threading.Thread(target=_run_anim, daemon=True).start()
                 except json.JSONDecodeError:
                     pass
 

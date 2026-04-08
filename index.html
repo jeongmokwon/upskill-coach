@@ -147,6 +147,12 @@
     display: flex; flex-direction: column;
   }
   #explain-panel.open { width: 560px; }
+  #explain-panel.fullscreen-overlay {
+    position: absolute; inset: 0;
+    width: 100% !important; height: 100%;
+    z-index: 200;
+    border-left: none;
+  }
   #explain-panel-header {
     display: flex; align-items: center; justify-content: space-between;
     padding: 14px 20px; border-bottom: 1px solid #21262d;
@@ -716,12 +722,14 @@
   }
   #home-screen .home-subtitle {
     color: #8b949e; font-size: 15px; line-height: 1.6;
-    text-align: center; max-width: 460px; margin-bottom: 40px;
+    text-align: center; max-width: 460px;
+    /* No big margin — input sits right under with its own margin-top */
+    margin-bottom: 0;
   }
   #home-screen .home-input-bar {
-    border-top: 1px solid #21262d;
-    padding: 20px 24px;
-    display: flex; gap: 12px; align-items: center;
+    margin-top: 24px;
+    display: flex; gap: 10px; align-items: center;
+    width: 100%; max-width: 560px;
   }
   #home-screen .home-input {
     flex: 1; background: #0d1117;
@@ -1151,12 +1159,12 @@
       </div>
       <div class="home-title">AI Upskill Coach</div>
       <div class="home-subtitle">Your personal learning companion. Ask me anything — I'll explain it step by step.</div>
-    </div>
-    <div class="home-input-bar">
-      <input type="text" class="home-input" id="home-input" placeholder="Ask your coach" autocomplete="off">
-      <button class="home-send" id="home-send" title="Send">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
-      </button>
+      <div class="home-input-bar">
+        <input type="text" class="home-input" id="home-input" placeholder="Ask your coach" autocomplete="off" autofocus>
+        <button class="home-send" id="home-send" title="Send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -1727,6 +1735,11 @@ function connect() {
         document.getElementById('onboarding-screen').classList.remove('active');
         document.getElementById('quiz-screen').classList.remove('active');
         document.getElementById('home-screen').classList.add('active');
+        // Autofocus the "Ask your coach" input so the blinking caret is visible immediately
+        setTimeout(() => {
+          const hi = document.getElementById('home-input');
+          if (hi) hi.focus();
+        }, 50);
         break;
 
       case 'init_settings': {
@@ -2049,6 +2062,30 @@ function connect() {
           const sEl = chatMsgs3.querySelector('[data-streaming]');
           if (sEl) {
             delete sEl.dataset.streaming;
+            // Strip animation JSON from display — it's handled separately via chat_animation_start
+            const rawA = sEl.textContent;
+            const animMatch = rawA.match(/\{[^{}]*"type"\s*:\s*"animation"[^{}]*\}/);
+            if (animMatch) {
+              const idxA = rawA.indexOf(animMatch[0]);
+              const beforeA = rawA.substring(0, idxA).trim();
+              const afterA = rawA.substring(idxA + animMatch[0].length).trim();
+              sEl.innerHTML = '';
+              if (beforeA) {
+                const beforeDiv = document.createElement('div');
+                beforeDiv.innerHTML = beforeA.replace(/</g, '&lt;').replace(/\n/g, '<br>');
+                sEl.appendChild(beforeDiv);
+              }
+              const placeholder = document.createElement('div');
+              placeholder.style.cssText = 'margin-top:8px;padding:10px 14px;border:1px solid #30363d;background:#161b22;border-radius:8px;font-size:12px;color:#8b949e;';
+              placeholder.textContent = '✨ Opening animated explanation...';
+              sEl.appendChild(placeholder);
+              if (afterA) {
+                const afterDiv = document.createElement('div');
+                afterDiv.style.marginTop = '8px';
+                afterDiv.innerHTML = afterA.replace(/</g, '&lt;').replace(/\n/g, '<br>');
+                sEl.appendChild(afterDiv);
+              }
+            }
             // Check for fill_blank JSON in the streamed text
             const raw = sEl.textContent;
             const jsonMatch = raw.match(/\{[^{}]*"type"\s*:\s*"fill_blank"[^{}]*\}/);
@@ -2119,17 +2156,31 @@ function connect() {
         window._savedChatTitle = document.getElementById('explain-panel-title').textContent;
         window._chatAnimationActive = true;
 
-        // Hide code editor, show animation panel full-width
-        const caDisplay = document.getElementById('display');
-        if (caDisplay) caDisplay.style.display = 'none';
+        // Detect whether the trigger came from the new full-screen chat view
+        const chatScreenEl = document.getElementById('chat-screen');
+        const fromChatScreen = !!(chatScreenEl && chatScreenEl.classList.contains('active'));
+        window._chatAnimationFromScreen = fromChatScreen;
+
         const caPanel = document.getElementById('explain-panel');
         document.getElementById('explain-panel-title').textContent = '✨ Animated Explanation';
         document.getElementById('explain-dismiss').textContent = '← Back to chat';
         caContent.style.cssText = '';
         caContent.innerHTML = '<div data-loading="1" style="color:#484f58;font-size:14px;padding:40px 20px;text-align:center;">✨ Generating animation from conversation...</div>';
-        caPanel.classList.add('open');
-        caPanel.style.width = '100%';
-        document.getElementById('reopen-explain-btn').style.display = 'none';
+
+        if (fromChatScreen) {
+          // Hide full-screen chat; show explain-panel as a fullscreen overlay on top
+          chatScreenEl.classList.remove('active');
+          caPanel.classList.add('open');
+          caPanel.classList.add('fullscreen-overlay');
+        } else {
+          // Legacy code-editor flow
+          const caDisplay = document.getElementById('display');
+          if (caDisplay) caDisplay.style.display = 'none';
+          caPanel.classList.add('open');
+          caPanel.style.width = '100%';
+        }
+        const reopenBtn = document.getElementById('reopen-explain-btn');
+        if (reopenBtn) reopenBtn.style.display = 'none';
         document.getElementById('explain-panel-scroll').scrollTop = 0;
         // Reset sections for new animation
         window._explainSections = [];
@@ -2870,6 +2921,27 @@ document.getElementById('explain-dismiss').addEventListener('click', () => {
     // Restore chat panel instead of closing
     window._chatAnimationActive = false;
     document.getElementById('explain-dismiss').textContent = 'Dismiss';
+
+    if (window._chatAnimationFromScreen) {
+      // Restore the new full-screen chat view
+      window._chatAnimationFromScreen = false;
+      panel.classList.remove('fullscreen-overlay');
+      panel.classList.remove('open');
+      panel.style.width = '';
+      const content = document.getElementById('explain-content');
+      content.innerHTML = '';
+      content.style.cssText = '';
+      const chatScreenEl = document.getElementById('chat-screen');
+      if (chatScreenEl) chatScreenEl.classList.add('active');
+      const csInput = document.getElementById('chat-screen-input');
+      const csSend = document.getElementById('chat-screen-send');
+      if (csInput) { csInput.disabled = false; csInput.focus(); }
+      if (csSend) csSend.disabled = false;
+      const csMsgs = document.getElementById('chat-screen-messages');
+      if (csMsgs) csMsgs.scrollTop = csMsgs.scrollHeight;
+      return;
+    }
+
     panel.style.width = '';  // Back to normal width (560px)
     const content = document.getElementById('explain-content');
     content.innerHTML = window._savedChatHTML || '';
