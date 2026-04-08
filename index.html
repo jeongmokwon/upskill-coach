@@ -682,6 +682,129 @@
     animation: fadeIn 0.5s ease;
   }
   #onboarding-screen.active { display: flex; }
+
+  /* ── Home screen (post-onboarding landing) ── */
+  #home-screen {
+    display: none;
+    position: absolute; inset: 0;
+    background: #0d1117;
+    z-index: 100;
+    flex-direction: column;
+    animation: fadeIn 0.4s ease;
+  }
+  #home-screen.active { display: flex; }
+  #home-screen .home-main {
+    flex: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 40px 20px;
+  }
+  #home-screen .home-icon {
+    width: 72px; height: 72px; border-radius: 16px;
+    background: #2ea44f;
+    display: flex; align-items: center; justify-content: center;
+    margin-bottom: 24px;
+    box-shadow: 0 4px 16px rgba(46,164,79,0.25);
+  }
+  #home-screen .home-icon svg {
+    width: 36px; height: 36px; stroke: #fff; fill: none;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  }
+  #home-screen .home-title {
+    color: #e6edf3; font-size: 32px; font-weight: 700;
+    margin-bottom: 12px; letter-spacing: -0.5px;
+  }
+  #home-screen .home-subtitle {
+    color: #8b949e; font-size: 15px; line-height: 1.6;
+    text-align: center; max-width: 460px; margin-bottom: 40px;
+  }
+  #home-screen .home-input-bar {
+    border-top: 1px solid #21262d;
+    padding: 20px 24px;
+    display: flex; gap: 12px; align-items: center;
+  }
+  #home-screen .home-input {
+    flex: 1; background: #0d1117;
+    border: 1px solid #30363d; border-radius: 12px;
+    color: #e6edf3; padding: 14px 18px;
+    font-size: 14px; font-family: inherit;
+    outline: none; transition: border-color 0.15s;
+  }
+  #home-screen .home-input::placeholder { color: #484f58; }
+  #home-screen .home-input:focus { border-color: #2ea44f; }
+  #home-screen .home-send {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: #2ea44f; border: none;
+    color: #fff; font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  #home-screen .home-send:hover { background: #3fb950; transform: translateY(-1px); }
+  #home-screen .home-send:disabled { opacity: 0.4; cursor: default; }
+
+  /* ── Free chat screen (full-screen chat view) ── */
+  #chat-screen {
+    display: none;
+    position: absolute; inset: 0;
+    background: #0d1117;
+    z-index: 100;
+    flex-direction: column;
+    animation: fadeIn 0.3s ease;
+  }
+  #chat-screen.active { display: flex; }
+  #chat-screen .chat-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid #21262d;
+    display: flex; align-items: center; gap: 12px;
+  }
+  #chat-screen .chat-header-icon {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: #2ea44f;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #chat-screen .chat-header-icon svg {
+    width: 18px; height: 18px; stroke: #fff; fill: none;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  }
+  #chat-screen .chat-header-title {
+    color: #e6edf3; font-size: 15px; font-weight: 600;
+  }
+  #chat-screen #chat-screen-messages {
+    flex: 1; overflow-y: auto; padding: 20px 24px;
+    display: flex; flex-direction: column; gap: 12px;
+    max-width: 800px; width: 100%;
+    margin: 0 auto;
+  }
+  #chat-screen .chat-input-bar {
+    border-top: 1px solid #21262d;
+    padding: 16px 24px;
+    display: flex; gap: 12px; align-items: flex-end;
+    max-width: 800px; width: 100%;
+    margin: 0 auto;
+    box-sizing: border-box;
+  }
+  #chat-screen .chat-input-field {
+    flex: 1; background: #0d1117;
+    border: 1px solid #30363d; border-radius: 12px;
+    color: #e6edf3; padding: 12px 16px;
+    font-size: 14px; font-family: inherit;
+    outline: none; resize: none;
+    min-height: 44px; max-height: 140px;
+    transition: border-color 0.15s;
+  }
+  #chat-screen .chat-input-field::placeholder { color: #484f58; }
+  #chat-screen .chat-input-field:focus { border-color: #2ea44f; }
+  #chat-screen .chat-send-btn {
+    width: 44px; height: 44px; border-radius: 50%;
+    background: #2ea44f; border: none;
+    color: #fff; font-size: 16px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+  }
+  #chat-screen .chat-send-btn:hover { background: #3fb950; }
+  #chat-screen .chat-send-btn:disabled { opacity: 0.4; cursor: default; }
   #onboarding-screen .ob-step-counter {
     color: #484f58; font-size: 12px; margin-bottom: 12px; letter-spacing: 1px;
   }
@@ -1017,6 +1140,40 @@
         <button class="ob-next" id="ob-next">Next →</button>
       </div>
       <button class="ob-submit" id="ob-submit">Start Learning →</button>
+    </div>
+  </div>
+
+  <!-- Home screen (shown after onboarding) -->
+  <div id="home-screen">
+    <div class="home-main">
+      <div class="home-icon">
+        <svg viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>
+      </div>
+      <div class="home-title">AI Upskill Coach</div>
+      <div class="home-subtitle">Your personal learning companion. Ask me anything — I'll explain it step by step.</div>
+    </div>
+    <div class="home-input-bar">
+      <input type="text" class="home-input" id="home-input" placeholder="Ask your coach" autocomplete="off">
+      <button class="home-send" id="home-send" title="Send">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- Full-screen chat view (activated from home input) -->
+  <div id="chat-screen">
+    <div class="chat-header">
+      <div class="chat-header-icon">
+        <svg viewBox="0 0 24 24"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>
+      </div>
+      <div class="chat-header-title">AI Upskill Coach</div>
+    </div>
+    <div id="chat-screen-messages"></div>
+    <div class="chat-input-bar">
+      <textarea class="chat-input-field" id="chat-screen-input" placeholder="Ask your coach" rows="1"></textarea>
+      <button class="chat-send-btn" id="chat-screen-send" title="Send">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+      </button>
     </div>
   </div>
 
@@ -1458,6 +1615,70 @@ function getSessionId() {
 }
 const SESSION_ID = getSessionId();
 
+// Return the currently active chat messages container
+// (full-screen chat if visible, otherwise the legacy side panel)
+function getActiveChatMsgs() {
+  const screen = document.getElementById('chat-screen');
+  if (screen && screen.classList.contains('active')) {
+    return document.getElementById('chat-screen-messages');
+  }
+  return document.getElementById('chat-messages');
+}
+
+// Transition from home screen to full-screen chat view
+function openChatScreen(firstMessage) {
+  document.getElementById('home-screen').classList.remove('active');
+  const chatScreen = document.getElementById('chat-screen');
+  chatScreen.classList.add('active');
+  const msgsEl = document.getElementById('chat-screen-messages');
+  msgsEl.innerHTML = '';
+
+  // Initialize chat on server (first time only)
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'chat_init' }));
+  }
+
+  // Send the first message (from home input)
+  if (firstMessage && firstMessage.trim()) {
+    sendChatScreenMessage(firstMessage.trim());
+  }
+
+  const csInput = document.getElementById('chat-screen-input');
+  if (csInput) csInput.focus();
+}
+
+function sendChatScreenMessage(text) {
+  if (!text) return;
+  const msgsEl = document.getElementById('chat-screen-messages');
+  if (!msgsEl) return;
+
+  // Render user message
+  const uDiv = document.createElement('div');
+  uDiv.className = 'chat-msg user';
+  uDiv.innerHTML = text.replace(/</g, '&lt;').replace(/\n/g, '<br>');
+  msgsEl.appendChild(uDiv);
+
+  // Typing indicator
+  const typingDiv = document.createElement('div');
+  typingDiv.className = 'chat-msg system';
+  typingDiv.dataset.typing = '1';
+  typingDiv.textContent = '⏳';
+  typingDiv.style.animation = 'blink 1s infinite';
+  msgsEl.appendChild(typingDiv);
+  msgsEl.scrollTop = msgsEl.scrollHeight;
+
+  // Disable input
+  const csInput = document.getElementById('chat-screen-input');
+  const csSend = document.getElementById('chat-screen-send');
+  if (csInput) { csInput.value = ''; csInput.style.height = 'auto'; csInput.disabled = true; }
+  if (csSend) csSend.disabled = true;
+
+  // Send to server
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: 'chat_message', text }));
+  }
+}
+
 let wsPath = '/ws';
 function connect() {
   const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -1501,10 +1722,11 @@ function connect() {
         break;
 
       case 'show_code_editor':
+        // Onboarding complete → show home screen (free chat landing)
         if (waitingEl) waitingEl.style.display = 'none';
         document.getElementById('onboarding-screen').classList.remove('active');
         document.getElementById('quiz-screen').classList.remove('active');
-        showCodeEditor();
+        document.getElementById('home-screen').classList.add('active');
         break;
 
       case 'init_settings': {
@@ -1780,7 +2002,7 @@ function connect() {
       }
 
       case 'chat_reply': {
-        const chatMsgs = document.getElementById('chat-messages');
+        const chatMsgs = getActiveChatMsgs();
         if (!chatMsgs) break;
         // Remove typing indicator
         const typing = chatMsgs.querySelector('[data-typing]');
@@ -1791,16 +2013,20 @@ function connect() {
         cDiv.innerHTML = msg.text.replace(/</g, '&lt;').replace(/\n/g, '<br>');
         chatMsgs.appendChild(cDiv);
         chatMsgs.scrollTop = chatMsgs.scrollHeight;
-        // Re-enable input
+        // Re-enable input (both legacy panel and full-screen chat)
         const chatInput = document.getElementById('chat-input');
         const chatSend = document.getElementById('chat-send');
         if (chatInput) { chatInput.disabled = false; chatInput.focus(); }
         if (chatSend) chatSend.disabled = false;
+        const csInput = document.getElementById('chat-screen-input');
+        const csSend = document.getElementById('chat-screen-send');
+        if (csInput) { csInput.disabled = false; csInput.focus(); }
+        if (csSend) csSend.disabled = false;
         break;
       }
 
       case 'chat_stream': {
-        const chatMsgs2 = document.getElementById('chat-messages');
+        const chatMsgs2 = getActiveChatMsgs();
         if (!chatMsgs2) break;
         // Find or create streaming message
         let streamEl = chatMsgs2.querySelector('[data-streaming]');
@@ -1818,7 +2044,7 @@ function connect() {
       }
 
       case 'chat_done': {
-        const chatMsgs3 = document.getElementById('chat-messages');
+        const chatMsgs3 = getActiveChatMsgs();
         if (chatMsgs3) {
           const sEl = chatMsgs3.querySelector('[data-streaming]');
           if (sEl) {
@@ -1878,6 +2104,10 @@ function connect() {
         const chatSend2 = document.getElementById('chat-send');
         if (chatInput2) { chatInput2.disabled = false; chatInput2.focus(); }
         if (chatSend2) chatSend2.disabled = false;
+        const csInput2 = document.getElementById('chat-screen-input');
+        const csSend2 = document.getElementById('chat-screen-send');
+        if (csInput2) { csInput2.disabled = false; csInput2.focus(); }
+        if (csSend2) csSend2.disabled = false;
         break;
       }
 
@@ -3391,7 +3621,7 @@ function showQuiz(msg) {
   obGoTo(0); // Initialize
 }
 
-// ── Email prompt handlers (deferred — elements are below script) ──
+// ── Email prompt + home/chat-screen handlers (deferred — elements are below script) ──
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('ep-save')?.addEventListener('click', () => {
     const email = document.getElementById('ep-email').value.trim();
@@ -3405,6 +3635,36 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   document.getElementById('ep-email')?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') document.getElementById('ep-save').click();
+  });
+
+  // Home screen → full-screen chat transition
+  const homeInput = document.getElementById('home-input');
+  const homeSend = document.getElementById('home-send');
+  function submitHome() {
+    const text = homeInput.value.trim();
+    if (!text) return;
+    openChatScreen(text);
+  }
+  homeSend?.addEventListener('click', submitHome);
+  homeInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); submitHome(); }
+  });
+
+  // Full-screen chat input
+  const csInput = document.getElementById('chat-screen-input');
+  const csSend = document.getElementById('chat-screen-send');
+  csInput?.addEventListener('input', () => {
+    csInput.style.height = 'auto';
+    csInput.style.height = Math.min(csInput.scrollHeight, 140) + 'px';
+  });
+  function submitCs() {
+    const text = csInput.value.trim();
+    if (!text) return;
+    sendChatScreenMessage(text);
+  }
+  csSend?.addEventListener('click', submitCs);
+  csInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitCs(); }
   });
 });
 
