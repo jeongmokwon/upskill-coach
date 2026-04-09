@@ -1,5 +1,3 @@
 anthropic
-openai
 aiohttp
-numpy
 psycopg2-binary
