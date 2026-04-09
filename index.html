@@ -1443,23 +1443,16 @@ function connect() {
         ws.send(JSON.stringify({ type: 'identify', session_id: SESSION_ID }));
         break;
 
-      case 'connected':
-        if (waitingEl) waitingEl.style.display = 'none';
-        break;
-
       case 'show_onboarding':
-        if (waitingEl) waitingEl.style.display = 'none';
         document.getElementById('onboarding-screen').classList.add('active');
         break;
 
       case 'show_quiz':
-        if (waitingEl) waitingEl.style.display = 'none';
         showQuiz(msg);
         break;
 
       case 'show_code_editor':
         // Onboarding complete → show home screen (free chat landing)
-        if (waitingEl) waitingEl.style.display = 'none';
         document.getElementById('onboarding-screen').classList.remove('active');
         document.getElementById('quiz-screen').classList.remove('active');
         document.getElementById('home-screen').classList.add('active');
@@ -1468,134 +1461,6 @@ function connect() {
           const hi = document.getElementById('home-input');
           if (hi) hi.focus();
         }, 50);
-        break;
-
-      case 'question':
-        if (waitingEl) waitingEl.style.display = 'none';
-        lastQuestionText = msg.text;
-        questionLabel.querySelector('.q-mode').textContent = msg.mode;
-        questionLabel.querySelector('.q-text').textContent = msg.text;
-        questionLabel.style.display = 'block';
-        // Clear both views
-        textEl.textContent = '';
-        outputEl.style.display = 'none';
-        codeView.style.display = 'none';
-        codeView.innerHTML = '';
-        statusMsg.style.display = 'none';
-        break;
-
-      case 'capturing':
-        statusMsg.textContent = 'capturing screen...';
-        statusMsg.style.display = 'block';
-        break;
-
-      case 'streaming':
-        statusMsg.textContent = 'thinking...';
-        statusMsg.style.display = 'block';
-        break;
-
-      case 'delta':
-        statusMsg.style.display = 'none';
-        cursorEl.style.display = 'inline-block';
-        outputEl.style.display = 'block';
-        // Strip [[term]] markers for display
-        textEl.textContent += msg.text.replace(/\[\[([^\]]+)\]\]/g, '$1');
-        // (legacy scroll; #display removed in step 3b)
-        break;
-
-      case 'done':
-        cursorEl.style.display = 'none';
-        showAnswerInCodeBtn();
-        break;
-
-      case 'annotated_code':
-        statusMsg.style.display = 'none';
-        outputEl.style.display = 'none';
-        lastClaudeResponse = msg.note || '';
-        console.log('[WS] annotated_code received, code length:', msg.code?.length, 'line:', msg.highlight_line);
-        try {
-          renderAnnotatedCode(msg.code, msg.highlight_line, msg.note);
-        } catch (err) {
-          console.error('[WS] renderAnnotatedCode error:', err);
-          textEl.textContent = msg.note || 'Render error';
-          outputEl.style.display = 'block';
-        }
-        showAnswerInCodeBtn();
-        break;
-
-      case 'practice_questions':
-        renderPracticeQuestions(msg.questions, msg.code, msg.topic, msg.level);
-        break;
-
-      case 'followup_question':
-        renderFollowup(msg.question, msg.weak_concepts, msg.topic, msg.level);
-        break;
-
-      case 'grade_result': {
-        const fb = document.getElementById('fb-' + msg.gradeId);
-        if (fb) {
-          fb.textContent = (msg.correct ? '✅ ' : '❌ ') + msg.feedback;
-          fb.className = 'feedback ' + (msg.correct ? 'correct' : 'incorrect');
-          fb.style.display = 'block';
-        }
-        break;
-      }
-
-      case 'code_line_check_result': {
-        const textarea = document.getElementById(msg.editorId);
-        if (!textarea) break;
-
-        // Update error store
-        if (!window._codeErrors) window._codeErrors = {};
-        if (!window._codeErrors[msg.editorId]) window._codeErrors[msg.editorId] = {};
-        const errors = window._codeErrors[msg.editorId];
-
-        if (msg.has_error) {
-          errors[msg.lineNum] = { line: msg.line, correction: msg.correction };
-        } else {
-          delete errors[msg.lineNum];
-        }
-
-        // Clean errors for lines that changed or were removed
-        const lines = textarea.value.split('\n');
-        for (const ln of Object.keys(errors)) {
-          const idx = parseInt(ln) - 1;
-          if (idx >= lines.length || lines[idx].trim() !== errors[ln].line.trim()) {
-            delete errors[ln];
-          }
-        }
-
-        // Render floating post-its
-        renderPostits(msg.editorId);
-        break;
-      }
-
-      case 'code_inline_answer': {
-        const textarea = document.getElementById(msg.editorId);
-        if (!textarea) break;
-
-        // Find the #Q: line and insert answer right after it
-        const lines = textarea.value.split('\n');
-        const qLineIdx = msg.lineNum - 1;
-        if (qLineIdx >= 0 && qLineIdx < lines.length) {
-          // Wrap each answer line with #A: prefix
-          const answerLines = msg.answer.split('\n').map(l => '#A: ' + l);
-          lines.splice(qLineIdx + 1, 0, ...answerLines);
-          const newValue = lines.join('\n');
-          textarea.value = newValue;
-          // Move cursor to after the inserted answer
-          const cursorPos = lines.slice(0, qLineIdx + 1 + answerLines.length).join('\n').length + 1;
-          textarea.selectionStart = textarea.selectionEnd = cursorPos;
-
-          // Render answer line highlights
-          renderAnswerLines(msg.editorId);
-        }
-        break;
-      }
-
-
-      case 'drill_content':
-        renderDrillContent(msg.sections, msg.topic);
         break;
 
       case 'explain_animation_result': {
@@ -1667,60 +1532,6 @@ function connect() {
         if (window._explainSections) {
           window._explainSections.forEach(s => { s.total = finalTotal; });
           _updateExplainNav();
-        }
-        break;
-      }
-
-      case 'diagnostic_question':
-        renderDiagnosticQuestion(msg.question, msg.questionNum);
-        break;
-
-      case 'diagnostic_feedback_and_next': {
-        // Remove thinking indicator
-        const thinking = document.getElementById('diag-thinking');
-        if (thinking) thinking.remove();
-
-        const contentEl = document.getElementById('explain-content');
-
-        // Show evaluation feedback
-        const fbWrap = document.createElement('div');
-        fbWrap.style.cssText = 'padding:4px 16px 8px;animation:fadeIn 0.3s ease;';
-        const color = msg.understood ? '#3fb950' : '#f0883e';
-        fbWrap.innerHTML = `<div style="font-size:12px;color:${color};padding:8px 12px;background:${color}10;border-radius:8px;border:1px solid ${color}30;">${msg.understood ? '✓' : '✗'} ${msg.evaluation}</div>`;
-        contentEl.appendChild(fbWrap);
-
-        const scroll = document.getElementById('explain-panel-scroll');
-        scroll.scrollTop = scroll.scrollHeight;
-
-        if (msg.done) {
-          // Show transition to task
-          const transDiv = document.createElement('div');
-          transDiv.style.cssText = 'padding:20px 16px;text-align:center;color:#484f58;font-size:12px;animation:blink 1s infinite;';
-          transDiv.textContent = '⏳ Generating a practice task matched to your level...';
-          contentEl.appendChild(transDiv);
-          document.getElementById('explain-panel-title').textContent = '🏋️ Practice';
-        } else if (msg.nextQuestion) {
-          // Show next question after a brief pause
-          setTimeout(() => {
-            renderDiagnosticQuestion(msg.nextQuestion, msg.questionNum);
-          }, 800);
-        }
-        break;
-      }
-
-      case 'practice_task':
-        renderPracticeEditor(msg.task, msg.sectionMeta || {});
-        break;
-
-      case 'practice_review': {
-        const fb = document.getElementById('practice-feedback');
-        if (fb) {
-          fb.innerHTML = `<div style="margin-top:8px;padding:14px;border-radius:8px;border:1px solid ${msg.passed?'#3fb950':'#f0883e'};background:${msg.passed?'#3fb95010':'#f0883e10'};font-size:13px;line-height:1.6;color:#e6edf3;">${msg.feedback.replace(/\n/g,'<br>')}</div>`;
-        }
-        const submitBtn = document.querySelector('#practice-feedback')?.parentElement?.querySelector('button');
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.textContent = msg.passed ? '✅ Passed!' : '🔄 Try again & submit';
         }
         break;
       }
@@ -1882,19 +1693,11 @@ function connect() {
         caContent.style.cssText = '';
         caContent.innerHTML = '<div data-loading="1" style="color:#484f58;font-size:14px;padding:40px 20px;text-align:center;">✨ Generating animation from conversation...</div>';
 
-        if (fromChatScreen) {
-          // Keep chat-screen visible on the left, open explain-panel as a
-          // fixed side column on the right so both are visible at once.
-          chatScreenEl.classList.add('with-explain');
-          caPanel.classList.add('open');
-          caPanel.classList.add('chat-side-overlay');
-        } else {
-          // Legacy code-editor flow
-          const caDisplay = (document.getElementById('display') || _noopEl);
-          if (caDisplay) caDisplay.style.display = 'none';
-          caPanel.classList.add('open');
-          caPanel.style.width = '100%';
-        }
+        // Keep chat-screen visible on the left, open explain-panel as a
+        // fixed side column on the right so both are visible at once.
+        if (chatScreenEl) chatScreenEl.classList.add('with-explain');
+        caPanel.classList.add('open');
+        caPanel.classList.add('chat-side-overlay');
         document.getElementById('explain-panel-scroll').scrollTop = 0;
         // Reset sections for new animation
         window._explainSections = [];
@@ -1902,35 +1705,8 @@ function connect() {
         break;
       }
 
-      case 'diagnostic_error': {
-        const contentEl2 = document.getElementById('explain-content');
-        const th = document.getElementById('diag-thinking');
-        if (th) th.remove();
-        const ld = contentEl2?.querySelector('[data-loading]');
-        if (ld) ld.remove();
-        const errDiv = document.createElement('div');
-        errDiv.style.cssText = 'padding:20px 16px;text-align:center;animation:fadeIn 0.3s ease;';
-        errDiv.innerHTML = `<div style="color:#f0883e;font-size:13px;padding:14px;border:1px solid #f0883e30;background:#f0883e10;border-radius:8px;">${msg.message}</div><button style="margin-top:12px;padding:6px 16px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#e6edf3;font-size:12px;cursor:pointer;font-family:inherit;" onclick="this.parentElement.remove()">Dismiss</button>`;
-        contentEl2.appendChild(errDiv);
-        break;
-      }
-
-      case 'diagnostic_status': {
-        const contentEl3 = document.getElementById('explain-content');
-        let statusDiv = contentEl3?.querySelector('[data-diag-status]');
-        if (!statusDiv) {
-          statusDiv = document.createElement('div');
-          statusDiv.dataset.diagStatus = '1';
-          statusDiv.style.cssText = 'padding:8px 16px;color:#484f58;font-size:12px;text-align:center;animation:blink 1s infinite;';
-          contentEl3.appendChild(statusDiv);
-        }
-        statusDiv.textContent = msg.message;
-        break;
-      }
-
       case 'error':
-        statusMsg.textContent = 'error: ' + msg.message;
-        statusMsg.style.display = 'block';
+        console.error('[WS error]', msg.message);
         break;
     }
   };
