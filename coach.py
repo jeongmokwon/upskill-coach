@@ -13,10 +13,7 @@ Usage:
 import os
 import sys
 import base64
-import subprocess
-import tempfile
 import time
-import wave
 import json
 import asyncio
 import threading
@@ -24,15 +21,6 @@ import anthropic
 import http.server
 import aiohttp
 from aiohttp import web
-
-try:
-    import numpy as np
-    import sounddevice as sd
-    HAS_AUDIO = True
-except ImportError:
-    np = None
-    sd = None
-    HAS_AUDIO = False
 
 print("[BOOT] coach.py starting...", flush=True)
 
@@ -55,11 +43,6 @@ print("[BOOT] db imported OK", flush=True)
 
 
 # ─── Config ───────────────────────────────────────────────────────────
-SAMPLE_RATE = 16000
-CHANNELS = 1
-SCREENSHOT_PATH = os.path.join(tempfile.gettempdir(), "coach_screenshot.png")
-AUDIO_PATH = os.path.join(tempfile.gettempdir(), "coach_audio.wav")
-
 client = None  # Initialized lazily when API key is available
 HTTP_PORT = int(os.environ.get("PORT", 8765))
 WS_PORT = int(os.environ.get("WS_PORT", 8766))
@@ -357,87 +340,6 @@ def start_ws_server():
             traceback.print_exc()
 
     threading.Thread(target=_thread, daemon=True).start()
-
-# ─── Audio/Screen ─────────────────────────────────────────────────────
-recording = False
-audio_frames = []
-stream = None
-audio_process = None
-
-
-def capture_screenshot():
-    subprocess.run(["screencapture", "-x", SCREENSHOT_PATH], check=True)
-    with open(SCREENSHOT_PATH, "rb") as f:
-        return base64.standard_b64encode(f.read()).decode("utf-8")
-
-
-def start_recording():
-    global recording, audio_frames, stream
-    audio_frames = []
-    recording = True
-    print("🎙️  Recording... (Enter to stop)")
-
-    def callback(indata, frames, time_info, status):
-        if recording:
-            audio_frames.append(indata.copy())
-
-    stream = sd.InputStream(
-        samplerate=SAMPLE_RATE, channels=CHANNELS, dtype="int16", callback=callback
-    )
-    stream.start()
-
-
-def stop_recording():
-    global recording, stream
-    recording = False
-    stream.stop()
-    stream.close()
-
-    if not audio_frames:
-        return None
-
-    audio_data = np.concatenate(audio_frames, axis=0)
-    with wave.open(AUDIO_PATH, "wb") as wf:
-        wf.setnchannels(CHANNELS)
-        wf.setsampwidth(2)
-        wf.setframerate(SAMPLE_RATE)
-        wf.writeframes(audio_data.tobytes())
-
-    print(f"✅ Recorded ({len(audio_data) / SAMPLE_RATE:.1f}s)")
-    return AUDIO_PATH
-
-
-def transcribe_audio(audio_path):
-    try:
-        from openai import OpenAI
-        openai_client = OpenAI()
-        with open(audio_path, "rb") as f:
-            transcript = openai_client.audio.transcriptions.create(
-                model="whisper-1", file=f, language="en"
-            )
-        return transcript.text
-    except Exception as e:
-        print(f"⚠️  Whisper failed: {e}")
-        return input("Type your question: ")
-
-def speak(text):
-    print(f"🔊 Coach: {text}")
-    try:
-        from openai import OpenAI
-        openai_client = OpenAI()
-        response = openai_client.audio.speech.create(
-            model="tts-1", voice="nova", speed=1.07, input=text
-        )
-        speech_path = os.path.join(tempfile.gettempdir(), "coach_speech.mp3")
-        with open(speech_path, "wb") as f:
-            for chunk in response.iter_bytes():
-                f.write(chunk)
-        # Play in background so user can interrupt with Enter
-        global audio_process
-        audio_process = subprocess.Popen(["afplay", speech_path])
-    except Exception as e:
-        print(f"⚠️ TTS failed: {e}")
-        subprocess.run(["say", text])
 
 # ─── User profile ─────────────────────────────────────────────────────
 user_profile = {}  # Populated by onboarding: {user_id, user_name, goal, background}
