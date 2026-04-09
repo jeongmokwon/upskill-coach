@@ -463,103 +463,8 @@ import re as _re
 
 
 
-IS_SERVER = bool(os.environ.get("RENDER") or os.environ.get("BIND_HOST") == "0.0.0.0")
-
-
 def onboard_user():
-    """Ask for user name, load or create profile. Returns profile dict."""
-    global user_profile
-
-    if IS_SERVER:
-        return _onboard_server()
-
-    # Terminal mode: also sync to _global_ctx for WS handlers
-
-    print("\n👋 Welcome! What's your name?")
-    name = input("📝 : ").strip()
-    if not name:
-        name = "learner"
-
-    # Check if profile exists
-    profile = db.get_user_profile(name)
-    if profile:
-        db.set_user_id(profile["user_id"])
-        user_profile = profile
-        print(f"✅ Welcome back, {profile['user_name']}!")
-        if profile.get("studying"):
-            print(f"   Studying: {profile['studying']}")
-        if profile.get("goal"):
-            print(f"   Goal: {profile['goal']}")
-
-        # Returning user — ask what they're studying today (can change)
-        print(f"\n📚 What are you studying today? (Enter to continue: {profile.get('studying', '')})")
-        new_studying = input("📝 : ").strip()
-        if new_studying:
-            user_profile["studying"] = new_studying
-            db.update_user_profile(profile["user_id"], studying=new_studying)
-
-        # Ask difficulty & condition each session
-        diff, cond = _ask_difficulty_condition(
-            default_diff=profile.get("difficulty", 3),
-            default_cond=profile.get("user_condition", 3),
-        )
-        user_profile["difficulty"] = diff
-        user_profile["user_condition"] = cond
-        db.update_user_profile(profile["user_id"], difficulty=diff, user_condition=cond)
-        # Sync to global ctx for terminal mode
-        _global_ctx.user_profile = user_profile
-        _global_ctx.user_id = user_profile.get("user_id", "")
-        _global_ctx.study_topic = user_profile.get("studying", "")
-        return profile
-
-    # ── New user onboarding ──
-    print(f"\n🆕 Nice to meet you, {name}!\n")
-
-    # 1. What are you studying?
-    print("📚 뭘 공부하고 있어?")
-    print("   (e.g., 'Karpathy makemore', 'PyTorch basics', 'transformer from scratch')")
-    studying = input("📝 : ").strip()
-
-    # 2. What's your goal?
-    print("\n🎯 목표가 뭐야?")
-    print("   (e.g., 'ML 논문 읽고 구현하기', 'Python 기초 마스터')")
-    goal = input("📝 : ").strip()
-
-    # 3. Hint preference
-    print("\n💡 힌트 있는 게 좋아, 혼자 푸는 게 좋아?")
-    print("   1) 힌트 줘 — 틀리기 전에 방향을 알려줘")
-    print("   2) 혼자 할게 — 틀려도 스스로 깨달을래")
-    hint_input = input("📝 (1 or 2) : ").strip()
-    hint_preference = "solo" if hint_input == "2" else "hints"
-
-    # 4. Difficulty & condition
-    diff, cond = _ask_difficulty_condition()
-
-    uid = db.create_user_profile(
-        name, goal=goal, background="", studying=studying,
-        hint_preference=hint_preference, difficulty=diff, user_condition=cond,
-    )
-    db.set_user_id(uid)
-    user_profile = {
-        "user_id": uid,
-        "user_name": name,
-        "goal": goal,
-        "background": "",
-        "studying": studying,
-        "hint_preference": hint_preference,
-        "difficulty": diff,
-        "user_condition": cond,
-    }
-    print(f"\n✅ Profile saved! Let's go, {name}.")
-    # Sync to global ctx for terminal mode WS handlers
-    _global_ctx.user_profile = user_profile
-    _global_ctx.user_id = user_profile.get("user_id", "")
-    _global_ctx.study_topic = user_profile.get("studying", "")
-    return user_profile
-
-
-def _onboard_server():
-    """Server-mode: skip terminal onboarding. Browser handles it via identify/onboarding_submit."""
+    """Server-mode onboarding: browser handles it via identify/onboarding_submit."""
     global user_profile
     user_profile = {}
     print("  [Server] Waiting for browser sessions (localStorage-based)")
@@ -671,24 +576,6 @@ def handle_onboarding_submit(msg):
         "condition": condition,
     })
     send_to_client({"type": "show_code_editor"})
-
-
-def _ask_difficulty_condition(default_diff=3, default_cond=3):
-    """Ask user for difficulty and condition gauges at session start."""
-    if IS_SERVER:
-        return default_diff, default_cond
-
-    print(f"\n📊 Set your learning preferences for this session:")
-    print(f"   Difficulty (1=easy … 5=hard) [current: {default_diff}]")
-    d = input("📝 : ").strip()
-    diff = int(d) if d.isdigit() and 1 <= int(d) <= 5 else default_diff
-
-    print(f"   Your condition (1=tired … 5=sharp) [current: {default_cond}]")
-    c = input("📝 : ").strip()
-    cond = int(c) if c.isdigit() and 1 <= int(c) <= 5 else default_cond
-
-    print(f"   → Difficulty: {diff}, Condition: {cond}")
-    return diff, cond
 
 
 # ─── Onboarding Quiz ─────────────────────────────────────────────────
