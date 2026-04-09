@@ -75,68 +75,9 @@
   }
   .gauge-btns button:hover { border-color: #58a6ff; color: #e6edf3; }
   .gauge-btns button.active { background: #58a6ff; color: #0d1117; border-color: #58a6ff; }
-  #reopen-explain-btn {
-    display: none;
-    cursor: pointer;
-    padding: 4px 10px;
-    border-radius: 8px;
-    font-size: 13px;
-    color: #8b949e;
-    margin-left: auto;
-    margin-right: 8px;
-    user-select: none;
-  }
-  #reopen-explain-btn:hover { color: #e6edf3; background: #21262d; }
-  #gaps-btn {
-    position: relative; cursor: pointer;
-    font-size: 14px; color: #484f58;
-    display: flex; align-items: center; gap: 5px;
-    padding: 4px 10px; border-radius: 6px;
-    transition: color 0.2s, background 0.2s;
-    user-select: none;
-  }
-  #gaps-btn:hover { color: #e6edf3; background: #21262d; }
-  #gaps-btn.has-items { color: #f0883e; }
-  #gaps-badge {
-    background: #f0883e; color: #0d1117; font-size: 10px;
-    font-weight: 700; min-width: 16px; height: 16px;
-    border-radius: 8px; display: none;
-    align-items: center; justify-content: center; padding: 0 4px;
-  }
-  #gaps-badge.visible { display: flex; }
-  #gaps-dropdown {
-    display: none; position: absolute; top: 100%; right: 0;
-    margin-top: 8px; width: 320px;
-    background: #161b22; border: 1px solid #30363d;
-    border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-    z-index: 50; overflow: hidden;
-    animation: dropdownIn 0.15s ease;
-  }
-  #gaps-dropdown.open { display: block; }
   @keyframes dropdownIn {
     from { opacity: 0; transform: translateY(-4px); }
     to { opacity: 1; transform: translateY(0); }
-  }
-  #gaps-dropdown .dd-header {
-    font-size: 11px; color: #484f58; text-transform: uppercase;
-    letter-spacing: 0.8px; padding: 12px 16px 8px; font-weight: 600;
-    border-bottom: 1px solid #21262d;
-  }
-  #gaps-dropdown .dd-empty {
-    padding: 20px 16px; text-align: center;
-    font-size: 12px; color: #484f58;
-  }
-  .hole-item {
-    padding: 10px 16px; cursor: pointer;
-    border-left: 3px solid transparent;
-    transition: background 0.15s;
-  }
-  .hole-item:hover { background: #1f2937; }
-  .hole-item .hole-title {
-    font-size: 13px; color: #f0883e; font-weight: 600; margin-bottom: 4px;
-  }
-  .hole-item .hole-context {
-    font-size: 11px; color: #8b949e; line-height: 1.4;
   }
 
   /* ─── Right explainer panel ─── */
@@ -903,49 +844,6 @@
   }
   #onboarding-screen .ob-submit:hover { background: #2ea043; }
 
-  /* ── Email prompt (after first correct answer) ── */
-  #email-prompt {
-    display: none;
-    position: fixed; bottom: 24px; right: 24px;
-    background: #161b22; border: 1px solid #30363d; border-radius: 12px;
-    padding: 20px 24px; z-index: 200;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
-    animation: slideUp 0.4s ease;
-    max-width: 340px;
-  }
-  #email-prompt.active { display: block; }
-  @keyframes slideUp {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  #email-prompt .ep-title {
-    color: #e6edf3; font-size: 15px; font-weight: 600; margin-bottom: 6px;
-  }
-  #email-prompt .ep-desc {
-    color: #8b949e; font-size: 12px; margin-bottom: 14px; line-height: 1.5;
-  }
-  #email-prompt .ep-row {
-    display: flex; gap: 8px;
-  }
-  #email-prompt .ep-row input {
-    flex: 1; background: #0d1117; border: 1px solid #30363d; border-radius: 8px;
-    color: #e6edf3; padding: 8px 12px; font-size: 13px; font-family: inherit;
-    outline: none;
-  }
-  #email-prompt .ep-row input:focus { border-color: #1f6feb; }
-  #email-prompt .ep-row input::placeholder { color: #484f58; }
-  #email-prompt .ep-save {
-    padding: 8px 16px; border-radius: 8px; border: none;
-    background: #238636; color: #fff; font-size: 13px; font-weight: 600;
-    font-family: inherit; cursor: pointer; white-space: nowrap;
-  }
-  #email-prompt .ep-save:hover { background: #2ea043; }
-  #email-prompt .ep-dismiss {
-    background: none; border: none; color: #484f58; font-size: 11px;
-    cursor: pointer; margin-top: 10px; font-family: inherit;
-  }
-  #email-prompt .ep-dismiss:hover { color: #8b949e; }
-
   /* ── Quiz screen ── */
   #quiz-screen {
     display: none;
@@ -1228,7 +1126,6 @@
     <div class="dot" id="dot"></div>
     <span class="label">upskill coach</span>
     <span id="study-context"></span>
-    <div id="reopen-explain-btn" title="Reopen explanation panel">✨</div>
     <div id="user-btn">
       👤
       <div id="user-dropdown">
@@ -1238,21 +1135,6 @@
           <div class="gauge-btns" id="gauge-difficulty">
             <button data-val="1">1</button><button data-val="2">2</button><button data-val="3">3</button><button data-val="4">4</button><button data-val="5">5</button>
           </div>
-        </div>
-        <div class="gauge-row">
-          <div class="gauge-label">Condition<small>1 tired · 5 sharp</small></div>
-          <div class="gauge-btns" id="gauge-condition">
-            <button data-val="1">1</button><button data-val="2">2</button><button data-val="3">3</button><button data-val="4">4</button><button data-val="5">5</button>
-          </div>
-        </div>
-      </div>
-    </div>
-    <div id="gaps-btn">
-      🧠 <span id="gaps-badge">0</span>
-      <div id="gaps-dropdown">
-        <div class="dd-header">Knowledge Gaps</div>
-        <div id="hole-list">
-          <div class="dd-empty">No gaps detected yet</div>
         </div>
       </div>
     </div>
@@ -1811,12 +1693,8 @@ function connect() {
 
       case 'init_settings': {
         userDifficulty = msg.difficulty || 3;
-        userCondition = msg.condition || 3;
         document.querySelectorAll('#gauge-difficulty button').forEach(b => {
           b.classList.toggle('active', parseInt(b.dataset.val) === userDifficulty);
-        });
-        document.querySelectorAll('#gauge-condition button').forEach(b => {
-          b.classList.toggle('active', parseInt(b.dataset.val) === userCondition);
         });
         break;
       }
@@ -1889,19 +1767,8 @@ function connect() {
           fb.className = 'feedback ' + (msg.correct ? 'correct' : 'incorrect');
           fb.style.display = 'block';
         }
-        // Show email prompt on first correct answer
-        if (msg.correct && !localStorage.getItem('upskill_email_prompted')) {
-          localStorage.setItem('upskill_email_prompted', '1');
-          setTimeout(() => {
-            document.getElementById('email-prompt').classList.add('active');
-          }, 1500);
-        }
         break;
       }
-
-      case 'email_saved':
-        document.getElementById('email-prompt').classList.remove('active');
-        break;
 
       case 'code_line_check_result': {
         const textarea = document.getElementById(msg.editorId);
@@ -1929,11 +1796,6 @@ function connect() {
 
         // Render floating post-its
         renderPostits(msg.editorId);
-
-        // Handle major knowledge hole
-        if (msg.major_hole && msg.hole_topic) {
-          addKnowledgeHole(msg.hole_topic, msg.hole_context || '', msg.line || '', msg.correction || '');
-        }
         break;
       }
 
@@ -2262,8 +2124,6 @@ function connect() {
           caPanel.classList.add('open');
           caPanel.style.width = '100%';
         }
-        const reopenBtn = document.getElementById('reopen-explain-btn');
-        if (reopenBtn) reopenBtn.style.display = 'none';
         document.getElementById('explain-panel-scroll').scrollTop = 0;
         // Reset sections for new animation
         window._explainSections = [];
@@ -2887,14 +2747,19 @@ function renderAnswerLines(editorId) {
 
 // ─── User Settings (dropdown + gauges) ─────────────────────────
 let userDifficulty = 3;
-let userCondition = 3;
+// NOTE: userCondition is a legacy constant kept for the (soon-to-be-removed)
+// animation section regen popover. condition gauge was deprecated in step 3a.
+const userCondition = 3;
 
 document.getElementById('user-btn').addEventListener('click', (e) => {
   e.stopPropagation();
   document.getElementById('user-dropdown').classList.toggle('open');
-  document.getElementById('gaps-dropdown').classList.remove('open');
 });
 document.getElementById('user-dropdown').addEventListener('click', (e) => e.stopPropagation());
+document.addEventListener('click', () => {
+  document.getElementById('user-dropdown').classList.remove('open');
+  document.querySelectorAll('.sec-popover.open').forEach(p => p.classList.remove('open'));
+});
 
 function initGauge(containerId, initial, onChange) {
   const container = document.getElementById(containerId);
@@ -2911,85 +2776,8 @@ function initGauge(containerId, initial, onChange) {
 
 initGauge('gauge-difficulty', userDifficulty, (val) => {
   userDifficulty = val;
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'update_settings', difficulty: val, condition: userCondition }));
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'update_settings', difficulty: val }));
 });
-initGauge('gauge-condition', userCondition, (val) => {
-  userCondition = val;
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'update_settings', difficulty: userDifficulty, condition: val }));
-});
-
-// ─── Knowledge Holes (dropdown + drill-down) ──────────────────
-const knowledgeHoles = []; // { topic, context, userCode, correction }
-
-// Toggle dropdown
-document.getElementById('gaps-btn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  document.getElementById('gaps-dropdown').classList.toggle('open');
-  document.getElementById('user-dropdown').classList.remove('open');
-});
-document.addEventListener('click', () => {
-  document.getElementById('gaps-dropdown').classList.remove('open');
-  document.getElementById('user-dropdown').classList.remove('open');
-  document.querySelectorAll('.sec-popover.open').forEach(p => p.classList.remove('open'));
-});
-document.getElementById('gaps-dropdown').addEventListener('click', (e) => e.stopPropagation());
-
-function addKnowledgeHole(topic, context, userCode, correction) {
-  // Deduplicate by topic
-  if (knowledgeHoles.some(h => h.topic === topic)) return;
-
-  knowledgeHoles.push({ topic, context, userCode, correction });
-
-  const list = document.getElementById('hole-list');
-  const badge = document.getElementById('gaps-badge');
-  const btn = document.getElementById('gaps-btn');
-
-  // Clear empty message
-  const empty = list.querySelector('.dd-empty');
-  if (empty) empty.remove();
-
-  const item = document.createElement('div');
-  item.className = 'hole-item';
-  item.innerHTML = `
-    <div class="hole-title">⚠️ ${escapeHtml(topic)}</div>
-    <div class="hole-context">${escapeHtml(context)}</div>
-  `;
-  item.addEventListener('click', () => {
-    document.getElementById('gaps-dropdown').classList.remove('open');
-    openDrillDown(topic, context, userCode, correction);
-  });
-  list.appendChild(item);
-
-  // Update badge
-  badge.textContent = knowledgeHoles.length;
-  badge.classList.add('visible');
-  btn.classList.add('has-items');
-}
-
-function openDrillDown(topic, context, userCode, correction) {
-  const panel = document.getElementById('explain-panel');
-  document.getElementById('explain-panel-title').textContent = '⚠️ ' + topic;
-  document.getElementById('explain-context-text').innerHTML =
-    `<p>${escapeHtml(context)}</p>` +
-    `<p style="margin-top:8px">Your code: <code>${escapeHtml(userCode)}</code></p>` +
-    `<p style="margin-top:4px; color:#8b949e">Fix: ${escapeHtml(correction)}</p>`;
-
-  const contentEl = document.getElementById('explain-content');
-  contentEl.innerHTML = '<div style="color:#484f58; font-size:13px; padding:20px 0;">Generating explanation...</div>';
-
-  panel.classList.add('open');
-
-  // Ask server for educational content
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({
-      type: 'drill_questions',
-      topic: topic,
-      context: context,
-      userCode: userCode,
-      correction: correction,
-    }));
-  }
-}
 
 document.getElementById('explain-dismiss').addEventListener('click', () => {
   const panel = document.getElementById('explain-panel');
@@ -3055,13 +2843,7 @@ document.getElementById('explain-dismiss').addEventListener('click', () => {
     if (display && display.style.display === 'none') {
       display.style.display = '';
     }
-    document.getElementById('reopen-explain-btn').style.display = 'block';
   }
-});
-
-document.getElementById('reopen-explain-btn').addEventListener('click', () => {
-  document.getElementById('explain-panel').classList.add('open');
-  document.getElementById('reopen-explain-btn').style.display = 'none';
 });
 
 function openExplainPanel(initialHtml) {
@@ -3078,7 +2860,6 @@ function openExplainPanel(initialHtml) {
   loadingDiv.innerHTML = initialHtml || '';
   content.appendChild(loadingDiv);
   panel.classList.add('open');
-  document.getElementById('reopen-explain-btn').style.display = 'none';
   document.getElementById('explain-panel-scroll').scrollTop = 0;
 }
 
@@ -3365,7 +3146,6 @@ function openChatPanel(selectedCode) {
   content.appendChild(inputBar);
 
   panel.classList.add('open');
-  document.getElementById('reopen-explain-btn').style.display = 'none';
   input.focus();
 }
 
@@ -3383,7 +3163,6 @@ function openPracticePanel(selectedCode) {
   content.appendChild(loadingDiv);
 
   panel.classList.add('open');
-  document.getElementById('reopen-explain-btn').style.display = 'none';
   document.getElementById('explain-panel-scroll').scrollTop = 0;
 }
 
@@ -3794,22 +3573,8 @@ function showQuiz(msg) {
   obGoTo(0); // Initialize
 }
 
-// ── Email prompt + home/chat-screen handlers (deferred — elements are below script) ──
+// ── Home/chat-screen handlers (deferred — elements are below script) ──
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('ep-save')?.addEventListener('click', () => {
-    const email = document.getElementById('ep-email').value.trim();
-    if (!email) return;
-    ws.send(JSON.stringify({ type: 'save_email', email }));
-    localStorage.setItem('upskill_email', email);
-    document.getElementById('email-prompt').classList.remove('active');
-  });
-  document.getElementById('ep-dismiss')?.addEventListener('click', () => {
-    document.getElementById('email-prompt').classList.remove('active');
-  });
-  document.getElementById('ep-email')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') document.getElementById('ep-save').click();
-  });
-
   // Home screen → full-screen chat transition
   const homeInput = document.getElementById('home-input');
   const homeSend = document.getElementById('home-send');
@@ -3844,15 +3609,5 @@ document.addEventListener('DOMContentLoaded', () => {
 connect();
 </script>
 
-<!-- Email save prompt (shown after first correct answer) -->
-<div id="email-prompt">
-  <div class="ep-title">Nice work on your first question!</div>
-  <div class="ep-desc">Save your email to keep your progress across devices.</div>
-  <div class="ep-row">
-    <input type="email" id="ep-email" placeholder="you@email.com">
-    <button class="ep-save" id="ep-save">Save</button>
-  </div>
-  <button class="ep-dismiss" id="ep-dismiss">Skip for now</button>
-</div>
 </body>
 </html>
