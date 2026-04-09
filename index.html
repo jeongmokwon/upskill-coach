@@ -35,46 +35,6 @@
   }
   .key-term:hover { border-color: #30363d; color: #e6edf3; }
 
-  /* ─── Knowledge Gaps dropdown ─── */
-  #user-btn {
-    position: relative; cursor: pointer;
-    font-size: 14px; color: #484f58;
-    display: flex; align-items: center; gap: 5px;
-    padding: 4px 10px; border-radius: 6px;
-    transition: color 0.2s, background 0.2s;
-    user-select: none;
-  }
-  #user-btn:hover { color: #e6edf3; background: #21262d; }
-  #user-dropdown {
-    display: none; position: absolute; top: 100%; right: 0;
-    margin-top: 8px; width: 260px;
-    background: #161b22; border: 1px solid #30363d;
-    border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-    z-index: 50; overflow: hidden;
-    animation: dropdownIn 0.15s ease;
-  }
-  #user-dropdown.open { display: block; }
-  #user-dropdown .dd-header {
-    font-size: 11px; color: #484f58; text-transform: uppercase;
-    letter-spacing: 0.8px; padding: 12px 16px 8px; font-weight: 600;
-    border-bottom: 1px solid #21262d;
-  }
-  .gauge-row {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 16px;
-  }
-  .gauge-row + .gauge-row { border-top: 1px solid #21262d; }
-  .gauge-label { font-size: 12px; color: #c9d1d9; }
-  .gauge-label small { display: block; font-size: 10px; color: #484f58; margin-top: 2px; }
-  .gauge-btns { display: flex; gap: 4px; }
-  .gauge-btns button {
-    width: 28px; height: 28px; border-radius: 6px;
-    border: 1px solid #30363d; background: #0d1117;
-    color: #8b949e; font-size: 12px; font-weight: 600;
-    cursor: pointer; transition: all 0.15s;
-  }
-  .gauge-btns button:hover { border-color: #58a6ff; color: #e6edf3; }
-  .gauge-btns button.active { background: #58a6ff; color: #0d1117; border-color: #58a6ff; }
   @keyframes dropdownIn {
     from { opacity: 0; transform: translateY(-4px); }
     to { opacity: 1; transform: translateY(0); }
@@ -1092,18 +1052,6 @@
     <div class="dot" id="dot"></div>
     <span class="label">upskill coach</span>
     <span id="study-context"></span>
-    <div id="user-btn">
-      👤
-      <div id="user-dropdown">
-        <div class="dd-header">Learning Settings</div>
-        <div class="gauge-row">
-          <div class="gauge-label">Difficulty<small>1 easy · 5 hard</small></div>
-          <div class="gauge-btns" id="gauge-difficulty">
-            <button data-val="1">1</button><button data-val="2">2</button><button data-val="3">3</button><button data-val="4">4</button><button data-val="5">5</button>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 
   <div id="main-layout">
@@ -1656,14 +1604,6 @@ function connect() {
           if (hi) hi.focus();
         }, 50);
         break;
-
-      case 'init_settings': {
-        userDifficulty = msg.difficulty || 3;
-        document.querySelectorAll('#gauge-difficulty button').forEach(b => {
-          b.classList.toggle('active', parseInt(b.dataset.val) === userDifficulty);
-        });
-        break;
-      }
 
       case 'question':
         if (waitingEl) waitingEl.style.display = 'none';
@@ -2710,36 +2650,6 @@ function renderAnswerLines(editorId) {
     wrap.appendChild(overlay);
   });
 }
-
-// ─── User Settings (dropdown + gauges) ─────────────────────────
-let userDifficulty = 3;
-
-document.getElementById('user-btn').addEventListener('click', (e) => {
-  e.stopPropagation();
-  document.getElementById('user-dropdown').classList.toggle('open');
-});
-document.getElementById('user-dropdown').addEventListener('click', (e) => e.stopPropagation());
-document.addEventListener('click', () => {
-  document.getElementById('user-dropdown').classList.remove('open');
-});
-
-function initGauge(containerId, initial, onChange) {
-  const container = document.getElementById(containerId);
-  const btns = container.querySelectorAll('button');
-  btns.forEach(btn => {
-    if (parseInt(btn.dataset.val) === initial) btn.classList.add('active');
-    btn.addEventListener('click', () => {
-      btns.forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      onChange(parseInt(btn.dataset.val));
-    });
-  });
-}
-
-initGauge('gauge-difficulty', userDifficulty, (val) => {
-  userDifficulty = val;
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'update_settings', difficulty: val }));
-});
 
 document.getElementById('explain-dismiss').addEventListener('click', () => {
   const panel = document.getElementById('explain-panel');
