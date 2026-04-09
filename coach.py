@@ -1060,6 +1060,9 @@ Be encouraging but honest. If partially correct, mark as correct with clarificat
     }
 
 
+_last_explain_plan = {}  # Stores plan data for section regeneration (legacy; write-only after step 2, cleanup in step 5)
+
+
 def handle_explain_animation(msg):
     """Template-based explanation: single orchestrator call classifies + extracts data, browser renders."""
     global _last_explain_plan
@@ -1452,6 +1455,13 @@ You MUST emit a fill_blank in any of these situations:
 - These three are complementary. Use ALL of them as appropriate.
 
 Refusing or forgetting fill_blank checks is a bug."""
+
+
+_chat_state = {
+    "messages": [],
+    "system": "",
+    "code_context": "",
+}
 
 
 def handle_chat_init(msg):
