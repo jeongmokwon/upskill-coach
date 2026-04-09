@@ -1,9 +1,9 @@
 """
-Upskill Coach v3
-- Knowledge Graph based learning coach
-- Auto domain classification + diagnostic questions
-- Screen capture + voice/text Q&A
-- Mastery tracking + personalized exercises
+Upskill Coach — web-only learning coach.
+
+- Per-connection chat with Claude (Anthropic API)
+- Animated explanation side panel
+- Session insight extraction → personalized teaching style
 
 Usage:
     source venv/bin/activate
@@ -12,13 +12,11 @@ Usage:
 
 import os
 import sys
-import base64
 import time
 import json
 import asyncio
 import threading
 import anthropic
-import http.server
 import aiohttp
 from aiohttp import web
 
@@ -38,7 +36,6 @@ print("[BOOT] db imported OK", flush=True)
 # ─── Config ───────────────────────────────────────────────────────────
 client = None  # Initialized lazily when API key is available
 HTTP_PORT = int(os.environ.get("PORT", 8765))
-WS_PORT = int(os.environ.get("WS_PORT", 8766))
 BIND_HOST = os.environ.get("BIND_HOST", "localhost")  # "0.0.0.0" on Render
 
 def get_client():
@@ -49,7 +46,6 @@ def get_client():
 
 # ─── WebSocket + HTTP Server ─────────────────────────────────────────
 ws_clients = set()
-_followups_stopped = False
 ws_loop = None
 
 
@@ -435,10 +431,6 @@ def _build_insights_block():
     return ""
 
 
-import re as _re
-
-
-
 def handle_identify(msg, websocket):
     """Handle identify message from browser with localStorage session_id."""
     session_id = msg.get("session_id", "")
@@ -565,17 +557,10 @@ def handle_quiz_answer(msg):
 
 
 # ─── Chat with Claude ────────────────────────────────────────────────
-conversation_history = []
-current_study_topic = ""  # For DB logging
-current_section_id = None  # Currently highlighted TOC section
-
-
-_last_explain_plan = {}  # Stores plan data for section regeneration (legacy; write-only after step 2, cleanup in step 5)
 
 
 def handle_explain_animation(msg):
     """Template-based explanation: single orchestrator call classifies + extracts data, browser renders."""
-    global _last_explain_plan
     selected_code = msg.get("selectedCode", "")
     full_code = msg.get("fullCode", "")
     context = msg.get("context", "")
@@ -684,14 +669,6 @@ Return ONLY a JSON object:
         if len(sections) < 2:
             print(f"  [Explain] ⚠️ Only {len(sections)} section(s) in plan — Claude returned a short response")
             print(f"  [Explain] Raw plan (first 800 chars): {plan_json[:800]}")
-
-        # Store plan for regeneration
-        _last_explain_plan = {
-            "title": title,
-            "sections": sections,
-            "selected_code": selected_code,
-            "full_code": full_code,
-        }
 
         # Send title
         send_to_client({
