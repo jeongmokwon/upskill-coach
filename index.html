@@ -30,7 +30,6 @@
   #main-layout {
     flex: 1; display: flex; overflow: hidden;
   }
-  .key-term:hover { border-color: #30363d; color: #e6edf3; }
 
   @keyframes dropdownIn {
     from { opacity: 0; transform: translateY(-4px); }
@@ -45,12 +44,6 @@
     display: flex; flex-direction: column;
   }
   #explain-panel.open { width: 560px; }
-  #explain-panel.fullscreen-overlay {
-    position: absolute; inset: 0;
-    width: 100% !important; height: 100%;
-    z-index: 200;
-    border-left: none;
-  }
   /* Side-column overlay used when animation is triggered from chat-screen.
      The chat-screen stays visible on the left; the explain-panel is fixed
      to the right half so both can be seen simultaneously. */
@@ -112,368 +105,10 @@
     color: #ff7b72; font-size: 12px;
   }
 
-  /* ─── Drill content sections ─── */
-  .drill-section {
-    margin-bottom: 24px;
-    opacity: 0; transform: translateY(12px);
-    animation: drillFadeIn 0.5s ease forwards;
-  }
-  @keyframes drillFadeIn {
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  /* Explanation */
-  .drill-explanation {
-    font-size: 14px; color: #e6edf3; line-height: 1.7;
-    padding: 14px 18px; background: #161b22;
-    border-left: 3px solid #58a6ff; border-radius: 0 8px 8px 0;
-  }
-
-  /* Pipeline — vertical flow */
-  .drill-pipeline { padding: 12px 0; }
-  .drill-pipeline .pipe-title {
-    font-size: 11px; color: #484f58; text-transform: uppercase;
-    letter-spacing: 0.8px; margin-bottom: 16px; font-weight: 600;
-  }
-  .pipe-steps {
-    display: flex; flex-direction: column; align-items: center;
-    gap: 0; padding: 0 8px;
-  }
-  .pipe-step {
-    width: 100%; max-width: 440px;
-    opacity: 0; transform: translateY(10px) scale(0.95);
-  }
-  .pipe-step.animated {
-    animation: pipeStepIn 0.5s ease forwards;
-  }
-  @keyframes pipeStepIn {
-    to { opacity: 1; transform: translateY(0) scale(1); }
-  }
-  .pipe-step .step-box {
-    background: #161b22; border: 2px solid #30363d;
-    border-radius: 10px; padding: 14px 18px; text-align: left;
-    display: flex; flex-direction: column;
-    transition: border-color 0.3s, box-shadow 0.3s;
-  }
-  .pipe-step.ok .step-box { border-color: #3fb950; }
-  .pipe-step.missing .step-box {
-    border-color: #f0883e; border-style: dashed;
-    box-shadow: 0 0 16px #f0883e33;
-    animation: pulseMissing 2s ease-in-out infinite;
-  }
-  .pipe-step.error .step-box {
-    border-color: #f85149;
-    box-shadow: 0 0 16px #f8514933;
-  }
-  @keyframes pulseMissing {
-    0%, 100% { box-shadow: 0 0 8px #f0883e22; }
-    50% { box-shadow: 0 0 24px #f0883e55; }
-  }
-  .pipe-step .step-label {
-    font-size: 13px; font-weight: 600; margin-bottom: 6px;
-  }
-  .pipe-step.ok .step-label { color: #3fb950; }
-  .pipe-step.missing .step-label { color: #f0883e; }
-  .pipe-step.error .step-label { color: #f85149; }
-  .pipe-step .step-value {
-    font-size: 12px; color: #8b949e; font-family: 'SF Mono', monospace;
-    word-break: break-all; line-height: 1.5;
-  }
-  .pipe-step .step-desc {
-    font-size: 11px; color: #484f58; margin-top: 4px; line-height: 1.4;
-  }
-  .pipe-arrow {
-    display: flex; flex-direction: column; align-items: center;
-    color: #30363d; font-size: 16px; padding: 4px 0;
-    opacity: 0;
-  }
-  .pipe-arrow.animated {
-    animation: pipeStepIn 0.3s ease forwards;
-  }
-  .pipe-arrow .arrow-line {
-    width: 2px; height: 20px; background: #30363d;
-  }
-
-  /* Comparison */
-  .drill-comparison {
-    display: flex; flex-direction: column; gap: 12px;
-  }
-  .comp-side {
-    border-radius: 8px; padding: 14px 16px; font-size: 13px;
-  }
-  .comp-side.wrong {
-    background: #f8514911; border: 1px solid #f8514933;
-  }
-  .comp-side.right {
-    background: #23863611; border: 1px solid #23863633;
-  }
-  .comp-side .comp-label {
-    font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px;
-    font-weight: 600; margin-bottom: 8px;
-  }
-  .comp-side.wrong .comp-label { color: #f85149; }
-  .comp-side.right .comp-label { color: #3fb950; }
-  .comp-side code {
-    display: block; background: #0d1117; padding: 8px 10px;
-    border-radius: 4px; font-size: 13px; margin-bottom: 8px;
-    font-family: 'SF Mono', monospace;
-  }
-  .comp-side.wrong code { color: #ff7b72; }
-  .comp-side.right code { color: #7ee787; }
-  .comp-side .comp-why {
-    font-size: 12px; color: #8b949e; line-height: 1.5;
-  }
-
-  /* Analogy */
-  .drill-analogy {
-    background: #1c1c1c; border: 1px solid #58a6ff33;
-    border-radius: 8px; padding: 14px 18px;
-    font-size: 13px; color: #c9d1d9; line-height: 1.6;
-  }
-  .drill-analogy::before {
-    content: '💡 '; font-size: 14px;
-  }
-
-  /* Code example */
-  .drill-code-example {
-    background: #161b22; border: 1px solid #30363d;
-    border-radius: 8px; overflow: hidden;
-  }
-  .drill-code-example .ce-title {
-    font-size: 11px; color: #484f58; padding: 8px 14px;
-    border-bottom: 1px solid #21262d; text-transform: uppercase;
-    letter-spacing: 0.6px; font-weight: 600;
-  }
-  .drill-code-example pre {
-    padding: 12px 14px; margin: 0; font-size: 13px;
-    color: #e6edf3; line-height: 1.5; overflow-x: auto;
-  }
-  .drill-code-example .ce-output {
-    border-top: 1px solid #21262d; padding: 10px 14px;
-    font-size: 12px; color: #3fb950; background: #0d1117;
-    font-family: 'SF Mono', monospace;
-  }
-  .drill-code-example .ce-output::before {
-    content: '>>> '; color: #484f58;
-  }
-
-  /* ─── Post-it note ─── */
-  .postit-wrapper {
-    position: relative;
-    padding: 0 16px;
-  }
-  .postit {
-    background: #fef3c7;
-    color: #78350f;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    font-size: 14px; line-height: 1.5;
-    padding: 12px 16px;
-    margin: 8px 0 4px 44px;
-    border-radius: 4px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2);
-    max-width: 500px;
-    position: relative;
-    animation: postitIn 0.3s ease;
-  }
-  .postit::after {
-    content: '';
-    position: absolute; bottom: -6px; left: 24px;
-    width: 12px; height: 12px;
-    background: #fef3c7;
-    transform: rotate(45deg);
-    box-shadow: 2px 2px 4px rgba(0,0,0,0.15);
-  }
-
-  /* ─── Practice questions card ─── */
-  .practice-card {
-    width: 100%; max-width: 900px;
-    background: #161b22; border: 1px solid #30363d;
-    border-radius: 8px; padding: 20px 24px; margin-top: 20px;
-    animation: fadeIn 0.4s ease;
-  }
-  .practice-card .card-header {
-    font-size: 13px; color: #58a6ff; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.5px;
-    margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
-  }
-  .practice-card .card-code {
-    background: #0d1117; border: 1px solid #21262d;
-    border-radius: 4px; padding: 8px 12px; margin-bottom: 16px;
-    font-size: 13px; color: #8b949e; white-space: pre-wrap;
-    max-height: 80px; overflow: hidden;
-  }
-  .practice-card .question-item {
-    padding: 10px 0;
-    border-bottom: 1px solid #21262d;
-    font-size: 14px; line-height: 1.6; color: #c9d1d9;
-  }
-  .practice-card .question-item:last-child { border-bottom: none; }
-  .practice-card .q-num {
-    color: #58a6ff; font-weight: 600; margin-right: 8px;
-  }
-  .practice-card .loading {
-    color: #484f58; font-size: 13px; padding: 12px 0;
-  }
-  .practice-card .answer-row {
-    display: flex; gap: 8px; margin-top: 8px; align-items: center;
-  }
-  .practice-card .answer-input {
-    flex: 1; background: #0d1117; border: 1px solid #30363d;
-    border-radius: 4px; padding: 6px 10px; color: #e6edf3;
-    font-family: inherit; font-size: 13px; outline: none;
-  }
-  .practice-card .answer-input:focus {
-    border-color: #58a6ff;
-  }
-  .practice-card .answer-input:disabled {
-    opacity: 0.5;
-  }
-  .practice-card .submit-btn {
-    background: #1f6feb; color: #fff; border: none;
-    border-radius: 4px; padding: 6px 14px; font-size: 13px;
-    cursor: pointer; white-space: nowrap; font-family: inherit;
-  }
-  .practice-card .submit-btn:hover { background: #388bfd; }
-  .practice-card .submit-btn:disabled {
-    background: #21262d; color: #484f58; cursor: default;
-  }
-  .practice-card .feedback {
-    margin-top: 6px; font-size: 13px; line-height: 1.5;
-    padding: 8px 10px; border-radius: 4px;
-    animation: fadeIn 0.3s ease;
-  }
-  .practice-card .feedback.correct {
-    background: #3fb95018; color: #3fb950; border: 1px solid #3fb95033;
-  }
-  .practice-card .feedback.incorrect {
-    background: #f8514918; color: #f85149; border: 1px solid #f8514933;
-  }
-  .practice-card .feedback.grading {
-    color: #484f58;
-  }
-  .practice-card .regen-row {
-    display: flex; gap: 8px; margin-top: 4px; align-items: center;
-    padding: 10px 0 4px; border-bottom: 1px solid #21262d;
-  }
-  .practice-card .regen-input {
-    flex: 1; background: #0d1117; border: 1px solid #30363d;
-    border-radius: 4px; padding: 6px 10px; color: #e6edf3;
-    font-family: inherit; font-size: 12px; outline: none;
-  }
-  .practice-card .regen-input:focus { border-color: #f0883e; }
-  .practice-card .regen-input::placeholder { color: #484f58; }
-  .practice-card .regen-btn {
-    background: #f0883e; color: #fff; border: none;
-    border-radius: 4px; padding: 6px 14px; font-size: 12px;
-    cursor: pointer; white-space: nowrap; font-family: inherit; font-weight: 500;
-  }
-  .practice-card .regen-btn:hover { background: #f09f5b; }
-  .practice-card .regen-btn:disabled {
-    background: #21262d; color: #484f58; cursor: default;
-  }
-
-  /* ─── Follow-up question card ─── */
-  .followup-card {
-    width: 100%; max-width: 900px;
-    background: #1a1f2e; border: 1px solid #f0883e44;
-    border-left: 3px solid #f0883e;
-    border-radius: 8px; padding: 20px 24px; margin-top: 16px;
-    animation: fadeIn 0.4s ease;
-  }
-  .followup-card .card-header {
-    font-size: 13px; color: #f0883e; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.5px;
-    margin-bottom: 8px;
-    display: flex; justify-content: space-between; align-items: center;
-  }
-  .stop-followup-btn {
-    font-size: 11px; color: #484f58; background: transparent;
-    border: 1px solid #484f58; border-radius: 4px;
-    padding: 2px 8px; cursor: pointer; text-transform: none;
-    letter-spacing: 0; font-weight: 400;
-  }
-  .stop-followup-btn:hover { color: #f85149; border-color: #f85149; }
-  .followup-card .weak-concepts {
-    font-size: 12px; color: #484f58; margin-bottom: 12px;
-  }
-  .followup-card .weak-concepts span {
-    display: inline-block; background: #f8514918; color: #f85149;
-    padding: 2px 8px; border-radius: 3px; margin-right: 6px;
-    font-size: 11px;
-  }
-
-  /* ─── Code answer editor ─── */
-  .code-answer-area {
-    width: 100%; max-width: 900px;
-    margin-top: 16px;
-    animation: fadeIn 0.3s ease;
-  }
-  .code-answer-area .ca-header {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 8px;
-  }
-  .code-answer-area .ca-label {
-    font-size: 12px; color: #58a6ff; font-weight: 600;
-    text-transform: uppercase; letter-spacing: 0.5px;
-  }
-  .code-answer-area .ca-lang {
-    font-size: 11px; color: #484f58; background: #21262d;
-    padding: 2px 8px; border-radius: 3px;
-  }
-  /* Wrapper for textarea + floating post-its */
-  .code-editor-wrap {
-    position: relative;
-  }
-  .code-editor-wrap textarea {
-    width: 100%; height: calc(100vh - 120px);
-    background: #0d1117; border: 1px solid #30363d;
-    border-radius: 6px; padding: 12px 14px;
-    color: #e6edf3; font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-    font-size: 13px; line-height: 20.8px; resize: none;
-    outline: none; tab-size: 4;
-  }
-  .code-editor-wrap textarea:focus { border-color: #58a6ff; }
-  .code-editor-wrap textarea::placeholder { color: #484f58; }
-  /* Answer line overlay (#A: lines) */
-  .answer-line-overlay {
-    position: absolute;
-    left: 0; right: 0;
-    background: #1f6feb12;
-    pointer-events: none;
-    z-index: 5;
-  }
-  /* Floating post-it positioned above error line */
-  .floating-postit {
-    position: absolute;
-    left: 20px; right: 20px;
-    padding: 6px 10px;
-    background: #fffbe6; color: #1a1a1a;
-    border-radius: 4px; font-size: 11px; line-height: 1.4;
-    border-left: 3px solid #f0c000;
-    box-shadow: 1px 2px 8px rgba(0,0,0,0.4);
-    animation: postitIn 0.3s ease;
-    font-family: -apple-system, sans-serif;
-    pointer-events: none;
-    z-index: 10;
-  }
-  .floating-postit code {
-    background: #f0e8c8; padding: 1px 4px; border-radius: 2px;
-    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px;
-  }
-  .answer-code-btn.outline {
-    background: transparent; border: 1px solid #30363d; color: #c9d1d9;
-    border-radius: 6px; padding: 7px 16px; font-size: 13px;
-    cursor: pointer; font-family: inherit; font-weight: 500;
-    display: inline-flex; align-items: center; gap: 6px;
-  }
-  .answer-code-btn.outline:hover { border-color: #58a6ff; color: #58a6ff; }
 
   @keyframes blink { 50% { opacity: 0; } }
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-  @keyframes postitIn {
-    from { opacity: 0; transform: translateY(-8px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
+
   /* ── Onboarding screen ── */
   #onboarding-screen {
     display: none;
@@ -780,11 +415,7 @@
   .fb-check:disabled { opacity: 0.4; cursor: default; }
   .fb-result { margin-top: 6px; font-size: 12px; min-height: 18px; }
 
-  /* ── Chat panel ── */
-  #chat-messages {
-    flex: 1; overflow-y: auto; padding: 16px;
-    display: flex; flex-direction: column; gap: 10px;
-  }
+  /* ── Chat messages (streamed inside #chat-screen-messages) ── */
   .chat-msg {
     max-width: 88%; font-size: 13px; line-height: 1.6;
     padding: 10px 14px; border-radius: 12px;
@@ -802,34 +433,9 @@
     align-self: center; color: #484f58; font-size: 11px;
     background: none; border: none; padding: 4px;
   }
-  #chat-input-bar {
-    display: flex; gap: 8px; padding: 12px 16px;
-    border-top: 1px solid #21262d;
-  }
-  #chat-input {
-    flex: 1; background: #0d1117; color: #e6edf3;
-    border: 1px solid #30363d; border-radius: 10px;
-    padding: 10px 14px; font-size: 13px; font-family: inherit;
-    resize: none; min-height: 42px; max-height: 120px;
-    outline: none; transition: border-color 0.15s;
-  }
-  #chat-input:focus { border-color: #58a6ff; }
-  #chat-send {
-    width: 42px; height: 42px; border-radius: 10px;
-    border: 1px solid #30363d; background: #21262d;
-    color: #e6edf3; font-size: 18px; cursor: pointer;
-    align-self: flex-end; transition: all 0.15s;
-  }
-  #chat-send:hover { border-color: #58a6ff; background: #30363d; }
-  #chat-send:disabled { opacity: 0.4; cursor: default; }
 
   #explain-nav button:hover:not(:disabled) { filter: brightness(1.2); }
   #explain-nav button:disabled { cursor: default; }
-
-  .sec-spinner {
-    text-align: center; color: #484f58; font-size: 12px;
-    padding: 8px; animation: blink 1s infinite;
-  }
 </style>
 </head>
 <body>
@@ -1685,7 +1291,6 @@ document.getElementById('explain-dismiss').addEventListener('click', () => {
   window._chatAnimationActive = false;
   document.getElementById('explain-dismiss').textContent = 'Dismiss';
 
-  panel.classList.remove('fullscreen-overlay');
   panel.classList.remove('chat-side-overlay');
   panel.classList.remove('open');
   panel.style.width = '';
