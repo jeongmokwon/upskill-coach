@@ -997,40 +997,6 @@
   #explain-nav button:hover:not(:disabled) { filter: brightness(1.2); }
   #explain-nav button:disabled { cursor: default; }
 
-  .sec-settings-btn {
-    position: absolute; top: 6px; right: 6px; z-index: 10;
-    width: 26px; height: 26px; border-radius: 6px;
-    border: 1px solid #30363d; background: #0d1117cc;
-    cursor: pointer; font-size: 12px; line-height: 26px;
-    text-align: center; opacity: 0;
-    transition: opacity 0.2s, border-color 0.2s;
-  }
-  [data-sec-idx]:hover .sec-settings-btn { opacity: 1; }
-  .sec-settings-btn:hover { border-color: #58a6ff; }
-  .sec-popover {
-    display: none; position: absolute; top: 6px; right: 36px; z-index: 20;
-    background: #161b22; border: 1px solid #30363d; border-radius: 10px;
-    padding: 12px; width: 220px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-    animation: dropdownIn 0.15s ease;
-  }
-  .sec-popover.open { display: block; }
-  .pop-gauge { display: flex; gap: 3px; }
-  .pop-gauge button {
-    width: 24px; height: 24px; border-radius: 5px;
-    border: 1px solid #30363d; background: #0d1117;
-    color: #8b949e; font-size: 11px; font-weight: 600;
-    cursor: pointer; transition: all 0.15s;
-  }
-  .pop-gauge button:hover { border-color: #58a6ff; color: #e6edf3; }
-  .pop-gauge button.active { background: #58a6ff; color: #0d1117; border-color: #58a6ff; }
-  .pop-regen {
-    width: 100%; padding: 6px; border-radius: 6px;
-    border: 1px solid #30363d; background: #21262d;
-    color: #e6edf3; font-size: 11px; cursor: pointer;
-    transition: background 0.15s;
-  }
-  .pop-regen:hover { background: #30363d; }
   .sec-spinner {
     text-align: center; color: #484f58; font-size: 12px;
     padding: 8px; animation: blink 1s infinite;
@@ -2747,9 +2713,6 @@ function renderAnswerLines(editorId) {
 
 // ─── User Settings (dropdown + gauges) ─────────────────────────
 let userDifficulty = 3;
-// NOTE: userCondition is a legacy constant kept for the (soon-to-be-removed)
-// animation section regen popover. condition gauge was deprecated in step 3a.
-const userCondition = 3;
 
 document.getElementById('user-btn').addEventListener('click', (e) => {
   e.stopPropagation();
@@ -2758,7 +2721,6 @@ document.getElementById('user-btn').addEventListener('click', (e) => {
 document.getElementById('user-dropdown').addEventListener('click', (e) => e.stopPropagation());
 document.addEventListener('click', () => {
   document.getElementById('user-dropdown').classList.remove('open');
-  document.querySelectorAll('.sec-popover.open').forEach(p => p.classList.remove('open'));
 });
 
 function initGauge(containerId, initial, onChange) {
@@ -2908,52 +2870,6 @@ function _renderExplainPage(pageIdx) {
   iframe.dataset.sectionId = 'page-' + pageIdx;
   pageContainer.appendChild(iframe);
 
-  // Settings button (top-right of section)
-  const settingsBtn = document.createElement('button');
-  settingsBtn.className = 'sec-settings-btn';
-  settingsBtn.style.opacity = '1';  // Always visible in single-page mode
-  settingsBtn.textContent = '⚙️';
-  settingsBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    document.querySelectorAll('.sec-popover.open').forEach(p => p.classList.remove('open'));
-    pageContainer.querySelector('.sec-popover')?.classList.toggle('open');
-  });
-  pageContainer.appendChild(settingsBtn);
-
-  // Popover
-  const popover = document.createElement('div');
-  popover.className = 'sec-popover';
-  popover.addEventListener('click', e => e.stopPropagation());
-  popover.innerHTML = `
-    <div style="font-size:10px;color:#484f58;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">Regenerate this section</div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-      <span style="font-size:11px;color:#c9d1d9;">Difficulty</span>
-      <div class="pop-gauge" data-gauge="difficulty">
-        ${[1,2,3,4,5].map(v => `<button data-val="${v}" class="${v===userDifficulty?'active':''}">${v}</button>`).join('')}
-      </div>
-    </div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-      <span style="font-size:11px;color:#c9d1d9;">Condition</span>
-      <div class="pop-gauge" data-gauge="condition">
-        ${[1,2,3,4,5].map(v => `<button data-val="${v}" class="${v===userCondition?'active':''}">${v}</button>`).join('')}
-      </div>
-    </div>
-    <button class="pop-regen">Regenerate ↻</button>
-  `;
-  popover.querySelectorAll('.pop-gauge button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-    });
-  });
-  popover.querySelector('.pop-regen').addEventListener('click', () => {
-    const d = parseInt(popover.querySelector('[data-gauge="difficulty"] .active')?.dataset.val || userDifficulty);
-    const c = parseInt(popover.querySelector('[data-gauge="condition"] .active')?.dataset.val || userCondition);
-    popover.classList.remove('open');
-    pageContainer.style.opacity = '0.4';
-    ws.send(JSON.stringify({ type: 'regenerate_section', sectionIndex: pageIdx, difficulty: d, condition: c }));
-  });
-  pageContainer.appendChild(popover);
   contentEl.appendChild(pageContainer);
 
   // Fade in
