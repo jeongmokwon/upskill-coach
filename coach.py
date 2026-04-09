@@ -177,22 +177,6 @@ async def ws_handler(request):
                     elif msg_type == "stop_followups":
                         ctx.followups_stopped = True
                         print("  [WS] Follow-ups stopped by user")
-                    elif msg_type == "update_settings":
-                        d = msg.get("difficulty")
-                        c = msg.get("condition")
-                        prof = ctx.user_profile
-                        if d is not None:
-                            prof["difficulty"] = int(d)
-                        if c is not None:
-                            prof["user_condition"] = int(c)
-                        if prof.get("user_id"):
-                            db.set_thread_user(prof["user_id"])
-                            db.update_user_profile(
-                                prof["user_id"],
-                                difficulty=prof.get("difficulty", 3),
-                                user_condition=prof.get("user_condition", 3),
-                            )
-                        print(f"  [WS] Settings updated → difficulty={prof.get('difficulty')}, condition={prof.get('user_condition')}")
                 except json.JSONDecodeError:
                     pass
                 except Exception as _outer_e:
@@ -500,14 +484,6 @@ def handle_identify(msg, websocket):
             ws_loop,
         )
         asyncio.run_coroutine_threadsafe(
-            websocket.send_str(json.dumps({
-                "type": "init_settings",
-                "difficulty": profile.get("difficulty", 3),
-                "condition": profile.get("user_condition", 3),
-            })),
-            ws_loop,
-        )
-        asyncio.run_coroutine_threadsafe(
             websocket.send_str(json.dumps({"type": "show_code_editor"})),
             ws_loop,
         )
@@ -554,11 +530,6 @@ def handle_onboarding_submit(msg):
 
     # Send state to client
     send_to_client({"type": "connected", "study_context": studying})
-    send_to_client({
-        "type": "init_settings",
-        "difficulty": difficulty,
-        "condition": condition,
-    })
     send_to_client({"type": "show_code_editor"})
 
 
