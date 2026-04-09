@@ -257,69 +257,6 @@
     content: '>>> '; color: #484f58;
   }
 
-  /* ─── Main display area ─── */
-  #display {
-    flex: 1; display: flex; flex-direction: column;
-    justify-content: flex-start; align-items: center;
-    padding: 32px 48px; overflow-y: auto;
-    transition: flex 0.35s ease;
-    min-width: 0;
-  }
-
-  /* Waiting state */
-  #waiting {
-    color: #484f58; font-size: 16px; text-align: center; line-height: 2.2;
-  }
-  #waiting code {
-    background: #161b22; padding: 2px 8px; border-radius: 4px;
-    color: #8b949e;
-  }
-
-  /* ─── Plain text output ─── */
-  #output {
-    width: 100%; max-width: 900px;
-    font-size: 16px; line-height: 1.7;
-    color: #f0f6fc; white-space: pre-wrap; word-wrap: break-word;
-    display: none;
-  }
-  #output .cursor {
-    display: inline-block; width: 3px; height: 1em;
-    background: #58a6ff; margin-left: 3px;
-    animation: blink 0.7s step-end infinite;
-    vertical-align: text-bottom;
-  }
-
-  /* ─── Annotated code view ─── */
-  #code-view {
-    width: 100%; max-width: 900px; display: none;
-    animation: fadeIn 0.4s ease;
-  }
-  #code-view .code-block {
-    background: #161b22; border: 1px solid #30363d;
-    border-radius: 8px; overflow: hidden;
-    font-size: 14px; line-height: 1.6;
-  }
-  #code-view .code-line {
-    display: flex; padding: 0 16px;
-    position: relative;
-  }
-  #code-view .code-line .line-no {
-    width: 36px; flex-shrink: 0; text-align: right;
-    color: #484f58; padding-right: 12px;
-    user-select: none;
-  }
-  #code-view .code-line .line-text {
-    flex: 1; white-space: pre;
-    padding: 0 4px;
-  }
-  #code-view .code-line.highlighted {
-    background: #58a6ff18;
-    border-left: 3px solid #58a6ff;
-  }
-  #code-view .code-line.highlighted .line-text {
-    color: #fff;
-  }
-
   /* ─── Post-it note ─── */
   .postit-wrapper {
     position: relative;
@@ -345,54 +282,6 @@
     background: #fef3c7;
     transform: rotate(45deg);
     box-shadow: 2px 2px 4px rgba(0,0,0,0.15);
-  }
-
-  /* Question label */
-  #question-label {
-    width: 100%; max-width: 900px;
-    font-size: 13px; color: #484f58; margin-bottom: 16px;
-    display: none; letter-spacing: 0.3px;
-  }
-  #question-label .q-text { color: #8b949e; }
-  #question-label .q-mode {
-    display: inline-block; padding: 1px 6px; border-radius: 3px;
-    background: #1f6feb33; color: #58a6ff; font-size: 11px;
-    margin-right: 6px; vertical-align: middle;
-  }
-
-  /* Status messages */
-  #status-msg {
-    width: 100%; max-width: 900px;
-    font-size: 13px; color: #484f58; margin-top: 12px;
-    display: none;
-  }
-
-  /* ─── Floating context menu ─── */
-  #context-menu {
-    position: fixed; display: none; z-index: 100;
-    background: #1c2333; border: 1px solid #30363d;
-    border-radius: 8px; padding: 4px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-    animation: fadeIn 0.15s ease;
-  }
-  #context-menu button {
-    display: block; width: 100%;
-    background: transparent; border: none; color: #e6edf3;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    font-size: 13px; padding: 8px 16px; text-align: left;
-    border-radius: 4px; cursor: pointer; white-space: nowrap;
-  }
-  #context-menu button:hover {
-    background: #1f6feb33; color: #58a6ff;
-  }
-  #context-menu button .menu-icon {
-    margin-right: 8px; font-size: 14px;
-  }
-  #context-menu button.disabled {
-    color: #484f58; cursor: default;
-  }
-  #context-menu button.disabled:hover {
-    background: transparent; color: #484f58;
   }
 
   /* ─── Practice questions card ─── */
@@ -578,23 +467,6 @@
     display: inline-flex; align-items: center; gap: 6px;
   }
   .answer-code-btn.outline:hover { border-color: #58a6ff; color: #58a6ff; }
-
-  /* Selection popup */
-  #selection-popup {
-    display: none; position: absolute; z-index: 20;
-    background: #161b22; border: 1px solid #30363d;
-    border-radius: 8px; padding: 4px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-    white-space: nowrap;
-    animation: fadeIn 0.15s ease;
-  }
-  #selection-popup .sel-opt {
-    display: block; width: 100%; text-align: left;
-    background: none; border: none; color: #e6edf3;
-    padding: 6px 14px; font-size: 12px; font-family: inherit;
-    cursor: pointer; border-radius: 5px;
-  }
-  #selection-popup .sel-opt:hover { background: #1f6feb; }
 
   @keyframes blink { 50% { opacity: 0; } }
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -1051,15 +923,6 @@
   </div>
 
   <div id="main-layout">
-    <div id="display">
-      <div id="waiting">
-        Connecting...<br>
-      </div>
-      <div id="question-label"><span class="q-mode"></span><span class="q-text"></span></div>
-      <div id="output"><span class="text"></span><span class="cursor"></span></div>
-      <div id="code-view"></div>
-      <div id="status-msg"></div>
-    </div>
     <div id="explain-panel">
       <div id="explain-panel-header">
         <span id="explain-panel-title"></span>
@@ -1073,13 +936,6 @@
         <div id="explain-content"></div>
       </div>
     </div>
-  </div>
-
-
-  <!-- Floating context menu for code selection -->
-  <div id="context-menu">
-    <button id="btn-ask-claude" class="disabled"><span class="menu-icon">💬</span>Ask Claude</button>
-    <button id="btn-practice"><span class="menu-icon">📝</span>Practice Questions</button>
   </div>
 
 <script>
@@ -1461,13 +1317,28 @@ function renderTemplate(template, data) {
 // ═══════════════════════════════════════════════════════════
 
 const dot = document.getElementById('dot');
-const waitingEl = document.getElementById('waiting');
-const questionLabel = document.getElementById('question-label');
-const outputEl = document.getElementById('output');
-const textEl = outputEl.querySelector('.text');
-const cursorEl = outputEl.querySelector('.cursor');
-const codeView = document.getElementById('code-view');
-const statusMsg = document.getElementById('status-msg');
+// Legacy element stubs — real DOM nodes removed in step 3b.
+// No-op Proxy keeps dead code paths alive until full cleanup in step 3c.
+const _noopEl = new Proxy({ textContent: '', innerHTML: '', value: '' }, {
+  get(target, prop) {
+    if (prop in target) return target[prop];
+    if (prop === 'style' || prop === 'classList' || prop === 'dataset') return _noopEl;
+    if (prop === 'querySelector' || prop === 'querySelectorAll') return () => _noopEl;
+    if (prop === 'contains') return () => false;
+    if (prop === 'appendChild' || prop === 'removeChild' || prop === 'remove') return () => _noopEl;
+    if (prop === 'addEventListener' || prop === 'removeEventListener') return () => {};
+    if (prop === 'getBoundingClientRect') return () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 });
+    return _noopEl;
+  },
+  set(target, prop, value) { target[prop] = value; return true; },
+});
+const waitingEl = document.getElementById('waiting') || _noopEl;
+const questionLabel = document.getElementById('question-label') || _noopEl;
+const outputEl = document.getElementById('output') || _noopEl;
+const textEl = outputEl.querySelector('.text') || _noopEl;
+const cursorEl = outputEl.querySelector('.cursor') || _noopEl;
+const codeView = document.getElementById('code-view') || _noopEl;
+const statusMsg = document.getElementById('status-msg') || _noopEl;
 let ws;
 
 // ── Anonymous session via localStorage ──
@@ -1629,7 +1500,7 @@ function connect() {
         outputEl.style.display = 'block';
         // Strip [[term]] markers for display
         textEl.textContent += msg.text.replace(/\[\[([^\]]+)\]\]/g, '$1');
-        document.getElementById('display').scrollTop = document.getElementById('display').scrollHeight;
+        // (legacy scroll; #display removed in step 3b)
         break;
 
       case 'done':
@@ -2019,7 +1890,7 @@ function connect() {
           caPanel.classList.add('chat-side-overlay');
         } else {
           // Legacy code-editor flow
-          const caDisplay = document.getElementById('display');
+          const caDisplay = (document.getElementById('display') || _noopEl);
           if (caDisplay) caDisplay.style.display = 'none';
           caPanel.classList.add('open');
           caPanel.style.width = '100%';
@@ -2114,10 +1985,10 @@ function renderAnnotatedCode(code, highlightLine, note) {
   }
 }
 
-/* ─── Code selection context menu ─── */
-const contextMenu = document.getElementById('context-menu');
-const btnAskClaude = document.getElementById('btn-ask-claude');
-const btnPractice = document.getElementById('btn-practice');
+/* ─── Code selection context menu (legacy stubs, removed in step 3b) ─── */
+const contextMenu = document.getElementById('context-menu') || _noopEl;
+const btnAskClaude = document.getElementById('btn-ask-claude') || _noopEl;
+const btnPractice = document.getElementById('btn-practice') || _noopEl;
 let selectedCodeText = '';
 
 document.addEventListener('mouseup', (e) => {
@@ -2165,7 +2036,7 @@ btnPractice.addEventListener('click', () => {
     <div class="card-code">${escapeHtml(selectedCodeText)}</div>
     <div class="loading">Generating questions...</div>
   `;
-  const display = document.getElementById('display');
+  const display = (document.getElementById('display') || _noopEl);
   display.appendChild(card);
   display.scrollTop = display.scrollHeight;
 });
@@ -2234,7 +2105,7 @@ function renderPracticeQuestions(questions, code, topic, level) {
         <div class="card-code">${escapeHtml(code || '')}</div>
         <div class="loading">Regenerating with feedback...</div>
       `;
-      const display = document.getElementById('display');
+      const display = (document.getElementById('display') || _noopEl);
       display.appendChild(loadCard);
       display.scrollTop = display.scrollHeight;
     }
@@ -2296,7 +2167,7 @@ function renderPracticeQuestions(questions, code, topic, level) {
     }, 0);
   });
 
-  const display = document.getElementById('display');
+  const display = (document.getElementById('display') || _noopEl);
   display.appendChild(card);
   display.scrollTop = display.scrollHeight;
 }
@@ -2336,7 +2207,7 @@ function renderFollowup(question, weakConcepts, topic, level) {
     </div>
   `;
 
-  const display = document.getElementById('display');
+  const display = (document.getElementById('display') || _noopEl);
   display.appendChild(card);
   display.scrollTop = display.scrollHeight;
 
@@ -2404,7 +2275,7 @@ function showAnswerInCodeBtn() {
     showCodeEditor();
   });
 
-  const display = document.getElementById('display');
+  const display = (document.getElementById('display') || _noopEl);
   display.appendChild(btn);
   display.scrollTop = display.scrollHeight;
 }
@@ -2423,7 +2294,7 @@ function showCodeEditor() {
     </div>
   `;
 
-  const display = document.getElementById('display');
+  const display = (document.getElementById('display') || _noopEl);
   display.appendChild(area);
   display.scrollTop = display.scrollHeight;
 
@@ -2690,7 +2561,7 @@ document.getElementById('explain-dismiss').addEventListener('click', () => {
     content.style.cssText = window._savedChatStyle || '';
     document.getElementById('explain-panel-title').textContent = window._savedChatTitle || '💬 자유 대화';
     // Restore code editor
-    const display = document.getElementById('display');
+    const display = (document.getElementById('display') || _noopEl);
     if (display && display.style.display === 'none') {
       display.style.display = '';
     }
@@ -2705,7 +2576,7 @@ document.getElementById('explain-dismiss').addEventListener('click', () => {
   } else {
     panel.classList.remove('open');
     panel.style.width = '';
-    const display = document.getElementById('display');
+    const display = (document.getElementById('display') || _noopEl);
     if (display && display.style.display === 'none') {
       display.style.display = '';
     }
