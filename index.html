@@ -25,9 +25,6 @@
   #topbar .label {
     font-size: 12px; color: #484f58; letter-spacing: 0.5px; text-transform: uppercase;
   }
-  #study-context {
-    font-size: 12px; color: #58a6ff; margin-left: auto;
-  }
 
   /* ─── Layout ─── */
   #main-layout {
@@ -1051,7 +1048,6 @@
   <div id="topbar">
     <div class="dot" id="dot"></div>
     <span class="label">upskill coach</span>
-    <span id="study-context"></span>
   </div>
 
   <div id="main-layout">
@@ -1465,7 +1461,6 @@ function renderTemplate(template, data) {
 // ═══════════════════════════════════════════════════════════
 
 const dot = document.getElementById('dot');
-const contextEl = document.getElementById('study-context');
 const waitingEl = document.getElementById('waiting');
 const questionLabel = document.getElementById('question-label');
 const outputEl = document.getElementById('output');
@@ -1579,7 +1574,6 @@ function connect() {
 
       case 'connected':
         if (waitingEl) waitingEl.style.display = 'none';
-        contextEl.textContent = msg.study_context;
         break;
 
       case 'show_onboarding':
