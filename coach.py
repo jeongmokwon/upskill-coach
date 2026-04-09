@@ -85,9 +85,6 @@ ws_sessions = {}
 # Thread-local: each handler thread gets its own ctx
 _tls = threading.local()
 
-# Global fallback for terminal mode
-_global_ctx = ClientCtx(None)
-
 
 def _set_ctx(ctx):
     """Set the current thread's client context."""
@@ -98,21 +95,21 @@ def _set_ctx(ctx):
 
 
 def _ctx():
-    """Get current thread's client context (or global fallback for terminal)."""
-    return getattr(_tls, 'ctx', None) or _global_ctx
+    """Get current thread's client context."""
+    return getattr(_tls, 'ctx', None)
 
 
 def send_to_client(msg):
     """Send message to the current thread's client websocket."""
     ctx = _ctx()
-    if ctx and ctx.ws and ws_loop:
-        data = json.dumps(msg)
-        try:
-            asyncio.run_coroutine_threadsafe(ctx.ws.send_str(data), ws_loop)
-        except Exception as e:
-            print(f"  [WS] Send to client failed: {e}")
-    else:
-        broadcast(msg)  # fallback for terminal mode
+    if not (ctx and ctx.ws and ws_loop):
+        print(f"  [WS] No client context, dropping: {msg.get('type', '?')}")
+        return
+    data = json.dumps(msg)
+    try:
+        asyncio.run_coroutine_threadsafe(ctx.ws.send_str(data), ws_loop)
+    except Exception as e:
+        print(f"  [WS] Send to client failed: {e}")
 
 
 def _spawn(handler, args, ws):
@@ -122,23 +119,6 @@ def _spawn(handler, args, ws):
         _set_ctx(ctx)
         handler(*args)
     threading.Thread(target=_run, daemon=True).start()
-
-
-def broadcast(msg):
-    """Send a JSON message to all connected browser clients."""
-    if not ws_clients:
-        print(f"  [WS] No clients connected, dropping: {msg.get('type', '?')}")
-        return
-    data = json.dumps(msg)
-    msg_type = msg.get('type', '?')
-    if msg_type not in ('chat_stream',):
-        print(f"  [WS] Broadcasting {msg_type} to {len(ws_clients)} client(s) ({len(data)} bytes)")
-    for ws in list(ws_clients):
-        try:
-            asyncio.run_coroutine_threadsafe(ws.send_str(data), ws_loop)
-        except Exception as e:
-            print(f"  [WS] Send failed: {e}")
-            ws_clients.discard(ws)
 
 async def ws_handler(request):
     """aiohttp WebSocket handler."""
@@ -161,19 +141,7 @@ async def ws_handler(request):
 
     # Send current state to newly connected client
     try:
-        if IS_SERVER:
-            await websocket.send_str(json.dumps({"type": "waiting_identify"}))
-        else:
-            # Terminal mode: use global context
-            prof = _global_ctx.user_profile
-            study_ctx = prof.get("studying", "") if prof else ""
-            await websocket.send_str(json.dumps({"type": "connected", "study_context": study_ctx}))
-            if prof:
-                await websocket.send_str(json.dumps({
-                    "type": "init_settings",
-                    "difficulty": prof.get("difficulty", 3),
-                    "condition": prof.get("user_condition", 3),
-                }))
+        await websocket.send_str(json.dumps({"type": "waiting_identify"}))
     except Exception:
         pass
 
@@ -212,7 +180,7 @@ async def ws_handler(request):
                         handle_quiz_answer(msg)
                     elif msg_type == "quiz_continue":
                         _quiz_done.set()
-                        broadcast({"type": "show_code_editor"})
+                        await websocket.send_str(json.dumps({"type": "show_code_editor"}))
                     elif msg_type == "stop_followups":
                         ctx.followups_stopped = True
                         print("  [WS] Follow-ups stopped by user")
