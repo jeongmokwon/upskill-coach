@@ -1,3 +1,4 @@
 anthropic
 aiohttp
 psycopg2-binary
+manim
