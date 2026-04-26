@@ -453,6 +453,12 @@ def handle_identify(msg, websocket):
             _set_ctx(ctx)
         study_topic = profile.get("studying", "")
 
+        # Drain any prior unfinished sessions for this user. These are
+        # sessions where the WS-disconnect handler never cleanly ran
+        # (process kill, OS sleep, daemon thread killed before save).
+        # Runs in background so the user gets connected immediately.
+        _cleanup_orphan_sessions_async(profile["user_id"])
+
         # Start DB session
         db.start_session(study_topic=study_topic)
         if ctx:
@@ -511,6 +517,10 @@ def handle_onboarding_submit(msg):
     }
 
     _ctx().study_topic = studying
+
+    # Drain orphan sessions for this user (in case the user was already
+    # known under a different session_id and had unfinished sessions).
+    _cleanup_orphan_sessions_async(uid)
 
     # Start DB session
     db.start_session(study_topic=studying)
@@ -1247,6 +1257,16 @@ def handle_chat_message(msg):
     if not text:
         return
 
+    # If the user has been idle longer than IDLE_THRESHOLD_MINUTES,
+    # treat that as the natural end of the prior learning session:
+    # close + analyze it (in background) and start a new DB session
+    # for this incoming message. Done before we save the message so
+    # save_message lands in the new session's row.
+    try:
+        _rotate_session_if_idle()
+    except Exception as _re:
+        print(f"  [Session] _rotate_session_if_idle raised: {_re}", flush=True)
+
     # SAFETY: if the chat state is missing a system prompt (e.g. server
     # restarted mid-conversation, or the browser sent chat_message without
     # ever calling chat_init first), auto-initialize it. Without this, the
@@ -1402,11 +1422,18 @@ def extract_teaching_style():
             return
 
 
-def analyze_session_and_save():
-    """Called when session ends. Analyze all messages and save insight."""
-    messages = db.get_session_messages()
+def analyze_session_and_save(session_id: str | None = None):
+    """Analyze a session's transcript and persist an insight row.
+
+    `session_id` lets the caller analyze a specific session (e.g. an
+    orphaned prior session, or the session being rotated out by the
+    idle-timeout helper). If omitted, falls back to the current
+    thread-local session via db._sid().
+    """
+    messages = db.get_session_messages(session_id)
     if len(messages) < 4:  # Need at least a few exchanges to analyze
-        print("  [Insight] Too few messages to analyze, skipping")
+        sid_label = session_id or 'current'
+        print(f"  [Insight] Too few messages to analyze ({len(messages)}) for session {sid_label}, skipping")
         return
 
     # Build transcript
@@ -1475,11 +1502,11 @@ def analyze_session_and_save():
                     raw = raw[:end_pos]
                 analysis = json.loads(raw)
                 print("\n" + "=" * 60)
-                print("📊 SESSION INSIGHT (saving to DB)")
+                print(f"📊 SESSION INSIGHT (saving to DB) — session {session_id or 'current'}")
                 print("=" * 60)
                 print(json.dumps(analysis, indent=2, ensure_ascii=False))
                 print("=" * 60 + "\n")
-                db.save_insight(analysis)
+                db.save_insight(analysis, session_id=session_id)
                 return
             except Exception as e:
                 if "overloaded" in str(e).lower() and attempt < 1:
@@ -1488,6 +1515,148 @@ def analyze_session_and_save():
                 raise
     except Exception as e:
         print(f"  [Insight] Analysis failed: {e}")
+
+
+# ─── Session lifecycle: idle rotation + orphan cleanup ────────────
+#
+# A "session" in this app means "one focused learning unit", not "one
+# WebSocket connection lifetime". Two helpers below realize that:
+#
+#   1. _rotate_session_if_idle(): on every chat_message we check the
+#      gap since the last message in the current session. If it
+#      exceeds IDLE_THRESHOLD_MINUTES, we close+analyze the prior
+#      session and open a fresh one for the incoming message. This is
+#      what makes a 3-hour "I closed my laptop and came back" gap
+#      register as two sessions instead of one.
+#
+#   2. _cleanup_orphan_sessions_async(): on connect, drain any of the
+#      user's prior sessions that still have end_time IS NULL. Those
+#      are sessions where the WS-disconnect handler never ran cleanly
+#      (process kill, OS sleep, daemon thread killed). Without this
+#      net, those sessions silently never get analyzed.
+
+IDLE_THRESHOLD_MINUTES = 20
+
+
+def _parse_db_timestamp(ts_str):
+    """Parse a DB timestamp string into datetime. Tolerant of either
+    isoformat (sessions/insights) or "YYYY-MM-DD HH:MM:SS" (messages)."""
+    if not ts_str:
+        return None
+    from datetime import datetime as _dt
+    for fmt in (None,):  # try fromisoformat first (handles both forms in py3.11+)
+        try:
+            return _dt.fromisoformat(ts_str)
+        except Exception:
+            pass
+    try:
+        return _dt.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+
+
+def _rotate_session_if_idle():
+    """Called at the top of handle_chat_message. If the gap since the
+    last message in the current session exceeds IDLE_THRESHOLD_MINUTES,
+    end+analyze the prior session and start a new one for the user.
+
+    Done synchronously enough that the incoming message lands in the
+    NEW session — but the analyzer itself runs in a background thread
+    so the user doesn't wait on Claude.
+    """
+    ctx = _ctx()
+    if not ctx or not ctx.user_id:
+        return
+    prior_sid = ctx.db_session_id or db.get_session_id()
+    if not prior_sid:
+        return
+
+    last_ts_str = db.get_last_activity_time(prior_sid)
+    if not last_ts_str:
+        return  # no messages yet → nothing to rotate
+
+    from datetime import datetime as _dt
+    last_ts = _parse_db_timestamp(last_ts_str)
+    if not last_ts:
+        return
+    gap_min = (_dt.now() - last_ts).total_seconds() / 60.0
+    if gap_min < IDLE_THRESHOLD_MINUTES:
+        return
+
+    print(f"  [Session] Idle {gap_min:.1f}min > {IDLE_THRESHOLD_MINUTES}min — rotating "
+          f"session {prior_sid} → new session", flush=True)
+
+    # Close the prior session row immediately so it shows up as ended
+    # in queries, and so the orphan-cleanup pass on next connect won't
+    # pick it up.
+    try:
+        db.end_session(session_id=prior_sid)
+    except Exception as e:
+        print(f"  [Session] end_session({prior_sid}) failed: {e}", flush=True)
+
+    # Analyze in background — don't block the user's incoming message.
+    captured_uid = ctx.user_id
+    def _analyze_in_bg(_uid=captured_uid, _sid=prior_sid):
+        try:
+            db.set_thread_user(_uid, _sid)
+            analyze_session_and_save(session_id=_sid)
+        except Exception as e:
+            print(f"  [Session] background analyze of {_sid} failed: {e}", flush=True)
+    threading.Thread(target=_analyze_in_bg, daemon=True).start()
+
+    # Start a new DB session for the incoming message. set_thread_user
+    # rebinds db's per-thread session id; start_session creates the row
+    # and updates user_state.
+    db.set_thread_user(ctx.user_id, None)
+    db.start_session(study_topic=ctx.study_topic or "")
+    new_sid = db.get_session_id()
+    ctx.db_session_id = new_sid
+    print(f"  [Session] New session started for {ctx.user_id}: {new_sid}", flush=True)
+    # Note: we deliberately keep _chat_state.messages (LLM short-term
+    # context). Analytics splits, conversational continuity stays.
+
+
+def _cleanup_orphan_sessions_async(user_id):
+    """Find any prior sessions for `user_id` that were never cleanly
+    ended (end_time IS NULL) and run analyze + end on each, in a
+    background thread.
+
+    The orphan list is SNAPSHOTTED here (in the calling thread) before
+    the background work begins, so that any new session created right
+    after this call by start_session() will not be picked up. The
+    background thread then iterates that fixed snapshot — even if more
+    sessions become open later, they're not in scope for this drain.
+
+    Idempotent — safe to call repeatedly; sessions already analyzed
+    become end_time-stamped and won't reappear in future snapshots.
+    """
+    if not user_id:
+        return
+    try:
+        orphans = db.get_open_sessions_for_user(user_id)
+    except Exception as e:
+        print(f"  [Orphan] lookup failed for {user_id}: {e}", flush=True)
+        return
+    if not orphans:
+        return
+    snapshot = [(o["session_id"], o.get("n_msgs", 0)) for o in orphans]
+
+    def _do(_uid=user_id, _items=snapshot):
+        print(f"  [Orphan] Found {len(_items)} unfinished session(s) for {_uid} — draining", flush=True)
+        for sid, n in _items:
+            try:
+                db.set_thread_user(_uid, sid)
+                # analyze_session_and_save bails internally if msgs < 4
+                analyze_session_and_save(session_id=sid)
+            except Exception as e:
+                print(f"  [Orphan] analyze {sid} (n_msgs={n}) failed: {e}", flush=True)
+            try:
+                db.end_session(session_id=sid)
+            except Exception as e:
+                print(f"  [Orphan] end {sid} failed: {e}", flush=True)
+        print(f"  [Orphan] Drain complete for {_uid}", flush=True)
+
+    threading.Thread(target=_do, daemon=True).start()
 
 
 def main_web_only():

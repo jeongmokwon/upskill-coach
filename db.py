@@ -405,10 +405,16 @@ def start_session(study_topic=""):
     return _current_session_id
 
 
-def end_session():
-    """End the current session."""
+def end_session(session_id=None):
+    """End a session by setting its end_time.
+
+    If `session_id` is omitted, ends the current thread's session and
+    clears the thread-local + global trackers (the original behavior).
+    If provided, ends only that specific session row — useful for
+    closing orphan sessions or rotating to a new session at idle.
+    """
     global _current_session_id
-    sid = _sid()
+    sid = session_id or _sid()
     if not sid:
         return
 
@@ -421,8 +427,10 @@ def end_session():
     conn.commit()
     conn.close()
     print(f"  [DB] Session ended: {sid}")
-    _current_session_id = None
-    _tls.session_id = None
+    # Only clear thread-local trackers if we ended the *current* session
+    if session_id is None or session_id == _sid():
+        _current_session_id = None
+        _tls.session_id = None
 
 
 def get_session_id():
@@ -718,6 +726,35 @@ def get_last_activity_time(session_id=None):
     row = _fetchone(cur)
     conn.close()
     return row["last_ts"] if row else None
+
+
+def get_open_sessions_for_user(user_id, exclude_session_id=None):
+    """Return sessions whose `end_time IS NULL` for a given user.
+
+    Used by the orphan-cleanup pass on connect: when a prior WebSocket
+    session was never cleanly closed (process kill, OS sleep, etc), the
+    session row stays open and its analyzer never ran. On the next
+    connect we walk these and drain them through the analyzer.
+
+    Returns a list of dicts with keys: session_id, start_time, n_msgs.
+    Sessions are returned oldest-first so the analyzer processes them
+    in chronological order.
+    """
+    if not user_id:
+        return []
+    conn = get_conn()
+    cur = _execute(conn, f"""
+        SELECT s.session_id, s.start_time,
+               (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) AS n_msgs
+        FROM sessions s
+        WHERE s.user_id = {_P}
+          AND s.end_time IS NULL
+          {('AND s.session_id != ' + _P) if exclude_session_id else ''}
+        ORDER BY s.start_time ASC
+    """, (user_id, exclude_session_id) if exclude_session_id else (user_id,))
+    rows = _fetchall(cur)
+    conn.close()
+    return rows
 
 
 # Initialize on import
