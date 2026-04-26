@@ -1354,11 +1354,8 @@ def handle_explain_animation(msg):
 
         # Diagnostic: dump the LLM's full Manim source so we can see
         # what it emitted (helper usage vs raw Text(), absolute
-        # font_size vs .scale()-based shrinks, etc.). The whole thing
-        # — Manim scenes are typically <5KB and Render's log lines
-        # handle multi-line fine. Remove once LLM compliance / scale
-        # handling is validated.
-        print(f"  [Manim] code BEGIN\n{manim_code}\n  [Manim] code END\n",
+        # font_size vs .scale()-based shrinks, etc.).
+        print(f"  [Manim] code BEGIN (LLM raw)\n{manim_code}\n  [Manim] code END\n",
               flush=True)
 
         # Prepend the typography helper prelude so Title/Subtitle/...
@@ -1366,6 +1363,16 @@ def handle_explain_animation(msg):
         # are deterministic regardless of what font_size the LLM may
         # have tried to put on a raw Text() call.
         manim_code = _inject_typography_helpers(manim_code)
+
+        # Diagnostic: also dump POST-injection code so we can see
+        # exactly where the helper prelude landed relative to the
+        # LLM's `from manim import *` line. If LLM has a SECOND
+        # `from manim import *` after our prelude, Manim's own classes
+        # would re-shadow our defs — that explains why Title works
+        # (we override before LLM imports) but Subtitle/Caption don't
+        # (LLM re-imports manim AFTER our def). First 1500 chars.
+        print(f"  [Manim] code POST-INJECT (first 1500)\n{manim_code[:1500]}\n  [Manim] /post\n",
+              flush=True)
 
         timeline = _extract_manim_to_json(manim_code, class_name)
         if timeline is None:
