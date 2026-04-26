@@ -155,7 +155,24 @@ const ManimRenderer = (() => {
       if ((m.slant || 'NORMAL') !== 'NORMAL') el.setAttribute('font-style', 'italic');
       if ((m.weight || 'NORMAL') !== 'NORMAL') el.setAttribute('font-weight', 'bold');
       el.textContent = m.text || '';
+      // textLength: force the rendered text to occupy exactly the width
+      // Manim measured in its own coord system. Without this, our
+      // browser font (-apple-system) renders wider/narrower than Cairo,
+      // and `.next_to(...)`-based layouts break (adjacent labels overlap).
+      // lengthAdjust="spacingAndGlyphs" stretches/squishes both letter
+      // shapes and inter-letter spacing to fit the target width.
+      applyTextLength(el, m);
       return el;
+    }
+
+    function applyTextLength(el, state) {
+      // Skip when width is missing or implausibly small (Manim sometimes
+      // returns ~0 for empty text). Browser default rendering is fine
+      // in those cases.
+      const w = Number(state.width);
+      if (!isFinite(w) || w < 0.05) return;
+      el.setAttribute('textLength', w);
+      el.setAttribute('lengthAdjust', 'spacingAndGlyphs');
     }
 
     // Manim font_size lives in Manim "points" — typical sane values are
@@ -457,6 +474,11 @@ const ManimRenderer = (() => {
         if (endState.font_size !== undefined) {
           el.setAttribute('font-size', manimFontSizeToUnits(endState.font_size));
         }
+        // Keep textLength in sync when the morph ends — a text mobject
+        // can change width during animation (text content swap, scale,
+        // etc.). Without re-applying, the rendered width stays fixed
+        // while the source width changes.
+        if (endState.width !== undefined) applyTextLength(el, endState);
         el.style.opacity = 1;
       } else if (type === 'Square' || type === 'Rectangle' || type === 'SurroundingRectangle') {
         const w = endState.width ?? 0.5;
