@@ -106,6 +106,94 @@ def _ensure_inter_font_installed():
 # Run at import time so it's done before any Manim subprocess runs.
 _ensure_inter_font_installed()
 
+
+# ─── Boot self-test: deterministic Text font_size baseline ──────────
+#
+# Local repro (macOS, same Manim version) shows current_h == initial_h
+# for every Text → Manim's font_size property returns the constructor
+# value unchanged. In prod the same helpers somehow yielded font_size
+# 79 / 85 / 172 instead of 22 / 16 / 18.
+#
+# To make local-vs-prod comparison apples-to-apples, run a FIXED scene
+# through extract.py at boot. Same input on both sides → any divergence
+# in [serialize] lines is purely environmental.
+def _run_text_font_size_self_test():
+    import subprocess
+    import tempfile
+
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    extract = os.path.join(project_dir, "animation_extractor", "extract.py")
+    if not os.path.exists(extract):
+        print("[BOOT][selftest] extract.py not found — skipping", flush=True)
+        return
+
+    # Mirrors the helper signatures we inject in production
+    # (see _HELPER_PRELUDE) and exercises the operations the LLM
+    # actually emits: .move_to, .next_to, multi-line text.
+    fixture = '''\
+from manim import *
+def _uc_make(text, fs, weight=None, **kw):
+    kw['font'] = 'Inter'; kw['font_size'] = fs
+    if weight is not None:
+        kw.setdefault('weight', weight)
+    t = Text(text, **kw)
+    try: t._uc_font_size = fs
+    except Exception: pass
+    return t
+def Title(s, **kw):    return _uc_make(s, 28, weight=BOLD, **kw)
+def Subtitle(s, **kw): return _uc_make(s, 22, **kw)
+def AxisLabel(s, **kw):return _uc_make(s, 16, **kw)
+def Caption(s, **kw):  return _uc_make(s, 18, **kw)
+
+class FontSizeProbe(Scene):
+    def construct(self):
+        title = Title("Linear head")
+        self.play(Write(title), run_time=0.1)
+
+        sub = Subtitle("Linear layer")
+        sub.move_to([0, 1.8, 0])
+        self.play(Write(sub), run_time=0.1)
+
+        ax = AxisLabel("(C, vocab_size)")
+        ax.next_to(Square(), DOWN, buff=0.15)
+        self.play(Write(ax), run_time=0.1)
+
+        cap = Caption("Every position predicts next token")
+        cap.move_to([0, -2.2, 0])
+        self.play(Write(cap), run_time=0.1)
+'''
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".py", delete=False, encoding="utf-8"
+    ) as f:
+        f.write(fixture)
+        scene_path = f.name
+
+    try:
+        manim_python = _default_manim_python() if "_default_manim_python" in globals() else sys.executable
+        result = subprocess.run(
+            [manim_python, extract, scene_path, "FontSizeProbe"],
+            capture_output=True, text=True, timeout=60,
+        )
+        print("[BOOT][selftest] === Text font_size baseline (compare to local) ===", flush=True)
+        # The [serialize] lines we want are on stderr (extract.py
+        # redirects everything-but-final-JSON there to keep stdout clean).
+        for line in (result.stderr or "").splitlines():
+            if "[serialize]" in line:
+                print(f"[BOOT][selftest] {line}", flush=True)
+        print(f"[BOOT][selftest] === end (extract returncode={result.returncode}) ===", flush=True)
+    except Exception as e:
+        print(f"[BOOT][selftest] failed: {e}", flush=True)
+    finally:
+        try:
+            os.unlink(scene_path)
+        except Exception:
+            pass
+
+
+# Defer the self-test until after _default_manim_python is defined
+# below; we'll call it from main_web_only().
+
+
 def get_client():
     global client
     if client is None:
@@ -3139,6 +3227,15 @@ def main_web_only():
     print("=" * 50)
     print("🎓 Upskill Coach")
     print("=" * 50)
+
+    # Run the deterministic Text font_size self-test once at startup so
+    # we have apples-to-apples diagnostic data on every deploy. This is
+    # a 4-Text scene that exercises the same operations the LLM emits;
+    # local runs of the same scene yield current_h == initial_h
+    # everywhere. If prod logs show otherwise, the divergence is purely
+    # environmental (Render Linux / Pango / installed Manim version /
+    # whatever).
+    _run_text_font_size_self_test()
 
     start_ws_server()
     print(f"🌐 Server listening on {BIND_HOST}:{HTTP_PORT} — waiting for browser clients")
