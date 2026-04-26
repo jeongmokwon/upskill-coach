@@ -1352,6 +1352,14 @@ def handle_explain_animation(msg):
         print(f"  [Manim] generated {class_name}: {len(manim_code)} chars — extracting…",
               flush=True)
 
+        # Diagnostic: dump the LLM's actual Manim source so we can see
+        # what it emitted (helper usage vs raw Text(), absolute font_size
+        # vs .scale()-based shrinks, etc.). Truncated to keep the log
+        # readable. Remove this once we've validated LLM compliance.
+        _preview = manim_code[:1500]
+        print(f"  [Manim] code preview (first 1500 chars):\n{_preview}\n  [Manim] /preview\n",
+              flush=True)
+
         # Prepend the typography helper prelude so Title/Subtitle/...
         # are in scope inside the Scene's construct(). Layout sizes
         # are deterministic regardless of what font_size the LLM may
