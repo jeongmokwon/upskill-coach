@@ -38,6 +38,74 @@ client = None  # Initialized lazily when API key is available
 HTTP_PORT = int(os.environ.get("PORT", 8765))
 BIND_HOST = os.environ.get("BIND_HOST", "localhost")  # "0.0.0.0" on Render
 
+
+def _ensure_inter_font_installed():
+    """Best-effort runtime install of Inter into fontconfig's user dir.
+
+    The render.yaml buildCommand also tries this, but Render's build $HOME
+    can differ from runtime $HOME — when that happens, fc-cache populates
+    the wrong user's cache and Pango at runtime never sees Inter (verified
+    by `WARNING Font Inter not in [...]` log lines coming out of Manim).
+
+    Doing it here, at runtime, uses the actual runtime $HOME so the cache
+    lands where Pango will read it. Idempotent: skips quickly if Inter is
+    already on the cache list.
+    """
+    import shutil
+    import subprocess
+
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+    src_dir = os.path.join(project_dir, "fonts", "inter")
+    if not os.path.isdir(src_dir):
+        print("[BOOT][font] fonts/inter/ not in project dir — skipping install", flush=True)
+        return
+
+    # Quick check: if fc-list already knows about Inter, we're done.
+    try:
+        check = subprocess.run(
+            ["fc-list", ":family"], capture_output=True, text=True, timeout=10,
+        )
+        if "Inter" in check.stdout:
+            print("[BOOT][font] Inter already registered with fontconfig ✓", flush=True)
+            return
+    except FileNotFoundError:
+        print("[BOOT][font] fc-list not on PATH — fontconfig may be missing; "
+              "Manim font fallbacks will be used", flush=True)
+        return
+    except Exception as e:
+        print(f"[BOOT][font] fc-list probe failed: {e} — proceeding with install", flush=True)
+
+    target_dir = os.path.expanduser("~/.local/share/fonts")
+    try:
+        os.makedirs(target_dir, exist_ok=True)
+        copied = 0
+        for name in os.listdir(src_dir):
+            if name.lower().endswith(".otf"):
+                shutil.copy2(os.path.join(src_dir, name),
+                             os.path.join(target_dir, name))
+                copied += 1
+        print(f"[BOOT][font] copied {copied} OTF files to {target_dir}", flush=True)
+        # Refresh fontconfig cache so Pango finds the new fonts.
+        result = subprocess.run(
+            ["fc-cache", "-fv", target_dir],
+            capture_output=True, text=True, timeout=30,
+        )
+        ok_marker = "Inter" in subprocess.run(
+            ["fc-list", ":family"], capture_output=True, text=True, timeout=10,
+        ).stdout
+        print(f"[BOOT][font] fc-cache returncode={result.returncode}; "
+              f"Inter visible to fontconfig now: {ok_marker}", flush=True)
+        if not ok_marker:
+            # Surface a sample of fc-cache output so we can diagnose
+            print(f"[BOOT][font] fc-cache stdout (first 400): {result.stdout[:400]}", flush=True)
+            print(f"[BOOT][font] fc-cache stderr (first 400): {result.stderr[:400]}", flush=True)
+    except Exception as e:
+        print(f"[BOOT][font] runtime install failed: {e}", flush=True)
+
+
+# Run at import time so it's done before any Manim subprocess runs.
+_ensure_inter_font_installed()
+
 def get_client():
     global client
     if client is None:
