@@ -125,6 +125,16 @@ DESIGN PRINCIPLES (apply even when the user prompt is vague)
    • Caption: font_size=20-24
    Keep Text(color=...) explicit so the extractor sees the right color.
 
+   ⚠️ HARD CAP — font_size MUST be between 10 and 36. The browser
+   renderer scales Manim's font_size to SVG user units against a
+   14-unit-wide viewBox; values above 36 render as text larger than
+   the entire viewport (text overflows the canvas, layout breaks).
+   The renderer enforces a clamp at the upper end, but if you emit
+   the recommended ranges above you don't have to rely on it.
+   Do NOT use font_size 48, 60, 72, 80, 96, or 120 even if Manim's
+   defaults nudge you that way — those values are tuned for Manim's
+   1080p Cairo output, not our SVG playback.
+
 5. Sequencing:
    • Stage 1: set the stage (pieces appear)
    • Stage 2: the operation/transformation

@@ -158,9 +158,19 @@ const ManimRenderer = (() => {
       return el;
     }
 
+    // Manim font_size lives in Manim "points" — typical sane values are
+    // 12-32. Our SVG viewBox is 14 units wide, so we scale by 0.0135 to
+    // get readable sizes (font_size 16 → 0.216 user units).
+    //
+    // The LLM occasionally ignores the prompt's font_size guidance and
+    // emits values like 80-130, which renders as text larger than the
+    // entire viewport. Clamp to MAX_FONT_UNITS so a wild value can't
+    // blow up the layout. 0.5 user units ≈ font_size 37 — readable
+    // and contained within the visible area.
+    const MAX_FONT_UNITS = 0.5;
     function manimFontSizeToUnits(fs) {
       const f = Number(fs) || 24;
-      return f * 0.0135;
+      return Math.min(MAX_FONT_UNITS, f * 0.0135);
     }
 
     function buildArrow(m) {
