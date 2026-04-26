@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Manim JSON Renderer</title>
+<link rel="stylesheet" href="renderer.css">
+</head>
+<body>
+  <div id="toolbar">
+    <button id="play-btn">▶ Play</button>
+    <button id="restart-btn">↻ Restart</button>
+    <span id="status">—</span>
+    <label class="file-label">
+      <input type="file" id="file-input" accept="application/json">
+      Load JSON…
+    </label>
+    <input type="text" id="url-input" placeholder="?json=bt_matrix.json" style="flex:1;">
+  </div>
+  <svg id="stage" viewBox="-7.111 -4 14.222 8" preserveAspectRatio="xMidYMid meet"></svg>
+
+  <script src="renderer.js"></script>
+  <script>
+    // Auto-load via URL param
+    const params = new URLSearchParams(location.search);
+    const jsonPath = params.get('json');
+    if (jsonPath) {
+      fetch(jsonPath).then(r => r.json()).then(data => ManimRenderer.load(data));
+    }
+  </script>
+</body>
+</html>

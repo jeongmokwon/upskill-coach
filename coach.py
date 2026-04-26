@@ -559,7 +559,208 @@ def handle_quiz_answer(msg):
 # ─── Chat with Claude ────────────────────────────────────────────────
 
 
+def _default_manim_python():
+    """Best-effort location of a Python interpreter with `manim` installed."""
+    candidates = [
+        os.environ.get("MANIM_PYTHON", ""),
+        "/Users/jeongmokwon/Desktop/manim-venv/bin/python",
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return sys.executable  # fallback; will fail at import if manim absent
+
+
+def _extract_manim_to_json(manim_code: str, class_name: str):
+    """Run animation_extractor/extract.py in a subprocess to convert a Manim
+    Scene into our JSON timeline. Returns the parsed dict on success, or
+    None on any failure (with diagnostics printed to the server log)."""
+    import subprocess
+    import tempfile
+
+    manim_python = _default_manim_python()
+    extract_script = os.path.join(PROJECT_DIR, "animation_extractor", "extract.py")
+    if not os.path.exists(extract_script):
+        print(f"  [Manim] ❌ extract.py not found at {extract_script}", flush=True)
+        return None
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".py", delete=False, encoding="utf-8"
+    ) as f:
+        f.write(manim_code)
+        tmp_path = f.name
+
+    keep_tmp = False
+    try:
+        result = subprocess.run(
+            [manim_python, extract_script, tmp_path, class_name],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            keep_tmp = True
+            print(
+                f"  [Manim] extract failed (code {result.returncode})\n"
+                f"  [Manim]   scene file kept at: {tmp_path}\n"
+                f"  [Manim]   repro: {manim_python} {extract_script} {tmp_path} {class_name}\n"
+                f"  [Manim] ─── stderr ───\n{result.stderr}\n"
+                f"  [Manim] ─── stdout (first 800) ───\n{result.stdout[:800]}",
+                flush=True,
+            )
+            return None
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            keep_tmp = True
+            print(f"  [Manim] extract output not JSON: {e}", flush=True)
+            print(f"  [Manim]   scene file kept at: {tmp_path}", flush=True)
+            print(f"  [Manim]   stdout (first 800): {result.stdout[:800]}", flush=True)
+            print(f"  [Manim]   stderr (first 800): {result.stderr[:800]}", flush=True)
+            return None
+    except subprocess.TimeoutExpired:
+        keep_tmp = True
+        print("  [Manim] extract timed out (60s)", flush=True)
+        print(f"  [Manim]   scene file kept at: {tmp_path}", flush=True)
+        return None
+    except Exception as e:
+        keep_tmp = True
+        print(f"  [Manim] extract exception: {e}", flush=True)
+        print(f"  [Manim]   scene file kept at: {tmp_path}", flush=True)
+        return None
+    finally:
+        if not keep_tmp:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
+def _try_parse_json(text: str):
+    """Tolerant JSON parser — handles stray prose around a JSON object."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    import re as _re
+    m = _re.search(r'\{[\s\S]*\}', text)
+    if m:
+        try:
+            return json.loads(m.group())
+        except Exception:
+            pass
+    return None
+
+
 def handle_explain_animation(msg):
+    """Generate a Manim scene for the chat topic, extract it to a JSON
+    timeline, and ship the timeline to the browser for live playback.
+
+    Replaces the legacy 12-template orchestrator. Kept the same message
+    signature so the existing `{"type": "animation", ...}` trigger from
+    chat_message continues to work unchanged.
+    """
+    selected_code = msg.get("selectedCode", "")
+    full_code = msg.get("fullCode", "")
+    context = msg.get("context", "")
+    title_hint = msg.get("title", "")
+
+    print(f"  [Manim] scene request: {title_hint or context[:60]}", flush=True)
+
+    # Import lazily so coach.py still starts when the package is absent.
+    try:
+        from animation_extractor.manim_prompt import build_manim_system_prompt
+    except Exception as e:
+        print(f"  [Manim] prompt module import failed: {e}", flush=True)
+        send_to_client({
+            "type": "animation_error",
+            "message": f"manim_prompt import failed: {e}",
+        })
+        return
+
+    user_ctx = get_user_context_str()
+    system = build_manim_system_prompt(extra_context=user_ctx)
+
+    task_parts = [
+        f"Title hint: {title_hint or 'an animated explanation'}",
+        f"Context: {context[:600]}",
+    ]
+    if selected_code.strip():
+        task_parts.append(f"Selected code:\n```\n{selected_code[:1500]}\n```")
+    if full_code.strip() and full_code.strip() != selected_code.strip():
+        task_parts.append(f"Full file:\n```python\n{full_code[:1500]}\n```")
+    task_parts.append(
+        "Produce a SINGLE Manim Scene that teaches ONE key concept from the "
+        "above. Return the JSON format described in OUTPUT FORMAT."
+    )
+    task = "\n\n".join(task_parts)
+
+    try:
+        response = get_client().messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=6000,
+            system=system,
+            messages=[{"role": "user", "content": task}],
+        )
+        raw = response.content[0].text
+
+        parsed = _try_parse_json(raw)
+        if not parsed:
+            print(f"  [Manim] could not parse Claude response as JSON", flush=True)
+            print(f"  [Manim] raw (first 400): {raw[:400]}", flush=True)
+            send_to_client({
+                "type": "animation_error",
+                "message": "Failed to parse Manim response JSON",
+            })
+            return
+
+        class_name = parsed.get("class_name") or ""
+        manim_code = parsed.get("manim_code") or ""
+        if not class_name or not manim_code:
+            print(f"  [Manim] response missing class_name/manim_code: keys={list(parsed.keys())}",
+                  flush=True)
+            send_to_client({
+                "type": "animation_error",
+                "message": "Incomplete Manim response",
+            })
+            return
+
+        print(f"  [Manim] generated {class_name}: {len(manim_code)} chars — extracting…",
+              flush=True)
+
+        timeline = _extract_manim_to_json(manim_code, class_name)
+        if timeline is None:
+            send_to_client({
+                "type": "animation_error",
+                "message": "Failed to extract Manim scene",
+            })
+            return
+
+        n_mobj = len(timeline.get("mobjects", {}))
+        n_ev = len(timeline.get("timeline", []))
+        dur = timeline.get("total_duration_ms", 0)
+        print(
+            f"  [Manim] timeline: {n_mobj} mobjects, {n_ev} events, {dur}ms",
+            flush=True,
+        )
+
+        send_to_client({
+            "type": "animation_timeline",
+            "title": title_hint or class_name,
+            "timeline": timeline,
+        })
+        return
+    except Exception as e:
+        print(f"  [Manim] error: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        send_to_client({
+            "type": "animation_error",
+            "message": str(e),
+        })
+        return
+
+
+# ─── Legacy 12-template explanation (deprecated — kept for rollback safety) ───
+def _legacy_handle_explain_animation(msg):
     """Template-based explanation: single orchestrator call classifies + extracts data, browser renders."""
     selected_code = msg.get("selectedCode", "")
     full_code = msg.get("fullCode", "")
@@ -709,6 +910,40 @@ Return ONLY a JSON object:
         })
 
 
+def _sanitize_json_candidate(s: str) -> str:
+    """Walk a JSON candidate and escape raw \n/\r/\t that appear INSIDE
+    string values (where strict JSON requires them escaped). No-op for
+    already-valid JSON. The model occasionally emits multi-line strings
+    in animation/fill_blank JSON; without this, json.loads() rejects
+    them with a JSONDecodeError.
+    """
+    out = []
+    in_str = False
+    esc = False
+    for c in s:
+        if esc:
+            out.append(c)
+            esc = False
+            continue
+        if c == '\\':
+            out.append(c)
+            esc = True
+            continue
+        if c == '"':
+            out.append(c)
+            in_str = not in_str
+            continue
+        if in_str:
+            if c == '\n':
+                out.append('\\n'); continue
+            if c == '\r':
+                out.append('\\r'); continue
+            if c == '\t':
+                out.append('\\t'); continue
+        out.append(c)
+    return ''.join(out)
+
+
 def _extract_typed_json(text, type_value):
     """Extract the first balanced-brace JSON object in ``text`` whose top-level
     ``type`` field equals ``type_value``. Handles nested braces, string
@@ -741,12 +976,17 @@ def _extract_typed_json(text, type_value):
                 depth -= 1
                 if depth == 0:
                     candidate = text[start:i + 1]
+                    obj = None
                     try:
                         obj = json.loads(candidate)
-                        if isinstance(obj, dict) and obj.get("type") == type_value:
-                            return candidate, obj
                     except Exception:
-                        pass
+                        # Retry after sanitizing raw control chars inside strings
+                        try:
+                            obj = json.loads(_sanitize_json_candidate(candidate))
+                        except Exception:
+                            obj = None
+                    if isinstance(obj, dict) and obj.get("type") == type_value:
+                        return candidate, obj
                     i += 1
                     break
             i += 1
