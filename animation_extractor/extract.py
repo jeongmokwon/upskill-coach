@@ -197,8 +197,16 @@ def _serialize_mobject(m: Mobject, mid: str, registry: _Registry) -> dict:
         # Prefer original_text (preserves whitespace) over .text (which Manim
         # strips of spaces for internal rendering).
         data["text"] = getattr(m, "original_text", None) or getattr(m, "text", "")
-        # font_size — Manim Text stores as attr on some versions
-        fs = getattr(m, "font_size", None)
+        # font_size: prefer the upskill-coach marker `_uc_font_size` set by
+        # the typography helpers (Title/Subtitle/...) — Manim's own
+        # `font_size` property is height/initial_height*_font_size, so any
+        # subsequent .next_to() / VGroup membership / scene-level
+        # operation that perturbs the mobject's height makes that getter
+        # return a wrong value. The marker is locked at construction time
+        # and reflects the SIZE THE HELPER REQUESTED.
+        fs = getattr(m, "_uc_font_size", None)
+        if fs is None:
+            fs = getattr(m, "font_size", None)
         if fs is None:
             fs = _safe(lambda: max(8.0, float(m.get_height()) * 50.0), 24.0)
         data["font_size"] = float(fs)

@@ -1212,48 +1212,56 @@ def _try_parse_json(text: str):
 # upgrade Caption to bold etc. when they really want.
 _HELPER_PRELUDE = '''\
 # === Typography helpers (injected by the upskill-coach runtime). ===
-# Use these factories instead of raw Text() so font sizes are
-# deterministic and server/browser metrics stay matched.
+# Each helper attaches a `_uc_font_size` marker on the returned Text
+# mobject so the extractor can read OUR intended size directly,
+# bypassing Manim's `font_size` property (which is computed as
+# height/initial_height * _font_size and drifts when .next_to() /
+# .move_to() / VGroup membership perturbs the height).
+import sys as _sys
+def _uc_make(text, fs, weight=None, **kw):
+    kw['font'] = 'Inter'
+    kw['font_size'] = fs
+    if weight is not None:
+        kw.setdefault('weight', weight)
+    t = Text(text, **kw)
+    try:
+        t._uc_font_size = fs
+    except Exception:
+        pass
+    print(f"DEBUG_UC: helper made Text(font_size={fs}) for {text[:40]!r}", file=_sys.stderr, flush=True)
+    return t
+
 def Title(s, **kw):
     """Animation title — large, bold."""
-    kw['font'] = 'Inter'; kw['font_size'] = 28
-    kw.setdefault('weight', BOLD)
-    return Text(s, **kw)
+    return _uc_make(s, 28, weight=BOLD, **kw)
 
 def Subtitle(s, **kw):
     """Section heading."""
-    kw['font'] = 'Inter'; kw['font_size'] = 22
-    return Text(s, **kw)
+    return _uc_make(s, 22, **kw)
 
 def Caption(s, **kw):
     """Bottom-of-frame summary."""
-    kw['font'] = 'Inter'; kw['font_size'] = 18
-    return Text(s, **kw)
+    return _uc_make(s, 18, **kw)
 
 def AxisLabel(s, **kw):
     """Brace labels (e.g. \"T = 4 (sequence length)\")."""
-    kw['font'] = 'Inter'; kw['font_size'] = 16
-    return Text(s, **kw)
+    return _uc_make(s, 16, **kw)
 
 def CellDigit(s, **kw):
     """Numbers shown inside matrix cells."""
-    kw['font'] = 'Inter'; kw['font_size'] = 18
-    return Text(s, **kw)
+    return _uc_make(s, 18, **kw)
 
 def RowLabel(s, **kw):
     """Row identifiers (e.g. \"batch 0\")."""
-    kw['font'] = 'Inter'; kw['font_size'] = 14
-    return Text(s, **kw)
+    return _uc_make(s, 14, **kw)
 
 def ColLabel(s, **kw):
     """Column identifiers."""
-    kw['font'] = 'Inter'; kw['font_size'] = 14
-    return Text(s, **kw)
+    return _uc_make(s, 14, **kw)
 
 def CodeText(s, **kw):
     """Inline code-like text (variable names, short snippets)."""
-    kw['font'] = 'Inter'; kw['font_size'] = 16
-    return Text(s, **kw)
+    return _uc_make(s, 16, **kw)
 # === end helpers ===
 
 '''
