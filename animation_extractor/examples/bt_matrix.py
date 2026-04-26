@@ -22,8 +22,7 @@ class BTMatrix(Scene):
 
         # ═══ Title ═══
         title = Text(
-            "What is a (B, T) matrix?", font_size=32
-        ).to_edge(UP, buff=0.5)
+            "What is a (B, T) matrix?", font_size=32, font="Inter").to_edge(UP, buff=0.5)
         self.play(Write(title), run_time=0.7)
 
         # ═══ Stage 1: 4 sentences appear as rows of character cells ═══
@@ -42,7 +41,7 @@ class BTMatrix(Scene):
                     stroke_width=1.5,
                 )
                 sq.move_to([-2.1 + t * cell_w, 0.6 - b * cell_w, 0])
-                ch = Text(sentences[b][t], font_size=22, color=WHITE)
+                ch = Text(sentences[b][t], font_size=22, color=WHITE, font="Inter")
                 ch.move_to(sq.get_center())
                 squares[(b, t)] = sq
                 chars[(b, t)] = ch
@@ -54,8 +53,7 @@ class BTMatrix(Scene):
                 f'"{sentences[b]}"',
                 font_size=15,
                 color=GREY_B,
-                slant=ITALIC,
-            )
+                slant=ITALIC,font="Inter")
             lbl.next_to(row[0], LEFT, buff=0.35)
             sentence_labels.add(lbl)
 
@@ -72,7 +70,7 @@ class BTMatrix(Scene):
         for b in range(B):
             for t in range(T):
                 tid = char_to_id[sentences[b][t]]
-                new_num = Text(str(tid), font_size=20, color=YELLOW_B)
+                new_num = Text(str(tid), font_size=20, color=YELLOW_B, font="Inter")
                 new_num.move_to(chars[(b, t)].get_center())
                 id_transforms.append(Transform(chars[(b, t)], new_num))
 
@@ -90,13 +88,11 @@ class BTMatrix(Scene):
 
         left_brace = Brace(matrix_group, LEFT, color=GREEN)
         b_label = Text(
-            "B = 4  (batch)", font_size=18, color=GREEN
-        ).next_to(left_brace, LEFT, buff=0.15)
+            "B = 4  (batch)", font_size=18, color=GREEN, font="Inter").next_to(left_brace, LEFT, buff=0.15)
 
         top_brace = Brace(matrix_group, UP, color=ORANGE)
         t_label = Text(
-            "T = 8  (sequence length)", font_size=18, color=ORANGE
-        ).next_to(top_brace, UP, buff=0.15)
+            "T = 8  (sequence length)", font_size=18, color=ORANGE, font="Inter").next_to(top_brace, UP, buff=0.15)
 
         self.play(GrowFromCenter(left_brace), Write(b_label), run_time=0.85)
         self.play(GrowFromCenter(top_brace), Write(t_label), run_time=0.85)
@@ -105,7 +101,6 @@ class BTMatrix(Scene):
         caption = Text(
             "(B, T) = (4, 8)   —   32 tokens total",
             font_size=22,
-            color=BLUE_B,
-        ).next_to(matrix_group, DOWN, buff=0.8)
+            color=BLUE_B,font="Inter").next_to(matrix_group, DOWN, buff=0.8)
         self.play(Write(caption), run_time=0.7)
         self.wait(1.1)

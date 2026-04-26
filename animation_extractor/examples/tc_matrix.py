@@ -29,8 +29,7 @@ class TCMatrix(Scene):
 
         # ═══ Title ═══
         title = Text(
-            "8 vectors make a (T, C) matrix", font_size=28
-        ).to_edge(UP, buff=0.4)
+            "8 vectors make a (T, C) matrix", font_size=28, font="Inter").to_edge(UP, buff=0.4)
         self.play(Write(title), run_time=0.6)
 
         # ═══ Stage 1: 8 row-vectors stacked ═══
@@ -70,13 +69,11 @@ class TCMatrix(Scene):
         # ═══ Stage 3: axis labels via braces ═══
         left_brace = Brace(matrix_frame, LEFT, color=GREEN, buff=0.1)
         t_label = Text(
-            "T = 8  (sequence length)", font_size=17, color=GREEN,
-        ).next_to(left_brace, LEFT, buff=0.15)
+            "T = 8  (sequence length)", font_size=17, color=GREEN,font="Inter").next_to(left_brace, LEFT, buff=0.15)
 
         top_brace = Brace(matrix_frame, UP, color=ORANGE, buff=0.1)
         c_label = Text(
-            "C = 16  (embedding dim)", font_size=17, color=ORANGE,
-        ).next_to(top_brace, UP, buff=0.15)
+            "C = 16  (embedding dim)", font_size=17, color=ORANGE,font="Inter").next_to(top_brace, UP, buff=0.15)
 
         self.play(GrowFromCenter(left_brace), Write(t_label), run_time=0.85)
         self.play(GrowFromCenter(top_brace), Write(c_label), run_time=0.85)
@@ -84,7 +81,6 @@ class TCMatrix(Scene):
         # ═══ Stage 4: final caption ═══
         caption = Text(
             "(T, C) = (8, 16)",
-            font_size=24, color=YELLOW_B,
-        ).next_to(matrix_frame, DOWN, buff=0.7)
+            font_size=24, color=YELLOW_B,font="Inter").next_to(matrix_frame, DOWN, buff=0.7)
         self.play(Write(caption), run_time=0.6)
         self.wait(1.0)

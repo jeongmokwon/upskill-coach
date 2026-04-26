@@ -64,6 +64,17 @@ FORBIDDEN (will break the extractor or renderer):
     arbitrary points, etc.
   • Anything outside the supported Mobject/Animation list above.
 
+REQUIRED FONT (critical for layout correctness):
+  EVERY Text(...) call MUST pass font="Inter" explicitly. Example:
+      Text("hello", font_size=18, color=BLUE_C, font="Inter")
+  The browser SVG renderer uses Inter via @font-face, and the server
+  has Inter installed for Pango/Cairo. If you omit `font="Inter"`,
+  Manim measures text widths with whatever the system default is —
+  but the browser renders with Inter, and the metric mismatch causes
+  adjacent labels to overlap (we have seen this break layouts).
+  This is non-negotiable. Apply to every Text mobject without
+  exception — including small cell digits and brace labels.
+
 COLOR SUPPORT:
   Use Manim's built-in constants (WHITE, BLACK, BLUE_C, YELLOW_B, GREEN,
   ORANGE, GREY_B, etc.) or hex strings ("#58a6ff"). interpolate_color

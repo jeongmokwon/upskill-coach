@@ -47,8 +47,7 @@ class BTCStack(Scene):
 
         # ═══ Title ═══
         title = Text(
-            "4 batches  →  (B, T, C)", font_size=28
-        ).to_edge(UP, buff=0.4)
+            "4 batches  →  (B, T, C)", font_size=28, font="Inter").to_edge(UP, buff=0.4)
         self.play(Write(title), run_time=0.6)
 
         # ═══ Stage 1: ONE (T, C) matrix front and center ═══
@@ -57,8 +56,7 @@ class BTCStack(Scene):
 
         b0_label = Text(
             "one batch:  (T, C)",
-            font_size=16, color=GREEN,
-        ).next_to(slab_b0, DOWN, buff=0.25)
+            font_size=16, color=GREEN,font="Inter").next_to(slab_b0, DOWN, buff=0.25)
 
         self.play(FadeIn(slab_b0), Write(b0_label), run_time=0.9)
         self.wait(0.4)
@@ -91,8 +89,7 @@ class BTCStack(Scene):
         )
         b_label = Text(
             "B = 4  (batch)",
-            font_size=17, color=ORANGE,
-        ).next_to(b_arrow.get_center(), RIGHT, buff=0.25).shift(UP * 0.1)
+            font_size=17, color=ORANGE,font="Inter").next_to(b_arrow.get_center(), RIGHT, buff=0.25).shift(UP * 0.1)
 
         self.play(
             GrowArrow(b_arrow), Write(b_label),
@@ -104,7 +101,6 @@ class BTCStack(Scene):
         # ═══ Stage 4: final caption ═══
         final_caption = Text(
             "(B, T, C) = (4, 8, 16)",
-            font_size=26, color=YELLOW_B,
-        ).shift(DOWN * 3.0)
+            font_size=26, color=YELLOW_B,font="Inter").shift(DOWN * 3.0)
         self.play(Write(final_caption), run_time=0.7)
         self.wait(1.0)

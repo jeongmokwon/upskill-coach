@@ -11,7 +11,19 @@ services:
     runtime: python
     plan: starter
     region: virginia
-    buildCommand: pip install -r requirements.txt
+    # Build:
+    #   1. Install Python deps
+    #   2. Install Inter OTF into the user's font dir + refresh fontconfig
+    #      cache so Manim's Pango/Cairo finds it. We use ~/.fonts (no sudo
+    #      needed on Render) — Pango walks user font dirs by default. The
+    #      same Inter font is embedded in the browser via @font-face so
+    #      server-measured text widths match browser-rendered widths
+    #      (= no layout drift).
+    buildCommand: |
+      pip install -r requirements.txt
+      mkdir -p $HOME/.fonts
+      cp fonts/inter/*.otf $HOME/.fonts/
+      fc-cache -fv $HOME/.fonts
     startCommand: python coach.py
     healthCheckPath: /health
     envVars:
