@@ -434,8 +434,603 @@
     background: none; border: none; padding: 4px;
   }
 
+  /* When a Claude bubble carries an inline animation, let it expand to
+     fill the chat column so the SVG has room to breathe. */
+  .chat-msg.claude.has-animation {
+    max-width: 100%;
+    width: 100%;
+    padding: 14px 16px;
+  }
+  .inline-anim-slot {
+    margin: 12px 0 4px;
+    width: 100%;
+    aspect-ratio: 14 / 8;
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    display: block;
+  }
+  .inline-anim-slot.loading,
+  .inline-anim-slot.errored {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 20px;
+    box-sizing: border-box;
+  }
+  .inline-anim-slot.loading { color: #8b949e; font-size: 12px; }
+  .inline-anim-slot.errored { color: #f85149; font-size: 12px; line-height: 1.5; }
+  .inline-anim-slot svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: #0d1117;
+  }
+
   #explain-nav button:hover:not(:disabled) { filter: brightness(1.2); }
   #explain-nav button:disabled { cursor: default; }
+
+  /* ══════════════════════════════════════════════════════════════
+     APPRENTICESHIP MODE — Phase 1 (animation deferred)
+     ══════════════════════════════════════════════════════════════ */
+
+  .home-apprentice-btn {
+    /* Apprentice mode entry hidden for the small-user release.
+       Keep the button + handler code intact so we can re-enable
+       by removing this `display: none` line. */
+    display: none;
+    margin-top: 20px; padding: 10px 24px; background: transparent;
+    color: #bc8cff; border: 1px solid #bc8cff60; border-radius: 10px;
+    font-size: 13px; cursor: pointer; transition: all 0.2s;
+    letter-spacing: 0.3px;
+  }
+  .home-apprentice-btn:hover {
+    background: #bc8cff15; border-color: #bc8cff;
+  }
+
+  #apprentice-screen {
+    display: none; position: fixed; inset: 0; z-index: 50;
+    background: #0d1117; color: #e6edf3;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  #apprentice-screen.active { display: flex; }
+
+  #apprentice-workspace {
+    flex: 1; display: flex; min-width: 0; overflow: hidden;
+    transition: padding-right 0.25s ease;
+  }
+  /* When chat is expanded, workspace shrinks to leave 1/3 for chat */
+  #apprentice-screen.chat-expanded #apprentice-workspace {
+    padding-right: 33.33vw;
+  }
+
+  .ap-panel {
+    display: flex; flex-direction: column; min-width: 0;
+    border-right: 1px solid #21262d; background: #0d1117;
+    transition: flex 0.3s ease, opacity 0.3s ease;
+  }
+  .ap-panel:last-child { border-right: none; }
+
+  .ap-panel-header {
+    padding: 14px 18px; font-size: 13px; font-weight: 600;
+    letter-spacing: 0.4px; color: #8b949e;
+    border-bottom: 1px solid #21262d; background: #161b22;
+    text-transform: uppercase;
+  }
+  .ap-panel-body {
+    flex: 1; overflow-y: auto; padding: 24px 28px;
+  }
+
+  /* Animation panel: hidden by default; opens to the LEFT of demo for Pass 1.5 */
+  #apprentice-animation-panel {
+    flex: 0 0 0; display: none; border-right: 1px solid #21262d;
+    background: #0a0e14;
+  }
+  #apprentice-animation-panel.visible { display: flex; }
+  /* While playing: animation 60% / demo 40% */
+  #apprentice-workspace.animation-playing #apprentice-animation-panel { flex: 6; }
+  #apprentice-workspace.animation-playing #apprentice-demo-panel { flex: 4; opacity: 0.6; }
+  /* After playing: animation 40% / demo 60% */
+  #apprentice-workspace.animation-idle #apprentice-animation-panel { flex: 4; }
+  #apprentice-workspace.animation-idle #apprentice-demo-panel { flex: 6; opacity: 1; }
+  /* When practice opens, animation collapses */
+  #apprentice-practice-panel.visible ~ #apprentice-animation-panel,
+  #apprentice-workspace:has(#apprentice-practice-panel.visible) #apprentice-animation-panel {
+    display: none;
+  }
+
+  #apprentice-animation-body {
+    position: relative; overflow: hidden;
+    background: #0a0e14;
+  }
+  #apprentice-animation-stage {
+    position: relative; width: 100%; height: 100%;
+    padding: 40px;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 28px;
+  }
+  .ap-anim-element {
+    font-family: "SF Mono", "JetBrains Mono", Menlo, monospace;
+    font-size: 22px; line-height: 1.55;
+    color: #e6edf3;
+    white-space: pre-wrap; word-break: break-word;
+    transition: opacity 0.4s ease, transform 0.5s ease, background 0.3s ease;
+    padding: 6px 10px; border-radius: 6px;
+    max-width: 90%;
+  }
+  .ap-anim-element.type-label {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 15px; color: #8b949e; font-style: italic;
+  }
+  .ap-anim-element.hidden { opacity: 0; }
+  .ap-anim-element .ap-char {
+    display: inline-block; position: relative;
+    padding: 2px 3px; margin: 0 1px;
+  }
+  .ap-anim-element .ap-bracket { color: #8b949e; font-weight: 600; }
+  .ap-anim-element .ap-char-annotation {
+    position: absolute; top: -10px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px; color: #79c0ff; font-family: inherit;
+  }
+  .ap-anim-arrow {
+    position: absolute; pointer-events: none;
+    stroke: #f0883e; stroke-width: 2; fill: none;
+  }
+
+  /* Hide chat while animation plays */
+  #apprentice-workspace.animation-playing ~ #apprentice-chat { display: none; }
+
+  /* Practice panel: hidden by default, opens when generator requests */
+  #apprentice-practice-panel {
+    flex: 0 0 0; display: none; border-right: 1px solid #21262d;
+  }
+  #apprentice-practice-panel.visible {
+    flex: 1; display: flex;
+  }
+  /* When practice is visible, demo fades to "reference" (demo is now BEFORE practice in DOM) */
+  #apprentice-workspace:has(#apprentice-practice-panel.visible) #apprentice-demo-panel {
+    opacity: 0.55;
+  }
+  #apprentice-workspace:has(#apprentice-practice-panel.visible) #apprentice-demo-panel:hover {
+    opacity: 0.9;
+  }
+
+  /* Demo panel takes full width by default */
+  #apprentice-demo-panel { flex: 1; }
+
+  /* Empty state in demo panel (pre-session) */
+  .ap-empty-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; min-height: 300px; padding: 60px 20px;
+    text-align: center;
+  }
+  .ap-empty-title {
+    font-size: 28px; font-weight: 600; color: #bc8cff;
+    margin-bottom: 8px; letter-spacing: 0.5px;
+  }
+  .ap-empty-sub {
+    font-size: 15px; color: #8b949e; margin-bottom: 32px;
+  }
+  .ap-empty-input {
+    display: flex; gap: 8px; width: 100%; max-width: 500px;
+  }
+  .ap-empty-input input {
+    flex: 1; padding: 12px 16px; font-size: 14px;
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    color: #e6edf3; outline: none;
+  }
+  .ap-empty-input input:focus { border-color: #bc8cff; }
+  .ap-empty-input button {
+    padding: 12px 24px; background: #bc8cff; color: #0d1117;
+    border: none; border-radius: 8px; font-weight: 600; cursor: pointer;
+    font-size: 14px;
+  }
+  .ap-empty-input button:hover { filter: brightness(1.1); }
+
+  /* Substep cells (demo and practice share base style) */
+  .ap-substep-cell {
+    margin-bottom: 24px; padding: 16px 20px;
+    background: #161b22; border: 1px solid #21262d;
+    border-radius: 10px; transition: all 0.3s ease;
+    font-size: 12px; opacity: 0.55;
+  }
+  .ap-substep-cell.focused {
+    opacity: 1; font-size: 15px;
+    border-color: #58a6ff; box-shadow: 0 0 0 1px #58a6ff40;
+    background: #0d2340;
+  }
+  /* Highlighted: cell stays fully visible & readable while the paired practice cell is active */
+  .ap-substep-cell.highlighted {
+    opacity: 1 !important;
+    font-size: 14px;
+    background: #1f1538;
+    border-color: #bc8cff;
+    box-shadow: 0 0 0 1px #bc8cff60;
+  }
+  .ap-substep-cell.highlighted .ap-substep-label { color: #bc8cff; font-size: 12px; }
+  .ap-substep-cell.highlighted .ap-substep-code { font-size: 14px; color: #e6edf3; }
+  .ap-substep-cell.highlighted .ap-substep-explanation { color: #adbac7; font-size: 13px; }
+
+  /* Pulse: brief visual transition when highlight is (re)applied */
+  .ap-substep-cell {
+    cursor: pointer;
+  }
+  .ap-substep-cell.paired-pulse {
+    animation: ap-pulse 0.9s ease;
+  }
+  @keyframes ap-pulse {
+    0% { box-shadow: 0 0 0 0 #bc8cff90, 0 0 0 1px #bc8cff60; }
+    40% { box-shadow: 0 0 0 10px #bc8cff40, 0 0 0 1px #bc8cff; }
+    100% { box-shadow: 0 0 0 0 #bc8cff00, 0 0 0 1px #bc8cff60; }
+  }
+  .ap-substep-label {
+    font-size: 11px; color: #8b949e; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;
+  }
+  .ap-substep-cell.focused .ap-substep-label {
+    color: #58a6ff; font-size: 13px;
+  }
+  .ap-substep-code {
+    font-family: "SF Mono", "JetBrains Mono", "Fira Code", Menlo, monospace;
+    background: #0d1117; padding: 14px 16px; border-radius: 6px;
+    border: 1px solid #21262d; white-space: pre-wrap; word-break: break-word;
+    line-height: 1.6; color: #d2a8ff;
+  }
+  /* Focused cell: code line is much larger — inventing the wheel, not the usual IDE size */
+  .ap-substep-cell.focused .ap-substep-code {
+    font-size: 22px; color: #e6edf3; line-height: 1.8;
+    padding: 20px 22px;
+  }
+  .ap-substep-explanation {
+    margin-top: 10px; font-size: 13px; line-height: 1.5; color: #8b949e;
+  }
+  .ap-substep-cell.focused .ap-substep-explanation {
+    color: #adbac7; font-size: 14px;
+  }
+  /* ── Pass 1: big-picture cells ── */
+  .ap-substep-cell.pass-1 {
+    padding: 22px 26px;
+  }
+  /* Label above caption — bigger in Pass 1 since it's the title of the moment */
+  .pass-1-label {
+    font-size: 15px; color: #58a6ff; margin-bottom: 10px;
+  }
+  .ap-caption {
+    font-size: 16px; line-height: 1.6;
+    color: #adbac7;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    margin-bottom: 16px;
+  }
+  .ap-big-display {
+    font-family: "SF Mono", "JetBrains Mono", "Fira Code", Menlo, monospace;
+    font-size: 22px; line-height: 1.55;
+    color: #e6edf3; padding: 16px 20px;
+    background: #0d1117; border: 1px solid #21262d; border-radius: 8px;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .ap-substep-cell.pass-1.focused .pass-1-label { font-size: 16px; }
+  .ap-substep-cell.pass-1.focused .ap-caption { font-size: 18px; color: #e6edf3; }
+  .ap-substep-cell.pass-1.focused .ap-big-display { font-size: 26px; }
+
+  /* Pass 2 active: shrink Pass 1 content to baseline 100%, make Pass 2 the big one */
+  .ap-substep-cell.pass-2-active .pass-1-label {
+    font-size: 13px;
+    transition: font-size 0.4s ease;
+  }
+  .ap-substep-cell.pass-2-active .ap-caption {
+    font-size: 13px; color: #8b949e;
+    transition: font-size 0.4s ease, color 0.4s ease;
+  }
+  .ap-substep-cell.pass-2-active .ap-big-display {
+    font-size: 15px; padding: 10px 14px;
+    transition: font-size 0.4s ease, padding 0.4s ease;
+    opacity: 0.7;
+  }
+
+  /* Divider between Pass 1 and Pass 2 content */
+  .ap-pass2-divider {
+    height: 1px;
+    background: linear-gradient(to right, transparent, #30363d 20%, #30363d 80%, transparent);
+    margin: 20px 0 16px 0;
+  }
+
+  /* Pseudo-code: 150% of baseline, sans-serif, gentle color */
+  .ap-pseudo-code {
+    font-family: "SF Mono", "JetBrains Mono", "Fira Code", Menlo, monospace;
+    font-size: 21px; line-height: 1.7;
+    color: #a5d6ff;
+  }
+  .ap-pseudo-line {
+    margin: 0;
+    min-height: 1.7em;
+    white-space: pre-wrap; word-wrap: break-word;
+  }
+
+  /* Pass-2 blocks — the interleaved comment / code / narrative sequence */
+  .ap-pass2-blocks {
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .ap-p2-block {
+    white-space: pre-wrap; word-wrap: break-word;
+    padding: 4px 0;
+  }
+  .ap-p2-line { min-height: 1.5em; }
+
+  /* comment: planning # notes — muted blue, monospace */
+  .ap-p2-comment {
+    font-family: "SF Mono", "JetBrains Mono", "Fira Code", Menlo, monospace;
+    font-size: 18px; line-height: 1.65;
+    color: #8ab4da;
+  }
+
+  /* code: the real thing — bright, monospace, slight background to distinguish */
+  .ap-p2-code {
+    font-family: "SF Mono", "JetBrains Mono", "Fira Code", Menlo, monospace;
+    font-size: 18px; line-height: 1.7;
+    color: #e6edf3;
+    background: rgba(110, 118, 129, 0.1);
+    border-left: 3px solid #58a6ff;
+    padding: 10px 14px; border-radius: 4px;
+  }
+
+  /* narrative: coach speaking — sans-serif, italic, warm tone */
+  .ap-p2-narrative {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 17px; line-height: 1.6;
+    color: #d0c4a8;
+    font-style: italic;
+    border-left: 3px solid #9e7a45;
+    padding: 8px 14px; border-radius: 4px;
+    background: rgba(158, 122, 69, 0.06);
+  }
+
+  /* Characters after split_text (Manim-lite) */
+  .ap-char {
+    display: inline-block; position: relative;
+    padding: 2px 4px; margin: 1px;
+    transition: opacity 0.25s ease, transform 0.35s ease;
+  }
+  .ap-char-fade-out { opacity: 0; transform: scale(0.6); }
+  .ap-bracket { color: #8b949e; font-weight: 600; }
+  .ap-char-annotation {
+    position: absolute; top: -10px; left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px; color: #79c0ff; font-family: inherit;
+  }
+
+  /* Intro narration — the coach's "verbal" lead-in, typed at top of cell */
+  .ap-cell-narration {
+    margin-bottom: 14px; font-size: 15px; line-height: 1.6;
+    color: #adbac7; font-style: italic;
+  }
+  .ap-substep-cell.focused .ap-cell-narration {
+    font-size: 19px; line-height: 1.55;
+    color: #e6edf3; font-style: normal; font-weight: 400;
+  }
+  /* Divider between narration and code */
+  .ap-cell-divider {
+    height: 1px; background: linear-gradient(to right, transparent, #30363d 20%, #30363d 80%, transparent);
+    margin: 16px 0;
+  }
+
+  /* Natural-language question — asked right above the blank line, prose style */
+  .ap-question {
+    margin: 10px 0 12px 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 15px; line-height: 1.55;
+    color: #79c0ff; font-weight: 500; font-style: normal;
+  }
+  .ap-substep-cell.focused .ap-question {
+    font-size: 18px; line-height: 1.5;
+    color: #a5d6ff;
+  }
+
+  /* Light-bulb hint button next to the blank */
+  .ap-hint-btn {
+    display: inline-block; margin-left: 6px; padding: 0 6px;
+    background: transparent; border: 1px solid #30363d; border-radius: 6px;
+    cursor: pointer; font-size: 14px; vertical-align: baseline;
+    color: #f0883e; line-height: 1.6;
+  }
+  .ap-hint-btn:hover {
+    background: #1c2029; border-color: #f0883e;
+  }
+  .ap-substep-cell.focused .ap-hint-btn {
+    font-size: 20px; padding: 2px 10px; margin-left: 8px;
+  }
+  /* Popover that appears when hint button is clicked */
+  .ap-hint-popover {
+    display: none; position: absolute;
+    margin-top: 6px;
+    padding: 12px 14px;
+    background: #1c2029; border-left: 3px solid #f0883e;
+    border-radius: 6px; color: #f0883e; font-size: 13px; line-height: 1.55;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-style: normal;
+    max-width: 420px; min-width: 280px; z-index: 5;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    white-space: normal; word-wrap: break-word;
+  }
+  .ap-hint-popover.visible { display: block; }
+  .ap-substep-cell.focused .ap-hint-popover {
+    font-size: 15px; padding: 14px 18px; max-width: 480px;
+  }
+  .ap-blank-holder { position: relative; }
+
+  /* Concept tip — legacy back-compat (only used if a cell has no `question`) */
+  .ap-concept-tip {
+    margin-top: 14px; padding: 14px 18px;
+    background: #1c2029; border-left: 4px solid #f0883e;
+    font-size: 14px; line-height: 1.55; color: #f0883e;
+    border-radius: 6px; font-weight: 500;
+  }
+  .ap-substep-cell.focused .ap-concept-tip {
+    font-size: 16px; padding: 16px 20px;
+  }
+  /* Legacy prompt (kept for back-compat with older inline_prompt field) */
+  .ap-substep-prompt {
+    margin-top: 10px; padding: 8px 12px;
+    background: #1c2029; border-left: 3px solid #f0883e;
+    font-size: 13px; color: #f0883e; border-radius: 4px;
+  }
+  /* Inline blank input inside code */
+  .ap-blank-holder {
+    display: inline-block; vertical-align: baseline;
+  }
+  .ap-blank-input {
+    display: inline-block; min-width: 60px; padding: 2px 8px;
+    background: #0d1117; border: 2px dashed #f0883e;
+    border-radius: 6px; color: #f0883e; font: inherit;
+    outline: none; font-family: inherit;
+    animation: ap-blank-pulse 1.4s ease-in-out infinite;
+    vertical-align: baseline;
+  }
+  .ap-blank-input:focus {
+    border-style: solid; background: #1a1410; color: #e6edf3;
+    animation: none;
+  }
+  @keyframes ap-blank-pulse {
+    0%, 100% { border-color: #f0883e; box-shadow: 0 0 0 0 #f0883e40; }
+    50% { border-color: #ffa657; box-shadow: 0 0 0 3px #f0883e20; }
+  }
+  .ap-blank-correct {
+    color: #3fb950; font-weight: 500;
+    text-decoration: underline; text-decoration-color: #3fb95060;
+    text-underline-offset: 3px;
+  }
+  .ap-blank-wrong {
+    color: #f85149; text-decoration: line-through;
+  }
+  .ap-blank-arrow { color: #6e7681; margin: 0 4px; }
+
+  /* Fade-in for explanation and concept tip */
+  .fade-in { animation: ap-fade-in 0.4s ease; }
+  @keyframes ap-fade-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Practice panel submit */
+  .ap-practice-submit {
+    margin-top: 16px; padding: 10px 20px; background: #3fb950;
+    color: #0d1117; border: none; border-radius: 6px;
+    font-weight: 600; font-size: 14px; cursor: pointer;
+  }
+  .ap-practice-submit:hover { filter: brightness(1.1); }
+
+  /* Chat: minimized (handle on right) or expanded (1/3 width) */
+  #apprentice-chat {
+    position: fixed; top: 0; right: 0; height: 100vh;
+    background: #161b22; border-left: 1px solid #30363d;
+    transition: width 0.25s ease;
+    display: flex; flex-direction: column; z-index: 10;
+  }
+  #apprentice-chat.minimized { width: 42px; }
+  #apprentice-chat.expanded { width: 33.33vw; }
+
+  #apprentice-chat-handle {
+    width: 42px; height: 100%; display: flex;
+    align-items: center; justify-content: center;
+    cursor: pointer; border-right: 1px solid #30363d;
+    background: #161b22;
+  }
+  #apprentice-chat-handle:hover { background: #1c2128; }
+  #apprentice-chat-handle .handle-text {
+    writing-mode: vertical-rl; transform: rotate(180deg);
+    font-size: 12px; letter-spacing: 3px; color: #8b949e;
+    text-transform: uppercase; font-weight: 600;
+  }
+  #apprentice-chat.expanded #apprentice-chat-handle { display: none; }
+
+  #apprentice-chat-body {
+    flex: 1; display: none; flex-direction: column; min-height: 0;
+  }
+  #apprentice-chat.expanded #apprentice-chat-body { display: flex; }
+
+  #apprentice-chat-messages {
+    flex: 1; overflow-y: auto; padding: 16px 18px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .ap-chat-msg {
+    max-width: 90%; padding: 10px 14px; border-radius: 10px;
+    font-size: 14px; line-height: 1.5; white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .ap-chat-msg.user {
+    align-self: flex-end; background: #1f6feb; color: #fff;
+  }
+  .ap-chat-msg.coach {
+    align-self: flex-start; background: #21262d; color: #e6edf3;
+  }
+  .ap-chat-msg.system {
+    align-self: center; color: #6e7681; font-size: 11px;
+    background: none; padding: 4px;
+  }
+
+  #apprentice-chat-input-bar {
+    display: flex; gap: 6px; padding: 10px 12px;
+    border-top: 1px solid #30363d; background: #0d1117;
+  }
+  #apprentice-chat-input {
+    flex: 1; padding: 8px 12px; font-size: 13px;
+    background: #161b22; border: 1px solid #30363d;
+    border-radius: 6px; color: #e6edf3; outline: none;
+    resize: none; min-height: 32px; max-height: 100px;
+    font-family: inherit;
+  }
+  #apprentice-chat-input:focus { border-color: #58a6ff; }
+  #apprentice-chat-send {
+    padding: 8px 14px; background: #238636; color: #fff;
+    border: none; border-radius: 6px; cursor: pointer; font-weight: 600;
+  }
+
+  /* Diagnostic overlay — modal during Phase 2 */
+  #apprentice-diagnostic-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(13, 17, 23, 0.92); z-index: 100;
+    align-items: center; justify-content: center;
+  }
+  #apprentice-diagnostic-overlay.active { display: flex; }
+
+  /* Hide chat while diagnostic is active — less visual noise */
+  #apprentice-screen.diagnostic-active #apprentice-chat { display: none; }
+  .ap-diag-card {
+    background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+    padding: 32px 36px; max-width: 640px; width: 90%;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  }
+  .ap-diag-progress {
+    font-size: 11px; color: #8b949e; margin-bottom: 12px;
+    text-transform: uppercase; letter-spacing: 1px;
+  }
+  .ap-diag-prompt {
+    font-size: 20px; color: #e6edf3; line-height: 1.5;
+    margin-bottom: 16px; font-weight: 500;
+  }
+  .ap-diag-example {
+    font-family: "SF Mono", Menlo, monospace; font-size: 14px;
+    background: #0d1117; padding: 12px 16px; border-radius: 6px;
+    color: #d2a8ff; margin-bottom: 20px; display: none;
+    border: 1px solid #21262d;
+  }
+  .ap-diag-example.visible { display: block; }
+  .ap-diag-input-bar { display: flex; gap: 8px; }
+  .ap-diag-input-bar input {
+    flex: 1; padding: 12px 16px; font-size: 14px;
+    background: #0d1117; border: 1px solid #30363d;
+    border-radius: 8px; color: #e6edf3; outline: none;
+  }
+  .ap-diag-input-bar input:focus { border-color: #58a6ff; }
+  .ap-diag-input-bar button {
+    padding: 12px 24px; background: #238636; color: #fff;
+    border: none; border-radius: 8px; font-weight: 600; cursor: pointer;
+  }
+  .ap-diag-input-bar button:hover { filter: brightness(1.1); }
 </style>
 </head>
 <body>
@@ -493,6 +1088,9 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         </button>
       </div>
+      <button id="home-apprentice-btn" class="home-apprentice-btn" title="Try Apprentice Mode (new)">
+        ✦ Try Apprentice Mode
+      </button>
     </div>
   </div>
 
@@ -544,9 +1142,65 @@
     </div>
   </div>
 
+  <!-- ═══════════════════════════════════════════════════════════
+       APPRENTICESHIP MODE (new architecture)
+       ═══════════════════════════════════════════════════════════ -->
+  <div id="apprentice-screen">
+    <div id="apprentice-workspace">
+      <!-- Demo panel (coach's blackboard) — the sole panel in this build -->
+      <div id="apprentice-demo-panel" class="ap-panel">
+        <div class="ap-panel-header" id="apprentice-demo-title">Coach's Demo</div>
+        <div class="ap-panel-body" id="apprentice-demo-body">
+          <div class="ap-empty-state" id="apprentice-empty-state">
+            <div class="ap-empty-title">✦ Apprentice Mode</div>
+            <div class="ap-empty-sub">What do you want to learn today?</div>
+            <div class="ap-empty-input">
+              <input type="text" id="apprentice-topic-input" placeholder="e.g., self-attention mechanism">
+              <button id="apprentice-start-btn">Start</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Right: practice panel (opens when generator requests) -->
+      <div id="apprentice-practice-panel" class="ap-panel">
+        <div class="ap-panel-header">Your work</div>
+        <div class="ap-panel-body" id="apprentice-practice-body"></div>
+      </div>
+    </div>
+    <!-- Chat: handle (default) or expanded (1/3 width) -->
+    <aside id="apprentice-chat" class="minimized">
+      <div id="apprentice-chat-handle">
+        <span class="handle-text">Coach</span>
+      </div>
+      <div id="apprentice-chat-body">
+        <div id="apprentice-chat-messages"></div>
+        <div id="apprentice-chat-input-bar">
+          <textarea id="apprentice-chat-input" placeholder="Ask coach..." rows="1"></textarea>
+          <button id="apprentice-chat-send" title="Send">→</button>
+        </div>
+      </div>
+    </aside>
+    <!-- Diagnostic overlay (shown during Phase 2) -->
+    <div id="apprentice-diagnostic-overlay">
+      <div class="ap-diag-card">
+        <div class="ap-diag-progress" id="apprentice-diag-progress"></div>
+        <div class="ap-diag-prompt" id="apprentice-diag-prompt"></div>
+        <div class="ap-diag-example" id="apprentice-diag-example"></div>
+        <div class="ap-diag-input-bar">
+          <input type="text" id="apprentice-diag-input" placeholder="Your answer...">
+          <button id="apprentice-diag-submit">Submit</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<!-- Manim JSON-timeline renderer (factory: ManimRenderer.create(svgEl, opts)) -->
+<script src="/animation_extractor/renderer.js"></script>
+
 <script>
 // ═══════════════════════════════════════════════════════════
 // TEMPLATE RENDERER — 12 visual template types
+// (DEPRECATED — kept only for rollback safety; see animation_timeline below)
 // ═══════════════════════════════════════════════════════════
 const TMPL_COLORS = {
   primary: '#58a6ff', success: '#3fb950', warning: '#f0883e',
@@ -557,6 +1211,29 @@ const TMPL_COLORS = {
 // Extract the first balanced-brace JSON object whose top-level "type" equals
 // `typeValue`. Handles nested braces and string escapes (unlike a naive regex).
 // Returns { raw, obj } or null.
+// Sanitize a JSON candidate so JSON.parse accepts it even when the model
+// emitted raw control chars (\n / \r / \t) inside string values. Walks the
+// candidate, tracks whether we're inside a quoted string, and only escapes
+// control chars that appear inside strings — outside strings, JSON allows
+// raw whitespace and we leave it untouched. No-op for already-valid JSON.
+function _sanitizeJsonCandidate(s) {
+  let out = '';
+  let inStr = false, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (esc) { out += c; esc = false; continue; }
+    if (c === '\\') { out += c; esc = true; continue; }
+    if (c === '"') { out += c; inStr = !inStr; continue; }
+    if (inStr) {
+      if (c === '\n') { out += '\\n'; continue; }
+      if (c === '\r') { out += '\\r'; continue; }
+      if (c === '\t') { out += '\\t'; continue; }
+    }
+    out += c;
+  }
+  return out;
+}
+
 function extractTypedJson(text, typeValue) {
   if (!text || typeof text !== 'string') return null;
   const n = text.length;
@@ -575,12 +1252,19 @@ function extractTypedJson(text, typeValue) {
         depth--;
         if (depth === 0) {
           const candidate = text.substring(start, i + 1);
-          try {
-            const obj = JSON.parse(candidate);
-            if (obj && typeof obj === 'object' && obj.type === typeValue) {
-              return { raw: candidate, obj };
-            }
-          } catch (_e) { /* not valid JSON, keep scanning */ }
+          // Try strict parse first; on failure, retry after sanitizing
+          // raw control chars inside string values. We always return the
+          // ORIGINAL candidate as `raw` so callers' indexOf(raw) still
+          // matches the bytes actually in `text`.
+          let obj = null;
+          try { obj = JSON.parse(candidate); }
+          catch (_e1) {
+            try { obj = JSON.parse(_sanitizeJsonCandidate(candidate)); }
+            catch (_e2) { obj = null; }
+          }
+          if (obj && typeof obj === 'object' && obj.type === typeValue) {
+            return { raw: candidate, obj };
+          }
           i++;
           break;
         }
@@ -1042,7 +1726,71 @@ function connect() {
         }, 50);
         break;
 
+      // ─── Manim JSON-timeline animation (inline architecture) ──────
+      case 'animation_timeline': {
+        // Find the most recent pending inline anim slot (created by
+        // chat_done when it detected the animation JSON in the bubble).
+        const slots = document.querySelectorAll('.inline-anim-slot[data-anim-slot="pending"]');
+        const slot = slots[slots.length - 1];
+        if (!slot) {
+          console.warn('[animation_timeline] no pending inline-anim-slot found — bubble may have been cleared');
+          break;
+        }
+
+        slot.classList.remove('loading');
+        slot.dataset.animSlot = 'ready';
+        slot.textContent = '';
+        // Tear down any previous renderer to stop its rAF loop.
+        if (window._manimInstance && window._manimInstance.reset) {
+          try { window._manimInstance.reset(); } catch (_e) {}
+          window._manimInstance = null;
+        }
+
+        // Build an SVG stage that fills the slot.
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.style.cssText = 'display:block;width:100%;height:100%;background:#0d1117;';
+        slot.appendChild(svg);
+
+        try {
+          if (!window.ManimRenderer) throw new Error('ManimRenderer not loaded');
+          const r = window.ManimRenderer.create(svg, {
+            onStatus: (s) => console.log('[ManimRenderer]', s),
+          });
+          window._manimInstance = r;
+          r.load(msg.timeline);
+          r.play();
+          // Scroll the new animation into view so the user sees it immediately.
+          slot.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch (e) {
+          console.error('[animation_timeline] renderer failed', e);
+          slot.classList.add('errored');
+          slot.dataset.animSlot = 'errored';
+          slot.innerHTML = '';
+          slot.textContent = '⚠️ Renderer error: ' + (e.message || e);
+        }
+        window._chatAnimationActive = false;
+        break;
+      }
+
+      case 'animation_error': {
+        const slots = document.querySelectorAll('.inline-anim-slot[data-anim-slot="pending"]');
+        const slot = slots[slots.length - 1];
+        if (slot) {
+          slot.classList.remove('loading');
+          slot.classList.add('errored');
+          slot.dataset.animSlot = 'errored';
+          slot.innerHTML = '';
+          slot.textContent = '⚠️ ' + (msg.message || 'Animation failed');
+        } else {
+          console.warn('[animation_error]', msg.message);
+        }
+        window._chatAnimationActive = false;
+        break;
+      }
+
+      // ─── DEPRECATED: 12-template flow (replaced by animation_timeline) ───
       case 'explain_animation_result': {
+        console.warn('[deprecated] explain_animation_result — use animation_timeline');
         // Initial setup — clear panel and show loading
         const contentEl = document.getElementById('explain-content');
         document.getElementById('explain-panel-title').textContent = '✨ ' + (msg.title || 'Explanation');
@@ -1054,6 +1802,7 @@ function connect() {
       }
 
       case 'explain_section': {
+        console.warn('[deprecated] explain_section — use animation_timeline');
         // Store section data for paginated display
         if (!window._explainSections) window._explainSections = [];
 
@@ -1105,6 +1854,7 @@ function connect() {
       }
 
       case 'explain_done': {
+        console.warn('[deprecated] explain_done — use animation_timeline');
         // Final total correction — update sections with actual total (do NOT re-render iframe)
         const finalTotal = msg.total;
         console.log('[explain_done] finalTotal=' + finalTotal + ' loaded=' + (window._explainSections ? window._explainSections.length : 0));
@@ -1154,50 +1904,69 @@ function connect() {
       }
 
       case 'chat_done': {
+        // Reconstruct the original streamed text from a message that had
+        // `\n → <br>` substitution applied at chat_stream time. textContent
+        // strips <br> as empty strings, destroying every newline. Walk the
+        // children explicitly: text nodes contribute their text, <br>
+        // elements contribute "\n".
+        const getStreamedRawText = (el) => {
+          let out = '';
+          el.childNodes.forEach(node => {
+            if (node.nodeType === Node.TEXT_NODE) {
+              out += node.nodeValue;
+            } else if (node.nodeType === Node.ELEMENT_NODE) {
+              if (node.tagName === 'BR') out += '\n';
+              else out += node.textContent;
+            }
+          });
+          return out;
+        };
+
         const chatMsgs3 = getActiveChatMsgs();
         if (chatMsgs3) {
           const sEl = chatMsgs3.querySelector('[data-streaming]');
           if (sEl) {
             delete sEl.dataset.streaming;
-            // Strip animation JSON from display — it's handled separately via chat_animation_start
-            const rawA = sEl.textContent;
+            const rawA = getStreamedRawText(sEl);
             const animHit = extractTypedJson(rawA, 'animation');
-            if (animHit) {
-              const animRaw = animHit.raw;
-              const idxA = rawA.indexOf(animRaw);
-              const beforeA = rawA.substring(0, idxA).trim();
-              const afterA = rawA.substring(idxA + animRaw.length).trim();
+            const fbHit = extractTypedJson(rawA, 'fill_blank');
+
+            // If either widget JSON is present, do a single unified rebuild
+            // of sEl so they coexist in source order. Earlier code ran two
+            // independent passes that wiped each other's DOM.
+            if (animHit || fbHit) {
               sEl.innerHTML = '';
-              if (beforeA) {
-                const beforeDiv = document.createElement('div');
-                beforeDiv.innerHTML = beforeA.replace(/</g, '&lt;').replace(/\n/g, '<br>');
-                sEl.appendChild(beforeDiv);
+
+              const markers = [];
+              if (animHit) {
+                const start = rawA.indexOf(animHit.raw);
+                if (start >= 0) markers.push({ kind: 'anim', start, end: start + animHit.raw.length, hit: animHit });
               }
-              const placeholder = document.createElement('div');
-              placeholder.style.cssText = 'margin-top:8px;padding:10px 14px;border:1px solid #30363d;background:#161b22;border-radius:8px;font-size:12px;color:#8b949e;';
-              placeholder.textContent = '✨ Opening animated explanation...';
-              sEl.appendChild(placeholder);
-              if (afterA) {
-                const afterDiv = document.createElement('div');
-                afterDiv.style.marginTop = '8px';
-                afterDiv.innerHTML = afterA.replace(/</g, '&lt;').replace(/\n/g, '<br>');
-                sEl.appendChild(afterDiv);
+              if (fbHit) {
+                const start = rawA.indexOf(fbHit.raw);
+                if (start >= 0) markers.push({ kind: 'fb', start, end: start + fbHit.raw.length, hit: fbHit });
               }
-            }
-            // Check for fill_blank JSON in the streamed text
-            const raw = sEl.textContent;
-            const fbHit = extractTypedJson(raw, 'fill_blank');
-            if (fbHit) {
-              try {
-                const fb = fbHit.obj;
-                const fbRaw = fbHit.raw;
-                // Split text: before JSON and after JSON
-                const idx = raw.indexOf(fbRaw);
-                const before = raw.substring(0, idx).trim();
-                const after = raw.substring(idx + fbRaw.length).trim();
-                sEl.innerHTML = '';
-                if (before) sEl.innerHTML = before.replace(/\n/g, '<br>') + '<br><br>';
-                // Render fill-in-the-blank card
+              markers.sort((a, b) => a.start - b.start);
+
+              const appendText = (txt) => {
+                txt = txt.trim();
+                if (!txt) return;
+                const div = document.createElement('div');
+                if (sEl.lastChild) div.style.marginTop = '8px';
+                div.innerHTML = txt.replace(/</g, '&lt;').replace(/\n/g, '<br>');
+                sEl.appendChild(div);
+              };
+
+              const appendAnimSlot = () => {
+                sEl.classList.add('has-animation');
+                const slot = document.createElement('div');
+                slot.className = 'inline-anim-slot loading';
+                slot.dataset.animSlot = 'pending';
+                slot.textContent = '✨ Generating animation…';
+                sEl.appendChild(slot);
+              };
+
+              const appendFbCard = (fb) => {
                 const card = document.createElement('div');
                 card.className = 'fill-blank-card';
                 // Tolerate 3+ underscores as the blank marker (model
@@ -1227,14 +1996,17 @@ function connect() {
                 fbCheck.addEventListener('click', checkFB);
                 fbInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') checkFB(); });
                 sEl.appendChild(card);
-                if (after) {
-                  const afterDiv = document.createElement('div');
-                  afterDiv.style.marginTop = '8px';
-                  afterDiv.innerHTML = after.replace(/\n/g, '<br>');
-                  sEl.appendChild(afterDiv);
-                }
                 setTimeout(() => fbInput.focus(), 100);
-              } catch(e) { /* not valid JSON, ignore */ }
+              };
+
+              let pos = 0;
+              for (const m of markers) {
+                appendText(rawA.substring(pos, m.start));
+                if (m.kind === 'anim') appendAnimSlot();
+                else appendFbCard(m.hit.obj);
+                pos = m.end;
+              }
+              appendText(rawA.substring(pos));
             }
           }
         }
@@ -1246,30 +2018,34 @@ function connect() {
       }
 
       case 'chat_animation_start': {
+        // Inline-animation architecture: the chat_done handler already
+        // inserted an <div class="inline-anim-slot loading"> into the
+        // bubble, so there's nothing to do here. Keep this case as a
+        // soft hook in case future logic wants to know "manim is
+        // building" — the side-panel branch is intentionally retired.
         window._chatAnimationActive = true;
-
-        const caPanel = document.getElementById('explain-panel');
-        const caContent = document.getElementById('explain-content');
-        document.getElementById('explain-panel-title').textContent = '✨ Animated Explanation';
-        document.getElementById('explain-dismiss').textContent = '← Back to chat';
-        caContent.style.cssText = '';
-        caContent.innerHTML = '<div data-loading="1" style="color:#484f58;font-size:14px;padding:40px 20px;text-align:center;">✨ Generating animation from conversation...</div>';
-
-        // Keep chat-screen visible on the left, open explain-panel as a
-        // fixed side column on the right so both are visible at once.
-        const chatScreenEl = document.getElementById('chat-screen');
-        if (chatScreenEl) chatScreenEl.classList.add('with-explain');
-        caPanel.classList.add('open');
-        caPanel.classList.add('chat-side-overlay');
-        document.getElementById('explain-panel-scroll').scrollTop = 0;
-        // Reset sections for new animation
-        window._explainSections = [];
-        window._explainCurrentPage = 0;
         break;
       }
 
       case 'error':
         console.error('[WS error]', msg.message);
+        break;
+
+      // ─── Apprentice mode ─────────────────────────────────────
+      case 'apprentice_greeting':
+        apprenticeAppendCoach(msg.message);
+        break;
+      case 'apprentice_diagnostic_question':
+        apprenticeShowDiagnostic(msg);
+        break;
+      case 'apprentice_diagnostic_done':
+        apprenticeDiagnosticDone(msg.user_state);
+        break;
+      case 'apprentice_teach':
+        apprenticeRenderTurn(msg);
+        break;
+      case 'apprentice_error':
+        apprenticeAppendSystem('⚠️ ' + (msg.message || 'error'));
         break;
     }
   };
@@ -1280,6 +2056,12 @@ document.getElementById('explain-dismiss').addEventListener('click', () => {
   const panel = document.getElementById('explain-panel');
   const scrollEl = document.getElementById('explain-panel-scroll');
   const ctxBox = document.getElementById('explain-context-box');
+
+  // Stop any running Manim renderer so its rAF/timer loops don't leak.
+  if (window._manimInstance && window._manimInstance.reset) {
+    try { window._manimInstance.reset(); } catch (_e) {}
+    window._manimInstance = null;
+  }
 
   // Restore scroll container and context box defaults
   scrollEl.style.cssText = 'flex:1;overflow-y:auto;padding:20px;';
@@ -1665,6 +2447,1237 @@ document.addEventListener('DOMContentLoaded', () => {
   csSend?.addEventListener('click', submitCs);
   csInput?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitCs(); }
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// APPRENTICESHIP MODE — client logic
+// ═══════════════════════════════════════════════════════════════════
+
+const apprenticeState = {
+  active: false,
+  topic: '',
+  lessonPlan: null,
+  userState: null,
+  demoSubsteps: [],      // accumulated cells in the demo panel
+  practiceSubsteps: [],  // current practice cells
+  focusedDemoId: null,
+  focusedPracticeId: null,
+  awaitUser: false,      // if true, frontend stops auto-progression and waits
+  renderingPass: null,   // 'cell' | null — guards against overlapping cell renders
+};
+
+function apprenticeEnter() {
+  document.getElementById('home-screen').classList.remove('active');
+  document.getElementById('chat-screen').classList.remove('active');
+  document.getElementById('apprentice-screen').classList.add('active');
+  apprenticeState.active = true;
+  // Auto-focus topic input
+  const inp = document.getElementById('apprentice-topic-input');
+  if (inp) setTimeout(() => inp.focus(), 100);
+}
+
+function apprenticeExit() {
+  document.getElementById('apprentice-screen').classList.remove('active');
+  document.getElementById('home-screen').classList.add('active');
+  apprenticeState.active = false;
+}
+
+function apprenticeStart() {
+  const inputEl = document.getElementById('apprentice-topic-input');
+  const topic = (inputEl ? inputEl.value : '').trim() || apprenticeState.topic;
+  if (!topic) {
+    console.warn('[Apprentice] Start pressed but no topic entered');
+    return;
+  }
+  apprenticeState.topic = topic;
+  console.log('[Apprentice] starting session, topic =', topic);
+  // Hide empty state but do NOT wipe demo-body: that would delete the empty-state subtree
+  // (including the topic input) and break future restarts.
+  const emptyState = document.getElementById('apprentice-empty-state');
+  if (emptyState) emptyState.style.display = 'none';
+  // Clear any previously rendered cells (siblings of empty-state inside demo-body)
+  const body = document.getElementById('apprentice-demo-body');
+  if (body) {
+    Array.from(body.children).forEach(ch => {
+      if (ch.id !== 'apprentice-empty-state') ch.remove();
+    });
+  }
+  // Keep chat minimized at start — cells flow directly in the demo panel.
+  apprenticeSetChatMode('minimized');
+  // Reset session-scoped trackers for a fresh session
+  apprenticeRenderedCells.clear();
+  apprenticeState.renderingPass = null;
+  apprenticeState.demoSubsteps = [];
+  apprenticeState.awaitUser = false;
+  // Send start (use the module-level `ws` websocket, not a local shadow)
+  if (ws && ws.readyState === 1) {
+    console.log('[Apprentice] sending apprentice_start');
+    ws.send(JSON.stringify({
+      type: 'apprentice_start',
+      session_id: getSessionId(),
+      topic: topic,
+    }));
+  } else {
+    console.warn('[Apprentice] ws not ready, readyState =', ws && ws.readyState);
+  }
+}
+
+function apprenticeAppendCoach(text) {
+  const el = document.getElementById('apprentice-chat-messages');
+  const msg = document.createElement('div');
+  msg.className = 'ap-chat-msg coach';
+  msg.textContent = text;
+  el.appendChild(msg);
+  el.scrollTop = el.scrollHeight;
+}
+function apprenticeAppendUser(text) {
+  const el = document.getElementById('apprentice-chat-messages');
+  const msg = document.createElement('div');
+  msg.className = 'ap-chat-msg user';
+  msg.textContent = text;
+  el.appendChild(msg);
+  el.scrollTop = el.scrollHeight;
+}
+function apprenticeAppendSystem(text) {
+  const el = document.getElementById('apprentice-chat-messages');
+  const msg = document.createElement('div');
+  msg.className = 'ap-chat-msg system';
+  msg.textContent = text;
+  el.appendChild(msg);
+  el.scrollTop = el.scrollHeight;
+}
+
+function apprenticeShowDiagnostic(msg) {
+  document.getElementById('apprentice-screen').classList.add('diagnostic-active');
+  const overlay = document.getElementById('apprentice-diagnostic-overlay');
+  overlay.classList.add('active');
+  document.getElementById('apprentice-diag-progress').textContent =
+    `Question ${msg.q_index + 1} / ${msg.total}  ·  ${msg.tests_for || ''}`;
+  document.getElementById('apprentice-diag-prompt').textContent = msg.question;
+  const ex = document.getElementById('apprentice-diag-example');
+  if (msg.example_shown) {
+    ex.textContent = msg.example_shown;
+    ex.classList.add('visible');
+  } else {
+    ex.classList.remove('visible');
+    ex.textContent = '';
+  }
+  const input = document.getElementById('apprentice-diag-input');
+  input.value = '';
+  setTimeout(() => input.focus(), 50);
+}
+
+function apprenticeSubmitDiagnostic() {
+  const input = document.getElementById('apprentice-diag-input');
+  const answer = input.value.trim();
+  if (!answer) return;
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({
+      type: 'apprentice_diagnostic',
+      session_id: getSessionId(),
+      answer: answer,
+    }));
+  }
+  input.value = '';
+}
+
+function apprenticeDiagnosticDone(userState) {
+  document.getElementById('apprentice-diagnostic-overlay').classList.remove('active');
+  document.getElementById('apprentice-screen').classList.remove('diagnostic-active');
+  apprenticeState.userState = userState;
+  const tier = userState.tier || 'mid';
+  apprenticeAppendSystem(`Diagnostic complete · tier: ${tier}`);
+  // Chat stays minimized — Pass 1 visuals start directly in the demo panel.
+  // The learner can open chat via the handle any time.
+}
+
+function apprenticeSetChatMode(mode) {
+  const chat = document.getElementById('apprentice-chat');
+  const screen = document.getElementById('apprentice-screen');
+  if (mode === 'expanded') {
+    chat.classList.remove('minimized'); chat.classList.add('expanded');
+    screen.classList.add('chat-expanded');
+  } else {
+    chat.classList.remove('expanded'); chat.classList.add('minimized');
+    screen.classList.remove('chat-expanded');
+  }
+}
+
+function apprenticeSendChat() {
+  const input = document.getElementById('apprentice-chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  apprenticeAppendUser(text);
+  input.value = '';
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({
+      type: 'apprentice_chat',
+      session_id: getSessionId(),
+      message: text,
+    }));
+  }
+}
+
+// ─── Panel rendering ────────────────────────────────────────────
+
+function apprenticeRenderTurn(msg) {
+  // Persist the await_user flag so the animation loop knows whether to auto-continue
+  apprenticeState.awaitUser = !!msg.await_user;
+  // Append coach's chat message only if non-empty (intro_narration handles in-cell lead-in now)
+  if (msg.message && msg.message.trim()) apprenticeAppendCoach(msg.message);
+  // Update chat mode
+  if (msg.chat_mode) apprenticeSetChatMode(msg.chat_mode);
+  // Apply panel commands
+  (msg.panels || []).forEach(p => apprenticeApplyPanelCmd(p));
+  // Store lesson plan for reference
+  if (msg.lesson_plan) apprenticeState.lessonPlan = msg.lesson_plan;
+}
+
+function apprenticeApplyPanelCmd(cmd) {
+  const action = cmd.action || 'update';
+  const type = cmd.type;
+  const content = cmd.content || {};
+
+  if (type === 'panel_apprentice_demo') {
+    if (action === 'close') {
+      document.getElementById('apprentice-demo-body').innerHTML = '';
+      apprenticeState.demoSubsteps = [];
+      return;
+    }
+    apprenticeUpdateDemo(content);
+  } else if (type === 'panel_apprentice_practice') {
+    console.warn('[Apprentice] panel_apprentice_practice is disabled in this build — ignoring');
+  } else if (type === 'panel_animation') {
+    console.warn('[Apprentice] panel_animation is disabled in this build — ignoring');
+  } else {
+    console.log('[Apprentice] unhandled panel:', cmd);
+  }
+}
+
+function apprenticeUpdateDemo(content) {
+  // Each update carries ALL substeps emitted so far. The new one (focused_substep_id)
+  // is the single cell we'll animate into view now.
+  const title = content.title || "Coach's Demo";
+  document.getElementById('apprentice-demo-title').textContent = title;
+
+  const body = document.getElementById('apprentice-demo-body');
+  const incomingSubsteps = content.substeps || [];
+  const focusedId = content.focused_substep_id;
+
+  apprenticeState.demoSubsteps = incomingSubsteps.slice();
+
+  // Ignore re-entrant updates while a cell is still rendering
+  if (apprenticeState.renderingPass === 'cell') {
+    console.warn('[Apprentice] ignoring update — a cell is still being rendered');
+    return;
+  }
+
+  // Find the focused substep in the incoming list; if already in DOM, nothing to do
+  const focusedSubstep = incomingSubsteps.find(s => s.substep_id === focusedId);
+  if (!focusedSubstep) {
+    console.warn('[Apprentice] update had no focused substep matching focused_substep_id:', focusedId);
+    return;
+  }
+  if (body.querySelector(`[data-substep-id="${focusedId}"]`)) {
+    console.warn('[Apprentice] focused substep already rendered, skipping:', focusedId);
+    return;
+  }
+
+  // Unfocus prior cells and render the new one
+  apprenticeUnfocusAll(body);
+  apprenticeState.renderingPass = 'cell';
+  apprenticeRenderCell(body, focusedSubstep)
+    .catch(e => console.error('[Apprentice] cell render failed:', e))
+    .finally(() => {
+      apprenticeState.renderingPass = null;
+      apprenticeState.focusedDemoId = focusedId;
+      apprenticeAfterCellComplete(focusedSubstep);
+    });
+}
+
+function apprenticeAfterCellComplete(substep) {
+  // After the cell finishes rendering, request the next one from the server — unless
+  // the server told us to await_user.
+  if (apprenticeState.awaitUser) return;
+  setTimeout(() => {
+    apprenticeRequestNextCell(substep.substep_id);
+  }, 1800);
+}
+
+function apprenticeRequestNextCell(lastSubstepId) {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({
+      type: 'apprentice_continue',
+      session_id: getSessionId(),
+      substep_id: lastSubstepId,
+      user_answer: '',
+      answer_correct: null,
+    }));
+  }
+}
+
+// ─── Cell rendering (pass_1 big picture → divider → pass_2 pseudo-code) ────
+
+async function apprenticeRenderCell(body, substep) {
+  // Create the cell shell
+  const cell = document.createElement('div');
+  cell.className = 'ap-substep-cell pass-1 focused fade-in';
+  cell.dataset.substepId = substep.substep_id;
+  // Click anywhere in a cell → that cell becomes the selected/focused one
+  cell.addEventListener('click', () => {
+    apprenticeSelectCell(cell);
+  });
+  body.appendChild(cell);
+  apprenticeScrollCellToCenter(cell);
+
+  const p1 = substep.pass_1 || {};
+  const p2 = substep.pass_2 || {};
+
+  // ─── Pass 1: label → caption → big_display ─────────────────────
+  const label = document.createElement('div');
+  label.className = 'ap-substep-label pass-1-label';
+  cell.appendChild(label);
+  await apprenticeTypeInto(label, substep.label || substep.substep_id, 32);
+
+  if (p1.caption) {
+    await apprenticeSleep(250);
+    const cap = document.createElement('div');
+    cap.className = 'ap-caption';
+    cell.appendChild(cap);
+    await apprenticeTypeInto(cap, p1.caption, 18);
+    apprenticeScrollCellToCenter(cell);
+  }
+
+  if (p1.big_display) {
+    await apprenticeSleep(300);
+    const artifact = document.createElement('div');
+    artifact.className = 'ap-big-display fade-in';
+    artifact.textContent = p1.big_display;
+    cell.appendChild(artifact);
+    apprenticeScrollCellToCenter(cell);
+    await apprenticeSleep(600);
+  }
+
+  // ─── Pass 2: shrink pass_1 → divider → blocks in order ─────────
+  // Back-compat: if the generator still sends legacy `pseudo_code` instead of `blocks`,
+  // wrap it into a single comment block so the renderer handles both shapes.
+  const blocks = (p2 && p2.blocks) ? p2.blocks
+                 : (p2 && p2.pseudo_code) ? [{ type: 'comment', text: p2.pseudo_code }]
+                 : [];
+
+  if (blocks.length > 0) {
+    cell.classList.add('pass-2-active');
+    await apprenticeSleep(400);
+
+    const divider = document.createElement('div');
+    divider.className = 'ap-pass2-divider fade-in';
+    cell.appendChild(divider);
+    await apprenticeSleep(300);
+
+    const container = document.createElement('div');
+    container.className = 'ap-pass2-blocks';
+    cell.appendChild(container);
+
+    for (let bi = 0; bi < blocks.length; bi++) {
+      const block = blocks[bi];
+      const type = block.type || 'comment';
+      const text = block.text || '';
+
+      const blockEl = document.createElement('div');
+      blockEl.className = 'ap-p2-block ap-p2-' + type;
+      container.appendChild(blockEl);
+
+      // Typing speed per type: comments/narrative a touch faster than code.
+      const speed = (type === 'code') ? 20 : (type === 'narrative' ? 16 : 22);
+      // Type line-by-line so long blocks wrap naturally
+      const lines = text.split('\n');
+      for (let li = 0; li < lines.length; li++) {
+        const lineEl = document.createElement('div');
+        lineEl.className = 'ap-p2-line';
+        blockEl.appendChild(lineEl);
+        await apprenticeTypeInto(lineEl, lines[li], speed);
+        apprenticeScrollCellToCenter(cell);
+      }
+
+      // Pause between blocks — longer between different types than same type
+      if (bi < blocks.length - 1) {
+        const nextType = blocks[bi + 1].type || 'comment';
+        const gap = (nextType !== type) ? 700 : 400;
+        await apprenticeSleep(gap);
+      }
+    }
+  }
+
+  apprenticeRenderedCells.add(substep.substep_id);
+  return cell;
+}
+
+function apprenticeUnfocusAll(body) {
+  body.querySelectorAll('.ap-substep-cell.focused').forEach(c => c.classList.remove('focused'));
+}
+
+function apprenticeScrollCellToCenter(cell) {
+  if (!cell) return;
+  cell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function apprenticeSelectCell(cell) {
+  if (!cell) return;
+  // Make this the sole focused cell, center it
+  const body = document.getElementById('apprentice-demo-body');
+  if (body) apprenticeUnfocusAll(body);
+  cell.classList.add('focused');
+  apprenticeState.focusedDemoId = cell.dataset.substepId || null;
+  apprenticeScrollCellToCenter(cell);
+}
+
+function apprenticeSleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function apprenticeTypeInto(el, text, msPerChar) {
+  return new Promise(resolve => {
+    let i = 0;
+    const tick = () => {
+      if (i >= text.length) { resolve(); return; }
+      el.textContent += text[i++];
+      setTimeout(tick, msPerChar);
+    };
+    tick();
+  });
+}
+
+// Track which substeps have already been fully rendered (so re-renders don't
+// re-play the typing animation on old cells)
+const apprenticeRenderedCells = new Set();
+
+// ═══════════════════════════════════════════════════════════════
+// ANIMATION PANEL — deferred in this build. Old timeline runner removed
+// to keep the code simple. Re-introduce from git history when needed.
+// ═══════════════════════════════════════════════════════════════
+/* REMOVED_START — animation/transition code deferred
+function apprenticeAnimationPlay(content) {
+  const panel = document.getElementById('apprentice-animation-panel');
+  const workspace = document.getElementById('apprentice-workspace');
+  const titleEl = document.getElementById('apprentice-animation-title');
+  const stage = document.getElementById('apprentice-animation-stage');
+
+  // Layout: panel visible, flex 60/40 while playing
+  panel.classList.add('visible');
+  workspace.classList.remove('animation-idle');
+  workspace.classList.add('animation-playing');
+  // Close chat during animation per spec
+  apprenticeSetChatMode('minimized');
+  const chat = document.getElementById('apprentice-chat');
+  if (chat) chat.style.display = 'none';
+
+  titleEl.textContent = content.title || 'Scene';
+  stage.innerHTML = '';
+
+  // Build the stage from `stage` field: {id, type, init, x?, y?}
+  const elementsById = {};
+  (content.stage || []).forEach(spec => {
+    const el = document.createElement('div');
+    el.className = 'ap-anim-element hidden type-' + (spec.type || 'text');
+    el.dataset.animId = spec.id;
+    el.dataset.animType = spec.type || 'text';
+    el.textContent = spec.init || '';
+    if (typeof spec.x === 'number' || typeof spec.y === 'number') {
+      el.style.position = 'absolute';
+      if (typeof spec.x === 'number') el.style.left = spec.x + 'px';
+      if (typeof spec.y === 'number') el.style.top = spec.y + 'px';
+    }
+    stage.appendChild(el);
+    elementsById[spec.id] = el;
+  });
+
+  // Run the timeline
+  const timeline = (content.timeline || []).slice().sort((a, b) => (a.at || 0) - (b.at || 0));
+  const totalDuration = content.duration_ms || 30000;
+  const startTime = Date.now();
+  const timers = [];
+
+  timeline.forEach(step => {
+    const t = setTimeout(() => {
+      apprenticeAnimationRunStep(step, elementsById, stage);
+    }, step.at || 0);
+    timers.push(t);
+  });
+
+  // After the scene finishes, transition panel to idle (40/60) and request Pass 2
+  const endTimer = setTimeout(() => {
+    workspace.classList.remove('animation-playing');
+    workspace.classList.add('animation-idle');
+    if (chat) chat.style.display = '';  // restore chat handle
+    // Signal next pass
+    apprenticeRequestNextPass(2);
+  }, totalDuration + 800);
+  timers.push(endTimer);
+
+  apprenticeState.animationTimers = timers;
+}
+
+function apprenticeAnimationClose() {
+  // Cancel any pending timers and hide the panel
+  if (apprenticeState.animationTimers) {
+    apprenticeState.animationTimers.forEach(t => clearTimeout(t));
+    apprenticeState.animationTimers = null;
+  }
+  const panel = document.getElementById('apprentice-animation-panel');
+  const workspace = document.getElementById('apprentice-workspace');
+  panel.classList.remove('visible');
+  workspace.classList.remove('animation-playing', 'animation-idle');
+}
+
+function apprenticeAnimationRunStep(step, elementsById, stage) {
+  try {
+    const action = step.action;
+    const targetId = step.target;
+    const targetEl = targetId ? elementsById[targetId] : null;
+
+    if (action === 'write') {
+      if (!targetEl) return;
+      targetEl.classList.remove('hidden');
+      targetEl.textContent = '';
+      const text = step.text || '';
+      const duration = step.duration || (text.length * 18);
+      const msPerChar = Math.max(5, Math.floor(duration / Math.max(text.length, 1)));
+      let i = 0;
+      const tick = () => {
+        if (i >= text.length) return;
+        targetEl.textContent += text[i++];
+        setTimeout(tick, msPerChar);
+      };
+      tick();
+    }
+    else if (action === 'fade_in') {
+      if (!targetEl) return;
+      const duration = step.duration || 500;
+      targetEl.style.transition = `opacity ${duration}ms ease`;
+      targetEl.classList.remove('hidden');
+      requestAnimationFrame(() => {
+        targetEl.style.opacity = '1';
+      });
+    }
+    else if (action === 'fade_out') {
+      if (!targetEl) return;
+      const duration = step.duration || 500;
+      targetEl.style.transition = `opacity ${duration}ms ease`;
+      targetEl.style.opacity = '0';
+    }
+    else if (action === 'transform') {
+      if (!targetEl) return;
+      const duration = step.duration || 700;
+      const newText = step.text || '';
+      targetEl.style.transition = `opacity ${duration / 2}ms ease`;
+      targetEl.style.opacity = '0';
+      setTimeout(() => {
+        targetEl.textContent = newText;
+        targetEl.style.opacity = '1';
+      }, duration / 2);
+    }
+    else if (action === 'shift') {
+      if (!targetEl) return;
+      const duration = step.duration || 600;
+      targetEl.style.transition = `transform ${duration}ms ease`;
+      const dx = step.dx || 0;
+      const dy = step.dy || 0;
+      const existing = targetEl.dataset.tx ? parseFloat(targetEl.dataset.tx) : 0;
+      const existingY = targetEl.dataset.ty ? parseFloat(targetEl.dataset.ty) : 0;
+      const newX = existing + dx;
+      const newY = existingY + dy;
+      targetEl.style.transform = `translate(${newX}px, ${newY}px)`;
+      targetEl.dataset.tx = newX;
+      targetEl.dataset.ty = newY;
+    }
+    else if (action === 'scale') {
+      if (!targetEl) return;
+      const duration = step.duration || 500;
+      const factor = step.factor || 1;
+      targetEl.style.transition = `transform ${duration}ms ease`;
+      const tx = targetEl.dataset.tx || 0;
+      const ty = targetEl.dataset.ty || 0;
+      targetEl.style.transform = `translate(${tx}px, ${ty}px) scale(${factor})`;
+      targetEl.dataset.scale = factor;
+    }
+    else if (action === 'highlight') {
+      if (!targetEl) return;
+      const duration = step.duration || 700;
+      const color = step.color || '#f0883e';
+      const original = targetEl.style.background;
+      targetEl.style.transition = `background ${duration / 3}ms ease`;
+      targetEl.style.background = color + '55';
+      setTimeout(() => {
+        targetEl.style.background = original;
+      }, duration);
+    }
+    else if (action === 'arrow') {
+      const fromEl = elementsById[step.from];
+      const toEl = elementsById[step.to];
+      if (!fromEl || !toEl) return;
+      const arrowEl = apprenticeDrawArrow(stage, fromEl, toEl);
+      if (targetId) elementsById[targetId] = arrowEl;
+    }
+    else if (action === 'group') {
+      // Logical grouping — create a wrapper element that contains the children
+      const childIds = step.children || [];
+      const asId = step.as || targetId;
+      if (!asId) return;
+      const group = document.createElement('div');
+      group.className = 'ap-anim-element ap-anim-group';
+      group.dataset.animId = asId;
+      childIds.forEach(cid => {
+        const c = elementsById[cid];
+        if (c) group.appendChild(c);
+      });
+      stage.appendChild(group);
+      elementsById[asId] = group;
+    }
+    else if (action === 'wait') {
+      // no-op; just a scheduled pause
+    }
+    else if (action === 'split_text') {
+      if (!targetEl) return;
+      const src = targetEl.textContent;
+      targetEl.innerHTML = '';
+      Array.from(src).forEach(ch => {
+        const sp = document.createElement('span');
+        sp.className = 'ap-char';
+        sp.textContent = ch;
+        targetEl.appendChild(sp);
+      });
+    }
+    else if (action === 'dedupe') {
+      if (!targetEl) return;
+      const seen = new Set();
+      Array.from(targetEl.querySelectorAll('.ap-char')).forEach(sp => {
+        if (seen.has(sp.textContent)) {
+          sp.style.transition = 'opacity 0.25s ease, transform 0.3s ease';
+          sp.style.opacity = '0';
+          sp.style.transform = 'scale(0.6)';
+          setTimeout(() => sp.remove(), 260);
+        } else {
+          seen.add(sp.textContent);
+        }
+      });
+    }
+    else if (action === 'rearrange') {
+      if (!targetEl) return;
+      const chars = Array.from(targetEl.querySelectorAll('.ap-char'));
+      if (step.order === 'sorted') {
+        chars.sort((a, b) => a.textContent.localeCompare(b.textContent));
+      } else if (Array.isArray(step.order)) {
+        const reordered = step.order.map(i => chars[i]).filter(Boolean);
+        chars.length = 0;
+        reordered.forEach(c => chars.push(c));
+      }
+      chars.forEach(sp => targetEl.appendChild(sp));
+    }
+    else if (action === 'wrap') {
+      if (!targetEl) return;
+      const left = document.createElement('span');
+      left.className = 'ap-char ap-bracket';
+      left.textContent = step.left || '[';
+      const right = document.createElement('span');
+      right.className = 'ap-char ap-bracket';
+      right.textContent = step.right || ']';
+      targetEl.insertBefore(left, targetEl.firstChild);
+      targetEl.appendChild(right);
+    }
+    else if (action === 'annotate_each') {
+      if (!targetEl) return;
+      const chars = Array.from(targetEl.querySelectorAll('.ap-char:not(.ap-bracket)'));
+      if (step.labels === 'indices') {
+        chars.forEach((sp, idx) => {
+          const ann = document.createElement('sup');
+          ann.className = 'ap-char-annotation';
+          ann.textContent = idx;
+          sp.appendChild(ann);
+        });
+      } else if (Array.isArray(step.labels)) {
+        chars.forEach((sp, idx) => {
+          if (step.labels[idx] == null) return;
+          const ann = document.createElement('sup');
+          ann.className = 'ap-char-annotation';
+          ann.textContent = step.labels[idx];
+          sp.appendChild(ann);
+        });
+      }
+    }
+    else {
+      console.warn('[Apprentice] unknown animation action:', action);
+    }
+  } catch (e) {
+    console.error('[Apprentice] animation step failed:', step, e);
+  }
+}
+
+function apprenticeDrawArrow(stage, fromEl, toEl) {
+  // Create an SVG overlay if not already present
+  let svg = stage.querySelector('svg.ap-anim-arrows');
+  if (!svg) {
+    svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('class', 'ap-anim-arrows');
+    svg.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;';
+    stage.appendChild(svg);
+    // Marker definition for arrowhead
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    defs.innerHTML = '<marker id="ap-arrow-head" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#f0883e"/></marker>';
+    svg.appendChild(defs);
+  }
+  const stageRect = stage.getBoundingClientRect();
+  const fromRect = fromEl.getBoundingClientRect();
+  const toRect = toEl.getBoundingClientRect();
+  const x1 = fromRect.left - stageRect.left + fromRect.width / 2;
+  const y1 = fromRect.top - stageRect.top + fromRect.height;
+  const x2 = toRect.left - stageRect.left + toRect.width / 2;
+  const y2 = toRect.top - stageRect.top;
+
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  const cx = (x1 + x2) / 2;
+  const cy = (y1 + y2) / 2 - 20;
+  line.setAttribute('d', `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`);
+  line.setAttribute('class', 'ap-anim-arrow');
+  line.setAttribute('marker-end', 'url(#ap-arrow-head)');
+  // Animate draw-on via stroke-dasharray
+  const totalLen = 300;  // approximate; works for most cases
+  line.style.strokeDasharray = totalLen;
+  line.style.strokeDashoffset = totalLen;
+  line.style.transition = 'stroke-dashoffset 0.5s ease';
+  svg.appendChild(line);
+  requestAnimationFrame(() => {
+    line.style.strokeDashoffset = 0;
+  });
+  return line;
+}
+
+// ─── Manim-lite transitions ─────────────────────────────────────
+
+async function apprenticeRunTransition(currentCell, prevCell, steps, substep) {
+  // MVP implementation: run each primitive, but do the minimal useful thing.
+  // More sophisticated motion can be layered in later.
+  const artifact = currentCell.querySelector('.ap-big-display');
+  if (!artifact) return;
+
+  for (const step of steps) {
+    const type = step.type;
+    const params = step.params || {};
+    try {
+      if (type === 'split_text') {
+        // Replace artifact content with individual character spans.
+        // Safety: if the text is very long or looks like running prose (contains
+        // multiple spaces/newlines), skip — split_text is meant for short, countable
+        // elements (vocab lists, token sequences), not full sentences.
+        const src = artifact.textContent;
+        const whitespaceCount = (src.match(/\s/g) || []).length;
+        if (src.length > 80 || whitespaceCount > 6) {
+          console.warn('[Apprentice] split_text skipped — artifact is too long or prose-like (' + src.length + ' chars, ' + whitespaceCount + ' whitespace)');
+          continue;
+        }
+        artifact.innerHTML = '';
+        Array.from(src).forEach(ch => {
+          const sp = document.createElement('span');
+          sp.className = 'ap-char';
+          sp.textContent = ch;
+          artifact.appendChild(sp);
+        });
+        await apprenticeSleep(150);
+      } else if (type === 'dedupe') {
+        const seen = new Set();
+        Array.from(artifact.querySelectorAll('.ap-char')).forEach(sp => {
+          if (seen.has(sp.textContent)) {
+            sp.classList.add('ap-char-fade-out');
+            setTimeout(() => sp.remove(), 240);
+          } else {
+            seen.add(sp.textContent);
+          }
+        });
+        await apprenticeSleep(280);
+      } else if (type === 'rearrange') {
+        const chars = Array.from(artifact.querySelectorAll('.ap-char'));
+        if (params.order === 'sorted') {
+          chars.sort((a, b) => a.textContent.localeCompare(b.textContent));
+        }
+        chars.forEach(sp => artifact.appendChild(sp));
+        await apprenticeSleep(200);
+      } else if (type === 'wrap') {
+        const left = document.createElement('span');
+        left.className = 'ap-char ap-bracket'; left.textContent = params.left || '[';
+        const right = document.createElement('span');
+        right.className = 'ap-char ap-bracket'; right.textContent = params.right || ']';
+        artifact.insertBefore(left, artifact.firstChild);
+        artifact.appendChild(right);
+        await apprenticeSleep(200);
+      } else if (type === 'annotate_each') {
+        const chars = Array.from(artifact.querySelectorAll('.ap-char:not(.ap-bracket)'));
+        // Safety: annotate_each only makes sense on a small list of atomic
+        // elements. If we have more than 40 chars, or most elements look like
+        // running text (letters intermixed with spaces), bail — generator used
+        // this primitive in the wrong place.
+        const nonWhitespace = chars.filter(c => /\S/.test(c.textContent));
+        const whitespaceCount = chars.length - nonWhitespace.length;
+        const looksLikeProse = chars.length > 40 || whitespaceCount > 3;
+        if (looksLikeProse) {
+          console.warn('[Apprentice] annotate_each skipped — artifact looks like prose, not a list (' + chars.length + ' chars, ' + whitespaceCount + ' whitespace)');
+          continue;
+        }
+        if (params.labels === 'indices') {
+          nonWhitespace.forEach((sp, idx) => {
+            const ann = document.createElement('sup');
+            ann.className = 'ap-char-annotation fade-in';
+            ann.textContent = idx;
+            sp.appendChild(ann);
+          });
+        } else if (Array.isArray(params.labels)) {
+          nonWhitespace.forEach((sp, idx) => {
+            if (params.labels[idx] == null) return;
+            const ann = document.createElement('sup');
+            ann.className = 'ap-char-annotation fade-in';
+            ann.textContent = params.labels[idx];
+            sp.appendChild(ann);
+          });
+        }
+        await apprenticeSleep(300);
+      } else if (type === 'fade_in') {
+        // no-op, base behavior
+      }
+    } catch (e) {
+      console.warn('[Apprentice] transition step failed:', step, e);
+    }
+  }
+}
+
+REMOVED_END */
+
+/* REMOVED_START — legacy Pass-3 cell renderers, practice-panel logic, hint popovers.
+   All cell rendering now flows through apprenticeRenderCell (pass_1 + pass_2 combined).
+function apprenticeRenderDemoCell(substep, focused) {
+  const cell = document.createElement('div');
+  cell.className = 'ap-substep-cell' + (focused ? ' focused' : '');
+  cell.dataset.substepId = substep.substep_id;
+
+  const label = document.createElement('div');
+  label.className = 'ap-substep-label';
+  label.textContent = substep.label || substep.substep_id;
+  cell.appendChild(label);
+
+  const code = document.createElement('div');
+  code.className = 'ap-substep-code';
+  cell.appendChild(code);
+
+  // Back-compat: if substep has old-style `code` field (no prefix/blank/suffix), show it flat
+  const hasNewFormat = ('code_prefix' in substep) || ('code_suffix' in substep) || ('blank' in substep);
+  const alreadyRendered = apprenticeRenderedCells.has(substep.substep_id);
+
+  if (!hasNewFormat) {
+    code.textContent = substep.code || '';
+    if (substep.explanation) {
+      const exp = document.createElement('div');
+      exp.className = 'ap-substep-explanation';
+      exp.textContent = substep.explanation;
+      cell.appendChild(exp);
+    }
+    if (substep.inline_prompt) {
+      const p = document.createElement('div');
+      p.className = 'ap-substep-prompt';
+      p.textContent = '→ ' + substep.inline_prompt;
+      cell.appendChild(p);
+    }
+    apprenticeRenderedCells.add(substep.substep_id);
+    return cell;
+  }
+
+  // New format: interactive typed-out cell
+  if (alreadyRendered) {
+    // Render the final state instantly (no re-animation)
+    apprenticeFillCellFinal(cell, code, substep);
+    return cell;
+  }
+
+  // First render: play typing animation + pause for blank
+  apprenticePlayCellAnimation(cell, code, substep);
+  return cell;
+}
+
+function apprenticeFillCellFinal(cell, codeEl, substep) {
+  // Narration + divider (instant, no typing) if not already present
+  if (substep.intro_narration && !cell.querySelector('.ap-cell-narration')) {
+    const narrationEl = document.createElement('div');
+    narrationEl.className = 'ap-cell-narration';
+    narrationEl.textContent = substep.intro_narration;
+    cell.insertBefore(narrationEl, codeEl);
+    const divider = document.createElement('div');
+    divider.className = 'ap-cell-divider';
+    cell.insertBefore(divider, codeEl);
+  }
+  // Natural-language question above the code (new format)
+  if (substep.blank && substep.blank.question && !cell.querySelector('.ap-question')) {
+    apprenticeShowQuestion(cell, codeEl, substep.blank.question);
+  }
+  // Show the complete code with the learner's answer (if any) already filled in
+  const answered = substep.blank ? (substep._userAnswer || substep.blank.answer) : '';
+  codeEl.textContent = (substep.code_prefix || '') + answered + (substep.code_suffix || '');
+
+  // For already-answered cells we no longer need the hint button — the concept
+  // tip appears inline below (legacy-style) as the post-hoc insight reminder.
+  const conceptText = (substep.blank && substep.blank.concept) || substep.explanation;
+  if (conceptText && !cell.querySelector('.ap-concept-tip')) {
+    apprenticeShowConceptTip(cell, conceptText);
+  }
+}
+
+async function apprenticePlayCellAnimation(cell, codeEl, substep) {
+  const narration = substep.intro_narration || '';
+  const prefix = substep.code_prefix || '';
+  const suffix = substep.code_suffix || '';
+  const blank = substep.blank;
+
+  // 0) Type out intro narration at the top of the cell (if present)
+  let narrationEl = cell.querySelector('.ap-cell-narration');
+  if (narration) {
+    if (!narrationEl) {
+      narrationEl = document.createElement('div');
+      narrationEl.className = 'ap-cell-narration';
+      // Insert after label, before code
+      const codeRef = cell.querySelector('.ap-substep-code');
+      if (codeRef) cell.insertBefore(narrationEl, codeRef);
+      else cell.appendChild(narrationEl);
+    }
+    await apprenticeTypeInto(narrationEl, narration, 18);
+
+    // Divider between narration and code
+    if (!cell.querySelector('.ap-cell-divider')) {
+      const divider = document.createElement('div');
+      divider.className = 'ap-cell-divider fade-in';
+      const codeRef = cell.querySelector('.ap-substep-code');
+      if (codeRef) cell.insertBefore(divider, codeRef);
+    }
+  }
+
+  // 1) Type out prefix character by character
+  await apprenticeTypeInto(codeEl, prefix, 22);
+
+  // 2) If there's a blank:
+  //    - Render the natural-language question OUTSIDE the code block (different font/color)
+  //    - Then insert the blank input + light-bulb hint button on the code line
+  let userAnswer = '';
+  let answerCorrect = null;
+  if (blank && blank.answer) {
+    if (blank.question) apprenticeShowQuestion(cell, codeEl, blank.question);
+    const result = await apprenticeAwaitBlank(codeEl, blank);
+    userAnswer = result.value;
+    answerCorrect = result.correct;
+    substep._userAnswer = userAnswer;
+    substep._answerCorrect = answerCorrect;
+  }
+
+  // 3) Type out suffix
+  if (suffix) await apprenticeTypeInto(codeEl, suffix, 22);
+
+  // 4) Show explanation ONLY if there was no blank.concept already surfaced
+  if (!blank || !blank.concept) {
+    if (substep.explanation) {
+      const exp = document.createElement('div');
+      exp.className = 'ap-substep-explanation fade-in';
+      exp.textContent = substep.explanation;
+      cell.appendChild(exp);
+    }
+  }
+  apprenticeRenderedCells.add(substep.substep_id);
+
+  // 5) Auto-progression: unless the last server response said await_user,
+  //    request the next substep automatically.
+  if (!apprenticeState.awaitUser) {
+    // Small pause so the learner registers completion before the next cell arrives
+    setTimeout(() => apprenticeRequestContinue(substep.substep_id, userAnswer, answerCorrect), 700);
+  }
+}
+
+function apprenticeRequestContinue(substepId, userAnswer, answerCorrect) {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({
+      type: 'apprentice_continue',
+      session_id: getSessionId(),
+      substep_id: substepId,
+      user_answer: userAnswer || '',
+      answer_correct: answerCorrect,
+    }));
+  }
+}
+
+function apprenticeShowQuestion(cell, codeEl, questionText) {
+  // Render the natural-language question in a prose style (non-mono), placed
+  // just ABOVE the code block so the blank line reads as an answer to it.
+  if (cell.querySelector('.ap-question')) return;  // dedupe
+
+  const q = document.createElement('div');
+  q.className = 'ap-question fade-in';
+  q.textContent = questionText;
+  cell.insertBefore(q, codeEl);
+}
+
+function apprenticeShowConceptTip(cell, conceptText) {
+  // Legacy path (back-compat) — only used by apprenticeFillCellFinal when replaying
+  // a cell that has no `question` field. Shows concept inline at the bottom.
+  if (cell.querySelector('.ap-concept-tip')) return;
+  const tip = document.createElement('div');
+  tip.className = 'ap-concept-tip fade-in';
+  tip.textContent = '💡 ' + conceptText;
+  cell.appendChild(tip);
+}
+
+function apprenticeTypeInto(el, text, msPerChar) {
+  return new Promise(resolve => {
+    let i = 0;
+    const tick = () => {
+      if (i >= text.length) { resolve(); return; }
+      el.textContent += text[i++];
+      setTimeout(tick, msPerChar);
+    };
+    tick();
+  });
+}
+
+function apprenticeAwaitBlank(codeEl, blank) {
+  return new Promise(resolve => {
+    // Create a span to host the inline input at the current cursor position
+    const holder = document.createElement('span');
+    holder.className = 'ap-blank-holder';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'ap-blank-input';
+    input.placeholder = blank.placeholder || '?';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    // Size the input to roughly match expected answer length
+    input.size = Math.max((blank.answer || '').length + 2, (blank.placeholder || '').length + 2, 4);
+    holder.appendChild(input);
+
+    // Light-bulb hint button — click to reveal the concept
+    if (blank.concept) {
+      const hintBtn = document.createElement('button');
+      hintBtn.type = 'button';
+      hintBtn.className = 'ap-hint-btn';
+      hintBtn.textContent = '💡';
+      hintBtn.title = 'Click for a hint';
+      const hintPopover = document.createElement('span');
+      hintPopover.className = 'ap-hint-popover';
+      hintPopover.textContent = blank.concept;
+      hintBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        hintPopover.classList.toggle('visible');
+        // Keep the input focused after click
+        setTimeout(() => input.focus(), 0);
+      });
+      // Close popover when clicking elsewhere
+      document.addEventListener('click', (e) => {
+        if (!holder.contains(e.target)) {
+          hintPopover.classList.remove('visible');
+        }
+      });
+      holder.appendChild(hintBtn);
+      holder.appendChild(hintPopover);
+    }
+
+    codeEl.appendChild(holder);
+
+    // Focus so the learner can start typing immediately
+    setTimeout(() => input.focus(), 50);
+
+    let submitted = false;  // guard against double-submit (Enter + blur)
+
+    const submit = () => {
+      if (submitted) return;
+      const val = input.value.trim();
+      if (!val) return;
+      submitted = true;
+
+      const ans = (blank.answer || '').trim();
+      const correct = apprenticeAnswerMatches(val, ans);
+      // Replace input with static text — correct gets green, wrong gets strikethrough + correct answer
+      // This also removes the light-bulb hint button, since the blank is resolved.
+      holder.innerHTML = '';
+      if (correct) {
+        const ok = document.createElement('span');
+        ok.className = 'ap-blank-correct';
+        ok.textContent = val;
+        holder.appendChild(ok);
+      } else {
+        const wrong = document.createElement('span');
+        wrong.className = 'ap-blank-wrong';
+        wrong.textContent = val;
+        holder.appendChild(wrong);
+        const arrow = document.createElement('span');
+        arrow.className = 'ap-blank-arrow';
+        arrow.textContent = ' → ';
+        holder.appendChild(arrow);
+        const right = document.createElement('span');
+        right.className = 'ap-blank-correct';
+        right.textContent = ans;
+        holder.appendChild(right);
+      }
+      // Concept tip was already shown ABOVE the code block before the blank appeared.
+      // Do NOT append another tip here — one concept per cell.
+      resolve({ value: correct ? val : ans, correct: correct });
+    };
+
+    input.addEventListener('keydown', e => {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Enter') { e.preventDefault(); submit(); }
+    });
+    input.addEventListener('blur', () => {
+      if (input.value.trim()) submit();
+    });
+  });
+}
+
+function apprenticeAnswerMatches(given, expected) {
+  const norm = s => s.toLowerCase().replace(/\s+/g, '').replace(/["']/g, '');
+  return norm(given) === norm(expected);
+}
+
+function apprenticeOpenPractice(content) {
+  // Expected content: { paired_demo_panel, practice_substeps }
+  const panel = document.getElementById('apprentice-practice-panel');
+  panel.classList.add('visible');
+  const body = document.getElementById('apprentice-practice-body');
+  body.innerHTML = '';
+
+  const substeps = content.practice_substeps || [];
+  apprenticeState.practiceSubsteps = substeps;
+
+  substeps.forEach(s => {
+    const cell = document.createElement('div');
+    cell.className = 'ap-substep-cell focused';
+    cell.dataset.substepId = s.substep_id;
+
+    const label = document.createElement('div');
+    label.className = 'ap-substep-label';
+    label.textContent = s.label || s.substep_id;
+    cell.appendChild(label);
+
+    const ta = document.createElement('textarea');
+    ta.className = 'ap-substep-code';
+    ta.style.cssText = 'width:100%;min-height:80px;color:#e6edf3;';
+    ta.value = s.starter_code || '';
+    ta.spellcheck = false;
+    cell.appendChild(ta);
+
+    if (s.hint) {
+      const h = document.createElement('div');
+      h.className = 'ap-substep-explanation';
+      h.textContent = '💡 ' + s.hint;
+      cell.appendChild(h);
+    }
+
+    const submit = document.createElement('button');
+    submit.className = 'ap-practice-submit';
+    submit.textContent = 'Submit this step';
+    submit.addEventListener('click', () => apprenticeSubmitPractice(s.substep_id, ta.value));
+    cell.appendChild(submit);
+
+    // Highlight the paired demo cell on click (persistent until another is clicked)
+    cell.addEventListener('click', () => apprenticeHighlightDemoPair(s.substep_id));
+
+    body.appendChild(cell);
+  });
+}
+
+function apprenticePracticeClose() {
+  const panel = document.getElementById('apprentice-practice-panel');
+  panel.classList.remove('visible');
+  document.getElementById('apprentice-practice-body').innerHTML = '';
+  apprenticeState.practiceSubsteps = [];
+}
+
+function apprenticeHighlightDemoPair(substepId) {
+  const demoBody = document.getElementById('apprentice-demo-body');
+
+  // Clear any previously highlighted demo cell
+  demoBody.querySelectorAll('.ap-substep-cell.highlighted').forEach(c => {
+    c.classList.remove('highlighted');
+  });
+
+  // Also mark the practice cell as active (and clear others)
+  const practiceBody = document.getElementById('apprentice-practice-body');
+  practiceBody.querySelectorAll('.ap-substep-cell.highlighted').forEach(c => {
+    c.classList.remove('highlighted');
+  });
+  const activePractice = practiceBody.querySelector(`[data-substep-id="${substepId}"]`);
+  if (activePractice) activePractice.classList.add('highlighted');
+
+  const pair = demoBody.querySelector(`[data-substep-id="${substepId}"]`);
+  if (!pair) return;
+
+  // Persistent readable state
+  pair.classList.add('highlighted');
+
+  // Brief pulse as transition feedback
+  pair.classList.remove('paired-pulse');
+  void pair.offsetWidth;  // force reflow to restart animation
+  pair.classList.add('paired-pulse');
+  setTimeout(() => pair.classList.remove('paired-pulse'), 1000);
+
+  pair.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function apprenticeSubmitPractice(substepId, code) {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({
+      type: 'apprentice_practice_submit',
+      session_id: getSessionId(),
+      substep_id: substepId,
+      code: code,
+    }));
+  }
+  apprenticeAppendSystem(`Submitted: ${substepId}`);
+}
+REMOVED_END */
+
+// ─── Wire up DOM events ─────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Home → Apprentice
+  const enterBtn = document.getElementById('home-apprentice-btn');
+  if (enterBtn) enterBtn.addEventListener('click', apprenticeEnter);
+
+  // Helper: ignore Enter while Korean/Japanese/Chinese IME is composing
+  const isImeComposing = (e) => e.isComposing || e.keyCode === 229;
+
+  // Start button + enter on topic input
+  const startBtn = document.getElementById('apprentice-start-btn');
+  if (startBtn) startBtn.addEventListener('click', apprenticeStart);
+  const topicInp = document.getElementById('apprentice-topic-input');
+  if (topicInp) topicInp.addEventListener('keydown', e => {
+    if (isImeComposing(e)) return;
+    if (e.key === 'Enter') { e.preventDefault(); apprenticeStart(); }
+  });
+
+  // Diagnostic submit + enter
+  const diagBtn = document.getElementById('apprentice-diag-submit');
+  if (diagBtn) diagBtn.addEventListener('click', apprenticeSubmitDiagnostic);
+  const diagInp = document.getElementById('apprentice-diag-input');
+  if (diagInp) diagInp.addEventListener('keydown', e => {
+    if (isImeComposing(e)) return;
+    if (e.key === 'Enter') { e.preventDefault(); apprenticeSubmitDiagnostic(); }
+  });
+
+  // Chat: handle click toggles expanded/minimized
+  const handle = document.getElementById('apprentice-chat-handle');
+  if (handle) handle.addEventListener('click', () => {
+    const chat = document.getElementById('apprentice-chat');
+    if (chat.classList.contains('expanded')) apprenticeSetChatMode('minimized');
+    else apprenticeSetChatMode('expanded');
+  });
+
+  // Chat send
+  const sendBtn = document.getElementById('apprentice-chat-send');
+  if (sendBtn) sendBtn.addEventListener('click', apprenticeSendChat);
+  const chatInp = document.getElementById('apprentice-chat-input');
+  if (chatInp) chatInp.addEventListener('keydown', e => {
+    if (isImeComposing(e)) return;
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); apprenticeSendChat(); }
   });
 });
 

@@ -1,0 +1,827 @@
+{
+  "ontology_version": "1.0.0",
+  "description": "User state detection ontology for personalized coaching. Eval agent detects states (multi-select) with intensity levels.",
+  "user_states": [
+    {
+      "id": "B001",
+      "label": "confused",
+      "trigger": "User does not understand a concept, has lost track of the explanation, or cannot connect ideas together",
+      "examples": {
+        "low": ["I'm not quite sure about this part", "Can you clarify that?", "Hmm, let me think..."],
+        "mid": ["Wait... what do you mean?", "I'm getting mixed up here", "Can you explain that again?"],
+        "high": ["I have no idea what's going on", "I'm completely lost", "None of this makes sense"]
+      }
+    },
+    {
+      "id": "B002",
+      "label": "anxious",
+      "trigger": "User fears making mistakes, feels pressure to perform, or worries about keeping up with the material",
+      "examples": {
+        "low": ["Is this right...?", "I hope I'm not wrong", "Not sure if I should try"],
+        "mid": ["I'm worried I can't keep up", "This feels too hard for me", "What if I get it wrong?"],
+        "high": ["I can't do this", "I want to give up", "I'm going to fail at this"]
+      }
+    },
+    {
+      "id": "B003",
+      "label": "disengaged",
+      "trigger": "User shows signs of boredom, fatigue, or lack of interest — responses become minimal, distracted, or dismissive",
+      "examples": {
+        "low": ["Yeah sure", "Ok", "Got it", "Next?"],
+        "mid": ["This is kind of boring", "I already know this", "Can we skip ahead?"],
+        "high": ["I don't care about this", "This is pointless", "I'm done"]
+      }
+    },
+    {
+      "id": "B004",
+      "label": "frustrated",
+      "trigger": "User feels stuck, doubts their own ability, or expresses regret or helplessness about their learning progress",
+      "examples": {
+        "low": ["Ugh, I keep getting this wrong", "Why can't I get this?"],
+        "mid": ["I'm so bad at this", "Maybe I'm not cut out for this", "I've been stuck forever"],
+        "high": ["I hate this", "I'm wasting my time", "I'll never understand this"]
+      }
+    },
+    {
+      "id": "B005",
+      "label": "curious",
+      "trigger": "User actively seeks deeper understanding, asks follow-up questions, or wants to explore beyond what was presented",
+      "examples": {
+        "low": ["That's interesting", "Huh, I didn't know that", "Tell me more"],
+        "mid": ["Why does it work that way?", "What happens if I change this?", "How is this related to X?"],
+        "high": ["I need to understand the internals", "Can we go deeper into the theory?", "What's the math behind this?"]
+      }
+    },
+    {
+      "id": "B006",
+      "label": "confident",
+      "trigger": "User demonstrates self-assurance about their understanding, feels prepared, or believes they have mastered the material",
+      "examples": {
+        "low": ["I think I get it", "That makes sense", "I see"],
+        "mid": ["Yeah I know this already", "This is easy", "I've done this before"],
+        "high": ["I could teach this to someone else", "I've completely mastered this", "Give me something harder"]
+      }
+    },
+    {
+      "id": "B007",
+      "label": "motivated",
+      "trigger": "User shows drive to learn, enthusiasm about the subject, or excitement about future progress",
+      "examples": {
+        "low": ["Alright, let's keep going", "I want to learn this", "What's next?"],
+        "mid": ["This is exciting!", "I can't wait to try this myself", "I'm really getting into this"],
+        "high": ["I'm going to build something with this!", "This changes everything", "I want to master all of this"]
+      }
+    },
+    {
+      "id": "B008",
+      "label": "accomplished",
+      "trigger": "User has just succeeded at a task, realized they understand something, or reflects positively on their progress",
+      "examples": {
+        "low": ["Oh, I got it right", "That wasn't so bad", "Ok cool"],
+        "mid": ["Yes! I did it!", "I actually understand this now", "That clicked"],
+        "high": ["I can't believe I figured that out!", "I'm so proud of myself", "Look how far I've come"]
+      }
+    },
+    {
+      "id": "B009",
+      "label": "enjoying",
+      "trigger": "User is having fun with the learning process, finds it playful or satisfying, or is in a state of flow",
+      "examples": {
+        "low": ["This is nice", "I'm enjoying this", "This is kinda fun"],
+        "mid": ["Haha this is cool!", "I love this stuff", "Time flew by"],
+        "high": ["This is the best part", "I could do this all day", "I'm completely absorbed"]
+      }
+    },
+    {
+      "id": "B010",
+      "label": "skeptical",
+      "trigger": "User doubts the accuracy of the explanation, questions the tutor's approach, or is unsure about the learning direction",
+      "examples": {
+        "low": ["Are you sure about that?", "That doesn't sound right", "Hmm..."],
+        "mid": ["I don't think that's correct", "This approach seems wrong", "Why are we doing it this way?"],
+        "high": ["That's definitely wrong", "I don't trust this explanation", "This is misleading"]
+      }
+    },
+    {
+      "id": "B011",
+      "label": "grateful",
+      "trigger": "User expresses appreciation toward the tutor, feels supported, or acknowledges helpful guidance",
+      "examples": {
+        "low": ["Thanks", "That helps", "Good explanation"],
+        "mid": ["Thank you so much, that really helped!", "You explain this so well", "I appreciate your patience"],
+        "high": ["You're amazing", "I couldn't have learned this without you", "Best tutor ever"]
+      }
+    },
+    {
+      "id": "B012",
+      "label": "rushing",
+      "trigger": "User wants to move faster than the current pace, skips details, or shows impatience with the learning flow",
+      "examples": {
+        "low": ["Can we move on?", "I got it, next", "Let's speed up a bit"],
+        "mid": ["Skip the basics please", "Just tell me the answer", "I don't need all the details"],
+        "high": ["Hurry up", "Too slow", "Just give me the code"]
+      }
+    },
+    {
+      "id": "B013",
+      "label": "overwhelmed",
+      "trigger": "User feels the volume of material, tasks, or expectations is too much to handle — distinct from confusion (which is about understanding) in that the user may understand each piece but feels crushed by the total amount",
+      "examples": {
+        "low": ["There's a lot to cover", "This is more than I expected", "Where do I even start?"],
+        "mid": ["I can't keep up with all of this", "Too many things at once", "My head is spinning"],
+        "high": ["This is way too much", "I can't handle this anymore", "I need to stop"]
+      }
+    }
+  ],
+  "pedagogical_principles": [
+    {
+      "id": "P001",
+      "label": "minimize_working_memory_load",
+      "description": "Present one concept at a time to avoid cognitive overload. The human brain can hold 4-7 items in working memory — exceeding this causes confusion and disengagement.",
+      "applies_when": "Introducing a new concept, user shows confusion, or explanation involves multiple moving parts at once",
+      "guidelines": [
+        "Introduce one idea before connecting it to the next",
+        "Use visuals or code to offload cognitive burden from text",
+        "Chunk complex explanations into sequential steps with pauses",
+        "Never introduce terminology before the concept it represents is understood"
+      ]
+    },
+    {
+      "id": "P002",
+      "label": "eliminate_i_dont_know_feeling",
+      "description": "Structure learning so the user always has enough context to make a reasonable attempt. The feeling of complete ignorance kills motivation instantly.",
+      "applies_when": "Before asking any question, before introducing a hard concept, when user shows anxiety or reluctance to try",
+      "guidelines": [
+        "Always provide enough scaffolding before asking the user to produce",
+        "Frame questions so partial knowledge is enough to attempt an answer",
+        "Normalize not knowing — reframe as 'not yet' rather than 'can't'",
+        "Give a worked example before asking user to do a similar one"
+      ]
+    },
+    {
+      "id": "P003",
+      "label": "zpd_difficulty_calibration",
+      "description": "Keep difficulty in the Zone of Proximal Development — slightly beyond current ability but reachable with guidance. Too easy = boredom. Too hard = anxiety.",
+      "applies_when": "Choosing next concept, generating practice questions, deciding how much scaffolding to provide",
+      "guidelines": [
+        "Calibrate question difficulty based on recent correct/incorrect rate",
+        "If user answers too easily, increase challenge",
+        "If user struggles repeatedly, step back to a simpler version",
+        "Target a success rate of roughly 70-80% — not too easy, not too hard"
+      ]
+    },
+    {
+      "id": "P004",
+      "label": "cognitive_apprenticeship",
+      "description": "Adapt the master-apprentice model to real learning sessions. Before any demonstration, decompose the target skill into substeps sized to the learner's tier. Model in two stages — first the concept visually (animation/diagram), then the code with substep-aligned explanation. During coded demonstration, always elicit learner responses between substeps. In practice, let the learner attempt only the substeps appropriate to their tier. Substeps in practice must remain visually linked to the demonstration substeps so the learner never loses the mapping.",
+      "applies_when": "Teaching any procedural skill, especially code — introduced after an initial concept is grasped",
+      "guidelines": [
+        "Plan first: decompose the skill into substeps before any teaching begins. Substep granularity adapts to user tier — lower tier = finer substeps.",
+        "Never code-demo without a prior visual/conceptual overview (animation or diagram).",
+        "During code demonstration, present one substep at a time in a scroll-accumulating cell. Explanation lives next to the code, not in chat.",
+        "Weave inline completion prompts between substeps during modeling — learner must be active, not watching.",
+        "In practice, select substeps based on tier: lower tier does the single most important substep; upper tier may attempt the full set.",
+        "Practice substeps must map visually to their demonstration counterparts — the learner sees 'this is the same step I just watched'.",
+        "Reflect in chat after practice — ask the learner to articulate what they did in their own words.",
+        "The lesson plan (substep list) is fixed for the session once created — do not re-plan mid-session for MVP."
+      ]
+    },
+    {
+      "id": "P005",
+      "label": "spaced_repetition",
+      "description": "Re-expose the user to previously learned concepts at increasing intervals to counteract forgetting.",
+      "applies_when": "When a concept was learned in a previous session, when user makes an error on something they previously got right",
+      "guidelines": [
+        "Surface earlier concepts naturally within new explanations",
+        "When introducing concept B that depends on concept A, briefly revisit A",
+        "Track which concepts are at risk of being forgotten based on time since last exposure",
+        "Use low-stakes retrieval (fill-in-the-blank) rather than re-explanation for spaced review"
+      ]
+    },
+    {
+      "id": "P006",
+      "label": "immediate_reinforcement",
+      "description": "Reinforce correct responses immediately and specifically. Delayed or vague feedback weakens the learning signal.",
+      "applies_when": "User answers correctly, completes a step, or makes a meaningful attempt even if imperfect",
+      "guidelines": [
+        "Acknowledge correct answers immediately and specifically — not just 'good job' but 'exactly right, because...'",
+        "When user is partially correct, affirm the correct part before addressing the gap",
+        "Never let a correct answer pass without acknowledgment",
+        "Avoid delayed evaluation — feedback must come within the same turn"
+      ]
+    },
+    {
+      "id": "P007",
+      "label": "errorless_learning",
+      "description": "Design interactions so the user is unlikely to fail. Errors early in learning are demotivating and reinforce wrong patterns.",
+      "applies_when": "Introducing a brand new concept, user is anxious or has low confidence, first attempt at any new skill",
+      "guidelines": [
+        "Start with heavily guided questions where the answer is nearly obvious",
+        "Use fill-in-the-blank with strong context clues before open-ended questions",
+        "Introduce difficulty gradually — never jump to hard questions without intermediate steps",
+        "If user fails twice on the same thing, simplify the question rather than repeating it"
+      ]
+    },
+    {
+      "id": "P008",
+      "label": "ausubel_meaningful_anchoring",
+      "description": "Connect new concepts to something the user already knows. Learning is faster and more durable when new information is anchored to existing knowledge.",
+      "applies_when": "Introducing any new concept, especially abstract ones",
+      "guidelines": [
+        "Always ask or infer what the user already knows before introducing something new",
+        "Explicitly name the connection: 'This is like X that you already know, except...'",
+        "Use analogies that match the user's background — a lawyer and an engineer need different anchors",
+        "Avoid analogies that are unrelated to the user's experience — they add confusion, not clarity"
+      ]
+    },
+    {
+      "id": "P009",
+      "label": "bloom_progression",
+      "description": "Move the user through levels of understanding: remember → understand → apply → analyze → evaluate → create. Don't skip levels.",
+      "applies_when": "Sequencing questions and tasks within a topic, deciding when user is ready to move on",
+      "guidelines": [
+        "Start with recall (what is X?), then understanding (why does X work?), then application (use X here)",
+        "Don't ask analysis-level questions before user has demonstrated understanding",
+        "Use creation-level tasks as the ultimate signal of mastery — can they build something with it?",
+        "If user fails at apply level, step back to understand level before retrying"
+      ]
+    },
+    {
+      "id": "P010",
+      "label": "keller_arcs_motivation",
+      "description": "Sustain motivation by managing Attention, Relevance, Confidence, and Satisfaction throughout the session.",
+      "applies_when": "Session start, when user shows disengagement, when transitioning between topics",
+      "guidelines": [
+        "Attention: open with something surprising, counterintuitive, or directly relevant to user's goal",
+        "Relevance: explicitly connect what is being learned to what the user said they want to achieve",
+        "Confidence: ensure early wins before increasing difficulty",
+        "Satisfaction: celebrate progress explicitly — 'you just understood something most people find hard'",
+        "Re-trigger ARCS when user shows disengagement or frustration"
+      ]
+    },
+    {
+      "id": "P011",
+      "label": "bruner_concrete_to_abstract",
+      "description": "Move from concrete and tangible to abstract and symbolic. Understanding follows the sequence: hands-on → visual → language.",
+      "applies_when": "Introducing abstract concepts, when user is confused by a symbolic or mathematical explanation",
+      "guidelines": [
+        "Start with a concrete example or analogy before introducing the formal definition",
+        "Use visuals or diagrams before introducing notation or terminology",
+        "Only introduce abstract language after the concept is understood concretely",
+        "If user is stuck on an abstract explanation, step back to a concrete version"
+      ]
+    },
+    {
+      "id": "P012",
+      "label": "reigeluth_elaboration",
+      "description": "Start with the simplest complete version of the whole picture, then elaborate details layer by layer. Never teach isolated details before the big picture exists.",
+      "applies_when": "Starting a new topic, when user asks 'what is this all for', when user seems lost in details",
+      "guidelines": [
+        "Always give a simplified overview of the whole before drilling into any part",
+        "Return to the big picture periodically as details are added",
+        "Use the analogy of zooming in — show the map before the street",
+        "When user gets lost in details, zoom out to the overview before continuing",
+        "Elaboration granularity matters: for most topics, each substep should deepen locally (big picture → pseudo-code → real code inside the same cell) before moving on. Session-wide sweeps (all substeps at overview level, then all at pseudo-code level, then all at code level) feel unnatural for procedural/code topics and should be reserved for domains where the macro arc genuinely precedes local detail (e.g., historical timelines, multi-stage proofs, narrative arcs)."
+      ]
+    },
+    {
+      "id": "P013",
+      "label": "gagne_nine_events",
+      "description": "Structure each learning unit through Gagné's nine instructional events: gain attention, state objective, recall prior knowledge, present content, provide guidance, elicit performance, give feedback, assess, enhance retention.",
+      "applies_when": "Starting a new concept unit, structuring a complete explanation from scratch",
+      "guidelines": [
+        "Gain attention first — start with a question, surprise, or relevance hook",
+        "State what the user will be able to do after this section",
+        "Explicitly connect to what they already know before presenting new content",
+        "Present content in small steps with guidance at each step",
+        "Always elicit a response from the user — don't just explain, ask",
+        "Give immediate feedback on every elicited response",
+        "End each unit with a transfer question — can they apply it somewhere new?"
+      ]
+    },
+    {
+      "id": "P014",
+      "label": "cognitive_flexibility",
+      "description": "Expose the same concept from multiple angles and contexts to build flexible, transferable understanding.",
+      "applies_when": "After initial understanding is confirmed, when preparing user to apply knowledge in new situations",
+      "guidelines": [
+        "Once a concept is understood in one context, present it in a different context",
+        "Ask 'how would this apply to X?' where X is different from the original example",
+        "Use at least two different analogies for abstract concepts",
+        "Test transfer explicitly — give a problem that looks different but uses the same underlying idea"
+      ]
+    },
+    {
+      "id": "P015",
+      "label": "self_paced_chunking",
+      "description": "Let the user control the pace implicitly through their responses. Learning chunks should be sized to the user's current processing speed.",
+      "applies_when": "Always — adapt chunk size based on user response latency, length, and confidence signals",
+      "guidelines": [
+        "Short, hesitant responses signal the user needs smaller chunks",
+        "Confident, detailed responses signal the user can handle more at once",
+        "Never push to the next concept until the current one is confirmed understood",
+        "If user says 'I get it' too quickly, verify with a question before moving on"
+      ]
+    },
+    {
+      "id": "P016",
+      "label": "desirable_difficulty",
+      "description": "Some difficulty during learning is beneficial. Making retrieval slightly effortful strengthens long-term memory more than easy review.",
+      "applies_when": "Practice and review phases, after initial understanding is confirmed",
+      "guidelines": [
+        "Use retrieval practice (close the notes, answer from memory) over re-reading",
+        "Introduce interleaving — mix questions from different topics rather than blocking by topic",
+        "Avoid giving hints too quickly — let the user struggle briefly before helping",
+        "Use open-ended questions before multiple choice — harder but more effective"
+      ]
+    },
+    {
+      "id": "P017",
+      "label": "goal_directed_relevance",
+      "description": "Every piece of content must be traceable to the user's stated goal. Irrelevant content kills motivation and wastes limited learning time.",
+      "applies_when": "Choosing what to teach next, deciding how deep to go on a tangent, when user asks 'why are we learning this'",
+      "guidelines": [
+        "Before introducing any concept, ask: does this directly serve the user's goal?",
+        "Explicitly name how each concept connects to the user's end goal",
+        "Skip depth on topics that are tangential to the user's immediate objective",
+        "When user's goal is clear (e.g. pass bar exam in 3 weeks), let urgency shape what gets covered"
+      ]
+    },
+    {
+      "id": "P018",
+      "label": "single_concept_per_turn",
+      "description": "Deliver exactly one concept per explanation turn. The human brain cannot simultaneously process and integrate multiple new ideas. One concept, fully landed, before the next begins.",
+      "applies_when": "Always — every explanation turn should have a single teachable unit. If you find yourself explaining two things, stop and split.",
+      "guidelines": [
+        "Before each explanation, identify the single concept being delivered",
+        "If an explanation requires concept A and concept B, teach A fully before introducing B",
+        "Resist the urge to add 'and also...' — save it for the next turn",
+        "A concept is 'landed' only when the user has demonstrated understanding, not just said 'ok'",
+        "When in doubt, make the chunk smaller — you can always combine later, you cannot undo confusion"
+      ]
+    },
+    {
+      "id": "P019",
+      "label": "inline_completion_prompts",
+      "description": "Embed short, 1-5 word fill-in-the-blank prompts naturally within the flow of explanation — the way a live tutor would pause mid-sentence and invite the student to complete the thought. This keeps the student active, tests real-time understanding, and makes passive listening impossible.",
+      "applies_when": "Throughout every explanation — at least once every 2-3 sentences. Especially after introducing a new term, a causal relationship, or a pattern.",
+      "guidelines": [
+        "Prompt should feel like a natural continuation of the sentence, not a quiz question",
+        "Keep expected answer to 1-5 words — the simpler the better",
+        "Use blanks to test the most important word in a sentence, not peripheral details",
+        "Examples of natural prompts: 'so the output shape would be...?', 'which means we need to call...?', 'and that's why we use...?'",
+        "If user answers correctly, affirm and continue — do not interrupt the flow",
+        "If user answers incorrectly, do not move on — gently correct and re-ask before continuing",
+        "Never cluster multiple prompts together — one at a time, woven into explanation"
+      ]
+    },
+    {
+      "id": "P020",
+      "label": "socratic_questioning",
+      "description": "Guide the user to discover answers through a sequence of questions rather than direct explanation. The insight feels self-generated, which dramatically increases retention and ownership of the knowledge.",
+      "applies_when": "When user is ready to reason through something (not completely lost), when exploring causal relationships, when user asks 'why does this work?', when testing deeper understanding beyond surface recall",
+      "guidelines": [
+        "Never give the answer directly if the user can be guided to find it themselves",
+        "Start with what the user already knows, then ask questions that lead logically to the new insight",
+        "Questions should be small steps — each answer should make the next question obvious",
+        "If user is stuck, don't abandon Socratic method — give a smaller hint and ask again",
+        "Avoid leading questions that telegraph the answer — the struggle is the point",
+        "End the sequence by letting the user state the conclusion in their own words",
+        "Example sequence: 'What does this function take as input?' → 'What does it return?' → 'So what must be happening in between?'"
+      ]
+    },
+    {
+      "id": "P021",
+      "label": "metacognitive_reflection",
+      "description": "Prompt the user to articulate their own understanding in their own words. The act of explaining forces the learner to identify gaps they didn't know existed — and solidifies what they do understand.",
+      "applies_when": "After a concept has been explained and initial understanding confirmed, at the end of a topic, when user says 'I get it' without having demonstrated it, before moving to a harder concept",
+      "guidelines": [
+        "Ask the user to explain the concept back as if teaching someone else",
+        "Use prompts like: 'How would you explain this to a friend?', 'Walk me through what just happened in your own words', 'If someone asked you what X is, what would you say?'",
+        "Do not correct every imperfection — listen for the core understanding first",
+        "If explanation reveals a gap, address only that gap before asking them to try again",
+        "Celebrate accurate self-explanation explicitly — this is hard and deserves recognition",
+        "Use this as a diagnostic tool — the user's own words reveal exactly what they understood and what they didn't",
+        "After reflection, ask: 'Is there any part you feel less sure about?' — this builds honest self-assessment habits"
+      ]
+    },
+    {
+      "id": "P022",
+      "label": "session_start_barrier_reduction",
+      "description": "The hardest moment in any learning session is starting. Avoidance behaviors (checking phone, finding reasons not to begin, suddenly needing to do something else) peak at session initiation. Early phase of the session (first ~20% of active time) must be engineered to be frictionless and non-threatening.",
+      "applies_when": "At the very beginning of every session, when user has been inactive and is returning, when user shows hesitation or avoidance signals",
+      "guidelines": [
+        "Never open with a hard concept or a question that requires effort to answer",
+        "Start with something the user already knows — a quick win before anything new",
+        "Make the entry point feel small: 'Let's just look at one thing' not 'Let's continue the chapter'",
+        "Reference what they did last time positively — remind them they already know something",
+        "If user seems to be avoiding, lower the bar even further — 'just read this one line with me'",
+        "The goal of the first 2-3 minutes is not learning — it is getting the user into a state where learning is possible"
+      ]
+    },
+    {
+      "id": "P023",
+      "label": "session_energy_curve_management",
+      "description": "Within a session, a learner's cognitive energy and motivation follow a predictable arc. The early phase (first 30-60 minutes) is the highest dropout risk — everything is new, the style is unfamiliar, and the relevance is not yet felt. The mid-phase is where deep work happens. Content delivery and pacing must adapt to where the user is in this arc.",
+      "applies_when": "Throughout every session — track time elapsed and user engagement signals to detect which phase the user is in",
+      "guidelines": [
+        "Early phase: prioritize relevance hooks, quick wins, and familiar anchors over dense content",
+        "Early phase: explicitly connect what is being covered to the user's stated goal within the first 5 minutes",
+        "Early phase: use shorter chunks and more frequent check-ins than mid-session",
+        "Mid phase: this is when the hardest concepts should be introduced — energy and context are both available",
+        "Mid phase: allow longer stretches of focused work with fewer interruptions",
+        "Watch for engagement drop signals (shorter responses, slower replies, minimal answers) as indicators of energy dip",
+        "When energy dip is detected mid-session, insert a brief consolidation moment before continuing"
+      ]
+    },
+    {
+      "id": "P024",
+      "label": "learner_condition_adaptation",
+      "description": "A learner's capacity varies day to day based on sleep, stress, schedule, and life circumstances. The same person may be able to handle deep conceptual work on Wednesday and only light review on Monday after a hard weekend. Content depth and session goals must adapt to the user's current condition, not just their knowledge state.",
+      "applies_when": "Session start, when user response quality drops unexpectedly, when user signals tiredness or low energy",
+      "guidelines": [
+        "Infer condition from response quality, length, and engagement — don't always ask directly",
+        "On low-condition days: prioritize review of known material, lighter practice, confidence-building",
+        "On high-condition days: introduce new concepts, push to harder problems, deeper exploration",
+        "Never force a hard new concept when the user is clearly fatigued — it won't land and may create negative associations",
+        "A session of solid review on a low day is more valuable than a failed attempt at new material",
+        "Adjust session length expectations — a 20-minute focused session on a hard day beats 90 minutes of disengaged going through the motions"
+      ]
+    },
+    {
+      "id": "P025",
+      "label": "flow_state_induction_and_maintenance",
+      "description": "Flow (Csikszentmihalyi) is the state of complete absorption in a task — time disappears, effort feels effortless, and learning accelerates dramatically. Flow requires: clear goals, immediate feedback, and challenge matched to skill. The coach's job is to create conditions for flow and then get out of the way.",
+      "applies_when": "Once initial confusion is resolved and user is engaged — transition from scaffolded guidance to sustained flow conditions",
+      "guidelines": [
+        "Flow requires clear immediate goals — always let the user know what they are working toward right now",
+        "Flow requires immediate feedback — never let a user action go unacknowledged",
+        "Flow requires challenge slightly above current skill — not too easy, not too hard (connects to P003)",
+        "Once flow is detected (longer responses, faster pace, user asking their own questions), reduce interruptions",
+        "Do not insert unnecessary check-ins when the user is in flow — let it run",
+        "Granularity is a key lever for flow: chunks too large break flow, chunks too small prevent it from starting",
+        "Re-induce flow after interruptions by re-establishing the immediate goal and giving a quick easy win"
+      ]
+    },
+    {
+      "id": "P026",
+      "label": "session_reentry_context_restoration",
+      "description": "When a user returns after a break (hours, days, or weeks), their working memory has reset. Jumping back into where they left off creates instant confusion and dropout. The first priority of any resumed session is rapid, low-friction context restoration.",
+      "applies_when": "At the start of any session that follows a gap, when user signals they have forgotten, when user seems lost in material they previously understood",
+      "guidelines": [
+        "Before introducing anything new, briefly reconstruct the last session's key concepts",
+        "Use retrieval prompts rather than re-explanation: 'What do you remember about X?' activates memory better than 'X works like this'",
+        "Keep context restoration short — 2-3 key concepts maximum before moving forward",
+        "If user cannot retrieve, provide a minimal re-explanation and move on — do not re-teach the full session",
+        "Frame reentry positively: 'You already understand X and Y — today we build on that'",
+        "Use the knowledge graph to identify which concepts are at highest risk of having faded since last session"
+      ]
+    }
+  ],
+  "diagnostic_cues": [
+    {
+      "id": "D001",
+      "label": "response_relevance",
+      "signal": "Did the user actually answer what was asked, or did they give a tangential, vague, or unrelated response?",
+      "detection": "Compare user's response to the specific question asked. Check if the core of the question is addressed.",
+      "tiers": {
+        "high": "Directly addresses the question, even if the answer is wrong",
+        "mid": "Partially addresses the question but drifts or adds unrelated content",
+        "low": "Response has little to no connection to what was asked"
+      }
+    },
+    {
+      "id": "D002",
+      "label": "orthographic_precision",
+      "signal": "Does the user write with consistent spelling and spacing, excluding commonly confused words and typical typos?",
+      "detection": "Look for unusual spacing errors, consistent misspellings, broken grammar that goes beyond normal typos. Language-dependent — Korean spacing rules differ from English spelling norms.",
+      "tiers": {
+        "high": "Clean writing with only common/expected errors",
+        "mid": "Noticeable pattern of spacing or spelling errors beyond the norm",
+        "low": "Frequent and varied errors suggesting low written language control"
+      }
+    },
+    {
+      "id": "D003",
+      "label": "response_completeness",
+      "signal": "Did the user finish their thought, or did the response trail off, stop mid-sentence, or feel abandoned?",
+      "detection": "Check if the response reaches a logical conclusion. Trailing '...', abrupt stops, sentence fragments that clearly had more to say.",
+      "tiers": {
+        "high": "Complete thought, clear ending — even if brief",
+        "mid": "Mostly complete but occasionally trails off or leaves thoughts hanging",
+        "low": "Frequently stops mid-thought, incomplete sentences, abandoned answers"
+      }
+    }
+  ],
+  "error_taxonomy": [
+    {
+      "id": "E001",
+      "label": "correct_with_transfer",
+      "description": "Correct answer with appropriate modification from the example. User recognized the pattern and applied it to a new case.",
+      "tier_signal": "upper",
+      "reveals": "Pattern recognition, working memory, transfer ability all intact",
+      "example": {
+        "shown": "var num = 1",
+        "prompt": "Write a variable with value 3",
+        "response": "var num = 3"
+      }
+    },
+    {
+      "id": "E002",
+      "label": "conceptual_not_syntactic",
+      "description": "Right idea, wrong form. User understood what to do but not the exact syntax. Shows conceptual grasp with surface-level gap.",
+      "tier_signal": "upper-mid",
+      "reveals": "Conceptual understanding present, syntax encoding incomplete — easily fixable with repetition",
+      "example": {
+        "shown": "var num = 1",
+        "prompt": "Write a variable with value 3",
+        "response": "variable num = 3"
+      }
+    },
+    {
+      "id": "E003",
+      "label": "verbatim_copy",
+      "description": "Copied the example exactly without modification. User sees the pattern but cannot transfer — or is afraid to change anything.",
+      "tier_signal": "mid",
+      "reveals": "Can reproduce but cannot modify. May indicate low confidence or inability to identify which part to change.",
+      "example": {
+        "shown": "var num = 1",
+        "prompt": "Write a variable with value 3",
+        "response": "var num = 1"
+      }
+    },
+    {
+      "id": "E004",
+      "label": "incomplete_trailing_off",
+      "description": "Started correctly but stopped before completing. Working memory or confidence ran out mid-answer.",
+      "tier_signal": "lower-mid",
+      "reveals": "Can begin a task but cannot sustain through completion. Working memory limit or loss of confidence partway through.",
+      "example": {
+        "shown": "var num = 1",
+        "prompt": "Write a variable with value 3",
+        "response": "var num"
+      }
+    },
+    {
+      "id": "E005",
+      "label": "single_element_extraction",
+      "description": "Grabbed one recognizable piece from the example but could not reproduce the structure. Cannot parse the example as a composed pattern.",
+      "tier_signal": "lower",
+      "reveals": "Cannot decompose an example into parts. Sees a blob, grabs the most salient element.",
+      "example": {
+        "shown": "var num = 1",
+        "prompt": "Write a variable with value 3",
+        "response": "num"
+      }
+    },
+    {
+      "id": "E006",
+      "label": "fragment_no_structure",
+      "description": "Response contains fragments related to the prompt but with no recognizable structure. The user attempted but could not organize the elements.",
+      "tier_signal": "lower",
+      "reveals": "Elements are floating in memory but the user cannot compose them into a coherent structure.",
+      "example": {
+        "shown": "var num = 1",
+        "prompt": "Write a variable with value 3",
+        "response": "n 3"
+      }
+    },
+    {
+      "id": "E007",
+      "label": "avoidance_or_irrelevant",
+      "description": "User did not attempt the task — changed subject, gave unrelated response, or left blank. May indicate anxiety, disengagement, or complete disconnect from the material.",
+      "tier_signal": "lowest",
+      "reveals": "Cannot determine cognitive level from this response. Must distinguish avoidance-by-anxiety (B002) from avoidance-by-disengagement (B003) from genuine incomprehension.",
+      "example": {
+        "shown": "var num = 1",
+        "prompt": "Write a variable with value 3",
+        "response": "I don't know"
+      }
+    }
+  ],
+  "panels": [
+    {
+      "id": "panel_apprentice_demo",
+      "label": "Apprenticeship Demo (coach)",
+      "affordance": "Vertical scroll of substep cells delivered ONE CELL PER TURN. Each cell deepens inside itself: it starts with a big-picture layer (label + concrete artifact + one-sentence caption), then a pseudo-code layer types in below a divider. The learner sees the full arc by watching cells accumulate. Previous cells remain visible but faded; the actively-rendering cell is focused and scrolled to center.",
+      "when_effective": "Entire T002 model_concept + model_code progression. Each lesson_plan substep is emitted as one update carrying the full cell content (pass_1 + pass_2).",
+      "interaction": "coach_types_user_fills_blank",
+      "content_schema": {
+        "title": "string",
+        "language": "string",
+        "substeps": [
+          {
+            "substep_id": "string",
+            "label": "short (3-5 word) label for the substep",
+            "pass_1": {
+              "big_display": "string — the concrete artifact shown at large font. E.g., 'text = \"First Citizen: Before we proceed...\"' or a vocabulary list, or a formula. Empty string if only label + caption is needed.",
+              "caption": "string — 1 sentence under the big_display explaining what this step is about, in plain language."
+            },
+            "pass_2": {
+              "blocks": "{ type: 'comment' | 'code' | 'narrative', text: string }[] — an interleaved sequence the coach decides. 'comment' blocks are # planning comments the engineer would write before coding; 'code' blocks are real implementation; 'narrative' blocks are the coach speaking TO the learner about context/why (no # prefix, prose style). Generator chooses the ORDER and COUNT freely to teach best. Accumulates under the Pass 1 layer with a divider between them."
+            }
+          }
+        ],
+        "focused_substep_id": "string — the substep currently being rendered; frontend uses this to focus + center-scroll that cell."
+      }
+    },
+    {
+      "id": "panel_apprentice_practice",
+      "label": "Apprenticeship Practice (user, paired with demo)",
+      "affordance": "Opens to the LEFT of the demo panel. Shows the substeps the learner will attempt (selected by tier — lower tier gets 1 substep, upper tier gets all). Each practice cell is visually linked to its corresponding demo cell (connecting line or shared color). Scroll is synchronized with the demo panel so the mapping stays obvious.",
+      "when_effective": "Practice phase after the full code demonstration is complete. Opens in tandem with (not instead of) the demo panel.",
+      "interaction": "user_edits_coach_reviews",
+      "content_schema": {
+        "paired_demo_panel": "panel_apprentice_demo",
+        "practice_substeps": "{ substep_id: string, label: string, starter_code: string, hint: string | null }[]"
+      }
+    },
+    {
+      "id": "panel_practice",
+      "label": "Practice Question (free-form)",
+      "affordance": "Free-form written response area. Coach can annotate with red-pen markings after submission.",
+      "when_effective": "Retrieval practice, short-answer assessment, explanation tasks, Bloom apply/analyze level",
+      "interaction": "user_writes_coach_marks",
+      "content_schema": {
+        "question": "string",
+        "hint": "string | null",
+        "expected_keywords": "string[]"
+      }
+    },
+    {
+      "id": "panel_mock_test",
+      "label": "Multiple Choice Test",
+      "affordance": "Multiple choice questions with selectable options. Coach scores and annotates after submission. Good for errorless learning (options serve as scaffold).",
+      "when_effective": "Assessment, spaced review with interleaving, ZPD calibration via difficulty adjustment",
+      "interaction": "user_selects_coach_marks",
+      "content_schema": {
+        "questions": "{ stem: string, options: string[], correct_index: number }[]"
+      }
+    },
+    {
+      "id": "panel_memo",
+      "label": "Notepad",
+      "affordance": "Text area for coach to present organized notes, summaries, or key points. A persistent reference the user can glance at during explanation.",
+      "when_effective": "Summarizing key concepts, providing reference material during practice, listing steps of a procedure",
+      "interaction": "coach_only",
+      "content_schema": {
+        "title": "string",
+        "content": "string (markdown)"
+      }
+    },
+    {
+      "id": "panel_whiteboard",
+      "label": "Whiteboard",
+      "affordance": "Visual drawing surface for diagrams, flowcharts, concept maps, and freeform illustrations. Coach renders SVG-based visuals to explain spatial or relational concepts.",
+      "when_effective": "Explaining relationships between concepts, system architecture, flowcharts, any concept that is spatial in nature",
+      "interaction": "coach_only",
+      "content_schema": {
+        "svg": "string",
+        "labels": "{ x: number, y: number, text: string }[]",
+        "title": "string"
+      }
+    },
+    {
+      "id": "panel_graph",
+      "label": "Graph / Chart",
+      "affordance": "Data visualization — bar charts, line graphs, scatter plots, tree diagrams. Best for showing patterns, trends, distributions, and comparisons.",
+      "when_effective": "Statistical concepts, performance trends, comparing quantities, showing data-driven insights",
+      "interaction": "coach_only",
+      "content_schema": {
+        "chart_type": "bar | line | scatter | pie | tree",
+        "data": "{ label: string, value: number }[] | number[][]",
+        "axes": "{ x: string, y: string }",
+        "title": "string"
+      }
+    },
+    {
+      "id": "panel_animation",
+      "label": "Animation",
+      "affordance": "Timeline-based scene animation (currently disabled — reserved for future use). Intended for Manim-style visual storytelling when a topic has a continuous transformation arc.",
+      "when_effective": "Deferred. Do not emit panel_animation updates in the current build.",
+      "interaction": "coach_only",
+      "content_schema": {
+        "_note": "Schema reserved; not used in the current build."
+      }
+    },
+    {
+      "id": "panel_timeline",
+      "label": "Timeline",
+      "affordance": "Chronological event display. Shows ordered sequence of events with dates, labels, and detail text. Can highlight the current focus point.",
+      "when_effective": "Historical narratives, evolution of ideas, biographical sequences, process steps that have temporal order",
+      "interaction": "coach_only",
+      "content_schema": {
+        "events": "{ date: string, label: string, detail: string }[]",
+        "highlight_index": "number | null"
+      }
+    },
+    {
+      "id": "panel_formula",
+      "label": "Formula / Equation",
+      "affordance": "LaTeX-rendered mathematical expressions with optional step-by-step derivation. Can highlight individual steps. Represents the symbolic/abstract stage of Bruner's progression.",
+      "when_effective": "Math derivations, physics equations, chemical formulas, formal logic, any symbolic notation",
+      "interaction": "coach_only",
+      "content_schema": {
+        "latex": "string",
+        "steps": "{ latex: string, explanation: string }[]",
+        "highlight_step": "number | null"
+      }
+    },
+    {
+      "id": "panel_flashcard",
+      "label": "Flashcard",
+      "affordance": "Front/back card pairs for spaced repetition and active recall. Coach presents cards; user mentally retrieves before flipping.",
+      "when_effective": "Vocabulary, definitions, fact memorization, spaced review of previously learned concepts",
+      "interaction": "coach_only",
+      "content_schema": {
+        "cards": "{ front: string, back: string }[]",
+        "mode": "new | review"
+      }
+    }
+  ],
+  "teaching_patterns": [
+    {
+      "id": "T001",
+      "label": "concept_introduction",
+      "description": "Introduce a new concept from zero. Start concrete, build to abstract, then verify understanding.",
+      "principles": ["P012", "P011", "P013", "P018"],
+      "sequence": [
+        { "step": "hook", "panel": "panel_animation", "purpose": "Big picture overview — why this matters" },
+        { "step": "concrete", "panel": "panel_animation | panel_whiteboard", "purpose": "Visual/concrete representation first" },
+        { "step": "explain", "panel": null, "purpose": "Chat explanation anchored to what user just saw" },
+        { "step": "formalize", "panel": "panel_formula", "purpose": "Symbolic/abstract representation (non-code domains)" },
+        { "step": "verify", "panel": "panel_practice", "purpose": "User demonstrates understanding" }
+      ]
+    },
+    {
+      "id": "T002",
+      "label": "cognitive_apprenticeship_for_code",
+      "description": "Teach a coding skill through cognitive apprenticeship. First plan (decompose into substeps sized to the learner's tier). Then deliver substeps one cell per turn: each cell opens with a big-picture layer (label + concrete artifact + one-sentence caption) and then deepens locally with a pseudo-code layer. After all cells are covered, practice selected substeps and reflect in chat. Lesson plan is fixed once created.",
+      "principles": ["P004", "P009", "P019", "P018", "P011", "P012"],
+      "sequence": [
+        {
+          "step": "plan",
+          "panel": null,
+          "output": "lesson_plan",
+          "purpose": "Decompose the target skill into substeps. Substep count and granularity adapt to user tier (lower tier = finer substeps, fewer skipped). Store in session state as fixed lesson_plan for the session.",
+          "lesson_plan_schema": {
+            "topic": "string",
+            "substeps": "{ substep_id: string, label: string, key_idea: string }[]",
+            "practice_substep_ids": "string[] — which substeps the user will attempt, chosen by tier"
+          }
+        },
+        {
+          "step": "model",
+          "panel": "panel_apprentice_demo",
+          "purpose": "Deliver substeps ONE CELL PER TURN. Each cell carries pass_1 (big picture: label + big_display + caption) AND pass_2 (pseudo-code lines). Frontend renders pass_1 first, then a divider, then types pass_2 line by line. Previous cells stay visible but faded; the active cell is focused and centered. Do not dump all substeps in one turn."
+        },
+        {
+          "step": "practice",
+          "panel": "panel_apprentice_practice",
+          "purpose": "Deferred. Open the practice panel to the right of the demo for substeps in lesson_plan.practice_substep_ids. Learner attempts; coach reviews with red-pen feedback."
+        },
+        {
+          "step": "reflect",
+          "panel": null,
+          "purpose": "Deferred. In chat, ask the learner to articulate what they built and why each substep was necessary."
+        }
+      ]
+    },
+    {
+      "id": "T003",
+      "label": "memorization_drill",
+      "description": "Commit facts to long-term memory through spaced retrieval and interleaving.",
+      "principles": ["P005", "P016", "P006"],
+      "sequence": [
+        { "step": "expose", "panel": "panel_flashcard", "purpose": "First exposure to new items" },
+        { "step": "retrieve", "panel": "panel_practice", "purpose": "Free recall without looking" },
+        { "step": "verify", "panel": "panel_flashcard", "purpose": "Check against cards, reinforce correct recall" },
+        { "step": "interleave", "panel": "panel_mock_test", "purpose": "Mix new items with older review items" }
+      ]
+    },
+    {
+      "id": "T004",
+      "label": "historical_narrative",
+      "description": "Teach a historical sequence or process evolution. Show the arc, zoom in, connect back.",
+      "principles": ["P012", "P008", "P011"],
+      "sequence": [
+        { "step": "arc", "panel": "panel_timeline", "purpose": "Show the full chronological arc first" },
+        { "step": "deep_dive", "panel": "panel_animation | panel_whiteboard", "purpose": "Zoom into a key moment or event" },
+        { "step": "connect", "panel": "panel_timeline", "purpose": "Return to timeline, highlight where this fits" },
+        { "step": "verify", "panel": "panel_practice", "purpose": "Why did X lead to Y? Cause-and-effect reasoning" }
+      ]
+    },
+    {
+      "id": "T005",
+      "label": "math_problem_solving",
+      "description": "Build mathematical understanding from visual intuition to formal derivation to independent practice.",
+      "principles": ["P011", "P004", "P018"],
+      "sequence": [
+        { "step": "intuition", "panel": "panel_graph | panel_whiteboard", "purpose": "Visual intuition — what does this look like?" },
+        { "step": "formalize", "panel": "panel_formula", "purpose": "Step-by-step symbolic derivation" },
+        { "step": "scaffold", "panel": "panel_formula", "purpose": "Similar problem, some steps filled in" },
+        { "step": "practice", "panel": "panel_practice", "purpose": "User solves independently from scratch" }
+      ]
+    }
+  ]
+}

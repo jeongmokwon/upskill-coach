@@ -1,0 +1,17 @@
+# System packages required by Manim Community Edition.
+# Render reads this file during the build phase and installs each
+# package via apt-get on top of the base Python image.
+#
+# Manim's Cairo backend needs cairo + pango headers to compile its
+# Python bindings; ffmpeg is needed at runtime for any rasterizing
+# scene (we don't rasterize on the server, but importing manim still
+# probes for it). pkg-config wires the dev headers up for pip-build.
+#
+# We deliberately do NOT install texlive — our Manim subset
+# (animation_extractor/manim_prompt.py SUBSET_RULES) forbids MathTex
+# / Tex, so we skip the multi-GB TeX download.
+
+ffmpeg
+libcairo2-dev
+libpango1.0-dev
+pkg-config

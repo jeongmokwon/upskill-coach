@@ -55,7 +55,7 @@ class ClientCtx:
     """Per-WebSocket-connection session state."""
     __slots__ = ("ws", "user_id", "user_profile", "study_topic",
                  "section_id", "followups_stopped", "db_session_id",
-                 "teaching_style")
+                 "teaching_style", "apprentice")
 
     def __init__(self, ws):
         self.ws = ws
@@ -66,6 +66,14 @@ class ClientCtx:
         self.followups_stopped = False
         self.db_session_id = ""
         self.teaching_style = {}
+        # Apprenticeship mode state — separate from legacy chat flow
+        self.apprentice = {
+            "topic": "",
+            "diagnostic_log": [],  # [{question, answer, observation}]
+            "user_state": None,    # filled after diagnostic
+            "lesson_plan": None,   # fixed once created
+            "messages": [],        # generator conversation history
+        }
 
 
 # Map websocket → ClientCtx
@@ -173,6 +181,16 @@ async def ws_handler(request):
                     elif msg_type == "stop_followups":
                         ctx.followups_stopped = True
                         print("  [WS] Follow-ups stopped by user")
+                    elif msg_type == "apprentice_start":
+                        _spawn(handle_apprentice_start, (msg,), websocket)
+                    elif msg_type == "apprentice_diagnostic":
+                        _spawn(handle_apprentice_diagnostic, (msg,), websocket)
+                    elif msg_type == "apprentice_chat":
+                        _spawn(handle_apprentice_chat, (msg,), websocket)
+                    elif msg_type == "apprentice_practice_submit":
+                        _spawn(handle_apprentice_practice_submit, (msg,), websocket)
+                    elif msg_type == "apprentice_continue":
+                        _spawn(handle_apprentice_continue, (msg,), websocket)
                 except json.JSONDecodeError:
                     pass
                 except Exception as _outer_e:
@@ -244,6 +262,447 @@ async def _static_handler(request):
     return web.Response(text="Not Found", status=404)
 
 
+# ─── Admin (read-only) ────────────────────────────────────────────────
+#
+# Three routes — all gated by HTTP Basic Auth backed by the
+# ADMIN_PASSWORD env var. If the env var is unset the routes return 503
+# (admin disabled). Username is ignored; password must match.
+#
+# WARNING: Basic Auth over plain HTTP is fine for localhost dev. Do NOT
+# expose this to the public internet without putting it behind TLS or
+# a stronger auth layer.
+
+import base64 as _b64
+import html as _html
+from collections import Counter as _Counter
+from urllib.parse import quote as _urlquote
+
+
+def _admin_auth_check(request):
+    """Returns None if the request is authorized, otherwise an aiohttp
+    Response that the caller must return to abort the handler."""
+    pw = os.environ.get("ADMIN_PASSWORD", "")
+    if not pw:
+        return web.Response(
+            text="Admin disabled. Set ADMIN_PASSWORD env var to enable.",
+            status=503,
+        )
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Basic "):
+        return web.Response(
+            status=401,
+            headers={"WWW-Authenticate": 'Basic realm="Upskill Admin"'},
+            text="Authorization required",
+        )
+    try:
+        decoded = _b64.b64decode(auth[6:].strip()).decode("utf-8", errors="replace")
+        _, _, password = decoded.partition(":")
+    except Exception:
+        password = ""
+    if password != pw:
+        return web.Response(
+            status=401,
+            headers={"WWW-Authenticate": 'Basic realm="Upskill Admin"'},
+            text="Invalid credentials",
+        )
+    return None
+
+
+def _admin_db_conn():
+    """Open a read-only DB connection via the cross-DB helper in
+    db.py. Routes through db.get_conn() so it works the same on
+    SQLite (local dev) and PostgreSQL (Render via DATABASE_URL)."""
+    return db.get_conn()
+
+
+def _admin_html_page(title: str, body: str) -> str:
+    """Wrap admin page body in a minimal dark-themed HTML shell."""
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<title>{_html.escape(title)} — Admin</title>
+<style>
+  body {{ margin:0; padding:24px; background:#0d1117; color:#e6edf3;
+         font-family:"SF Mono","Fira Code",monospace; font-size:13px;
+         line-height:1.5; }}
+  h1 {{ font-size:18px; color:#58a6ff; margin:0 0 8px; }}
+  h2 {{ font-size:14px; color:#f0883e; margin:24px 0 8px; }}
+  a {{ color:#58a6ff; text-decoration:none; }}
+  a:hover {{ text-decoration:underline; }}
+  .crumbs {{ font-size:12px; color:#8b949e; margin-bottom:16px; }}
+  table {{ width:100%; border-collapse:collapse; margin-bottom:16px;
+          font-size:12px; }}
+  th, td {{ padding:8px 12px; text-align:left;
+           border-bottom:1px solid #21262d; vertical-align:top; }}
+  th {{ color:#8b949e; font-weight:600; background:#161b22;
+        position:sticky; top:0; }}
+  tr:hover td {{ background:#161b22; }}
+  .meta {{ color:#8b949e; }}
+  .right {{ text-align:right; }}
+  .muted {{ color:#484f58; }}
+  .empty {{ color:#484f58; font-style:italic; padding:8px 0; }}
+  .tag {{ display:inline-block; padding:2px 8px; background:#21262d;
+         border-radius:4px; font-size:11px; color:#e6edf3;
+         margin:2px 4px 2px 0; }}
+  .tag.weak {{ background:#f8514922; color:#f85149;
+               border:1px solid #f8514944; }}
+  .tag.strong {{ background:#3fb95022; color:#3fb950;
+                 border:1px solid #3fb95044; }}
+  .tag.deep {{ background:#58a6ff22; color:#58a6ff;
+               border:1px solid #58a6ff44; }}
+  .tag.surface {{ background:#bc8cff22; color:#bc8cff;
+                  border:1px solid #bc8cff44; }}
+  .tag.memorized {{ background:#f0883e22; color:#f0883e;
+                    border:1px solid #f0883e44; }}
+  .panel {{ background:#161b22; border:1px solid #21262d;
+           border-radius:6px; padding:16px; margin-bottom:16px; }}
+  .msg {{ padding:8px 12px; margin:6px 0; border-radius:4px;
+         border-left:3px solid #30363d; background:#161b22; }}
+  .msg.user {{ border-left-color:#1f6feb; background:#1f6feb15; }}
+  .msg.coach {{ border-left-color:#58a6ff; }}
+  .msg-role {{ font-size:11px; color:#8b949e;
+              text-transform:uppercase; letter-spacing:0.5px;
+              margin-bottom:4px; }}
+  pre {{ white-space:pre-wrap; word-wrap:break-word; margin:0;
+        font-family:inherit; font-size:12px; }}
+  .warn {{ background:#f0883e22; border:1px solid #f0883e44;
+          color:#f0883e; padding:10px 14px; border-radius:6px;
+          margin-bottom:16px; font-size:12px; }}
+  .kv {{ display:grid; grid-template-columns:140px 1fr; gap:6px 16px;
+        font-size:12px; }}
+  .kv .k {{ color:#8b949e; }}
+</style></head>
+<body>
+<div class="warn">⚠️ Read-only admin. Do NOT deploy publicly without proper auth (Basic Auth + ADMIN_PASSWORD is a dev-only gate).</div>
+{body}
+</body></html>"""
+
+
+def _admin_format_pct(num, denom):
+    if not denom:
+        return "—"
+    return f"{int(round(100 * num / denom))}% ({num}/{denom})"
+
+
+async def _admin_users_handler(request):
+    """List all users with quick stats. Click → user detail."""
+    blk = _admin_auth_check(request)
+    if blk:
+        return blk
+    conn = _admin_db_conn()
+    try:
+        cur = db._execute(conn, """
+            SELECT
+                up.user_id, up.user_name, up.studying, up.hint_preference,
+                up.difficulty, up.created_at,
+                (SELECT COUNT(*) FROM sessions s WHERE s.user_id = up.user_id) AS n_sessions,
+                (SELECT COUNT(*) FROM messages m WHERE m.user_id = up.user_id) AS n_messages,
+                (SELECT MAX(m.timestamp) FROM messages m WHERE m.user_id = up.user_id) AS last_activity,
+                (SELECT COUNT(*) FROM interactions i
+                   WHERE i.user_id = up.user_id AND i.interaction_type = 'practice'
+                ) AS n_practice,
+                (SELECT COUNT(*) FROM interactions i
+                   WHERE i.user_id = up.user_id AND i.interaction_type = 'practice'
+                     AND i.is_correct = 1
+                ) AS n_correct,
+                (SELECT COUNT(*) FROM insights ins WHERE ins.user_id = up.user_id) AS n_insights
+            FROM user_profiles up
+            ORDER BY (last_activity IS NULL), last_activity DESC
+        """)
+        rows = db._fetchall(cur)
+    finally:
+        conn.close()
+
+    if not rows:
+        body = "<h1>Users</h1><div class='empty'>No users yet.</div>"
+        return web.Response(text=_admin_html_page("Users", body), content_type="text/html")
+
+    parts = ["<h1>Users</h1>",
+             "<table><thead><tr>",
+             "<th>User</th><th>Studying</th><th>Hint pref</th>",
+             "<th class='right'>Sessions</th><th class='right'>Messages</th>",
+             "<th class='right'>Practice ✓</th><th class='right'>Insights</th>",
+             "<th>Last activity</th>",
+             "</tr></thead><tbody>"]
+    for r in rows:
+        link = f"/admin/user/{_urlquote(r['user_id'])}"
+        parts.append(
+            "<tr>"
+            f"<td><a href='{link}'>{_html.escape(r['user_name'] or r['user_id'])}</a>"
+            f"<div class='meta'>{_html.escape(r['user_id'])}</div></td>"
+            f"<td>{_html.escape(r['studying'] or '')}</td>"
+            f"<td>{_html.escape(r['hint_preference'] or '')}</td>"
+            f"<td class='right'>{r['n_sessions']}</td>"
+            f"<td class='right'>{r['n_messages']}</td>"
+            f"<td class='right'>{_admin_format_pct(r['n_correct'], r['n_practice'])}</td>"
+            f"<td class='right'>{r['n_insights']}</td>"
+            f"<td class='meta'>{_html.escape(r['last_activity'] or '—')}</td>"
+            "</tr>"
+        )
+    parts.append("</tbody></table>")
+    return web.Response(text=_admin_html_page("Users", "".join(parts)), content_type="text/html")
+
+
+async def _admin_user_handler(request):
+    """Per-user detail: profile, sessions, accuracy, sticking points, insights."""
+    blk = _admin_auth_check(request)
+    if blk:
+        return blk
+    user_id = request.match_info.get("user_id", "")
+    if not user_id:
+        return web.Response(text="missing user_id", status=400)
+
+    P = db._P
+    conn = _admin_db_conn()
+    try:
+        cur = db._execute(conn, f"SELECT * FROM user_profiles WHERE user_id = {P}", (user_id,))
+        prof = db._fetchone(cur)
+        if not prof:
+            body = (
+                "<div class='crumbs'><a href='/admin'>← Users</a></div>"
+                f"<h1>User not found</h1><div class='empty'>{_html.escape(user_id)}</div>"
+            )
+            return web.Response(text=_admin_html_page("User not found", body),
+                                content_type="text/html", status=404)
+
+        cur = db._execute(conn, f"""
+            SELECT s.session_id, s.start_time, s.end_time, s.study_topic,
+                   (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) AS n_msgs,
+                   (SELECT 1 FROM insights i WHERE i.session_id = s.session_id LIMIT 1) AS has_insight
+            FROM sessions s
+            WHERE s.user_id = {P}
+            ORDER BY s.start_time DESC
+        """, (user_id,))
+        sessions = db._fetchall(cur)
+
+        cur = db._execute(conn, f"""
+            SELECT timestamp, practice_question, user_answer, is_correct,
+                   time_taken_seconds, study_topic, session_id
+            FROM interactions
+            WHERE user_id = {P} AND interaction_type = 'practice'
+            ORDER BY id DESC
+        """, (user_id,))
+        practice = db._fetchall(cur)
+
+        cur = db._execute(conn, f"""
+            SELECT session_id, analysis, created_at
+            FROM insights
+            WHERE user_id = {P}
+            ORDER BY id DESC
+        """, (user_id,))
+        insights = db._fetchall(cur)
+    finally:
+        conn.close()
+
+    # ─── Aggregate weak/strong concepts across all insights ───
+    weak_counter = _Counter()
+    strong_counter = _Counter()
+    for ins in insights:
+        try:
+            data = json.loads(ins["analysis"]) if ins["analysis"] else {}
+        except Exception:
+            data = {}
+        for w in data.get("weak_concepts", []) or []:
+            weak_counter[str(w)] += 1
+        for s in data.get("strong_concepts", []) or []:
+            strong_counter[str(s)] += 1
+
+    n_practice = len(practice)
+    n_correct = sum(1 for p in practice if p["is_correct"])
+
+    parts = [
+        "<div class='crumbs'><a href='/admin'>← Users</a></div>",
+        f"<h1>{_html.escape(prof['user_name'] or prof['user_id'])}</h1>",
+        "<div class='panel'><div class='kv'>",
+        f"<div class='k'>user_id</div><div>{_html.escape(prof['user_id'])}</div>",
+        f"<div class='k'>studying</div><div>{_html.escape(prof['studying'] or '—')}</div>",
+        f"<div class='k'>goal</div><div>{_html.escape(prof['goal'] or '—')}</div>",
+        f"<div class='k'>background</div><div>{_html.escape(prof['background'] or '—')}</div>",
+        f"<div class='k'>hint_preference</div><div>{_html.escape(prof['hint_preference'] or '—')}</div>",
+        f"<div class='k'>difficulty</div><div>{prof['difficulty']}</div>",
+        f"<div class='k'>condition</div><div>{prof['user_condition']}</div>",
+        f"<div class='k'>created_at</div><div class='meta'>{_html.escape(prof['created_at'])}</div>",
+        "</div></div>",
+    ]
+
+    # ─── Practice accuracy ───
+    parts.append(f"<h2>Practice accuracy — {_admin_format_pct(n_correct, n_practice)}</h2>")
+    if practice:
+        parts.append("<table><thead><tr>"
+                     "<th>When</th><th>Question</th><th>Answer</th>"
+                     "<th class='right'>Result</th><th class='right'>Time</th>"
+                     "</tr></thead><tbody>")
+        for p in practice[:50]:
+            ok = "✓" if p["is_correct"] else "✗"
+            ok_color = "#3fb950" if p["is_correct"] else "#f85149"
+            t = p["time_taken_seconds"]
+            t_str = f"{t:.1f}s" if t else "—"
+            parts.append(
+                "<tr>"
+                f"<td class='meta'>{_html.escape(p['timestamp'] or '')}</td>"
+                f"<td>{_html.escape((p['practice_question'] or '')[:160])}</td>"
+                f"<td>{_html.escape(p['user_answer'] or '')}</td>"
+                f"<td class='right' style='color:{ok_color};font-weight:bold'>{ok}</td>"
+                f"<td class='right meta'>{t_str}</td>"
+                "</tr>"
+            )
+        parts.append("</tbody></table>")
+        if len(practice) > 50:
+            parts.append(f"<div class='meta'>(showing 50 of {len(practice)})</div>")
+    else:
+        parts.append("<div class='empty'>No practice attempts yet.</div>")
+
+    # ─── Sticking points ───
+    parts.append("<h2>Recurring weak concepts (sticking points)</h2>")
+    if weak_counter:
+        parts.append("<div>")
+        for concept, cnt in weak_counter.most_common(20):
+            parts.append(
+                f"<span class='tag weak'>{_html.escape(concept)}"
+                f"{'  ×' + str(cnt) if cnt > 1 else ''}</span>"
+            )
+        parts.append("</div>")
+    else:
+        parts.append("<div class='empty'>None recorded yet.</div>")
+
+    parts.append("<h2>Recurring strong concepts</h2>")
+    if strong_counter:
+        parts.append("<div>")
+        for concept, cnt in strong_counter.most_common(20):
+            parts.append(
+                f"<span class='tag strong'>{_html.escape(concept)}"
+                f"{'  ×' + str(cnt) if cnt > 1 else ''}</span>"
+            )
+        parts.append("</div>")
+    else:
+        parts.append("<div class='empty'>None recorded yet.</div>")
+
+    # ─── Sessions list ───
+    parts.append(f"<h2>Sessions ({len(sessions)})</h2>")
+    if sessions:
+        parts.append("<table><thead><tr>"
+                     "<th>Session</th><th>Started</th><th>Ended</th>"
+                     "<th>Topic</th><th class='right'>Msgs</th>"
+                     "<th class='right'>Insight</th>"
+                     "</tr></thead><tbody>")
+        for s in sessions:
+            slink = f"/admin/session/{_urlquote(s['session_id'])}"
+            ended = s['end_time'] or "<span class='muted'>(active/orphan)</span>"
+            insight_mark = "✓" if s['has_insight'] else "<span class='muted'>—</span>"
+            parts.append(
+                "<tr>"
+                f"<td><a href='{slink}'>{_html.escape(s['session_id'])}</a></td>"
+                f"<td class='meta'>{_html.escape(s['start_time'] or '')}</td>"
+                f"<td class='meta'>{ended}</td>"
+                f"<td>{_html.escape(s['study_topic'] or '')}</td>"
+                f"<td class='right'>{s['n_msgs']}</td>"
+                f"<td class='right'>{insight_mark}</td>"
+                "</tr>"
+            )
+        parts.append("</tbody></table>")
+    else:
+        parts.append("<div class='empty'>No sessions yet.</div>")
+
+    # ─── Recent insights (full bodies) ───
+    parts.append("<h2>Recent insights (most recent 3)</h2>")
+    if insights:
+        for ins in insights[:3]:
+            try:
+                data = json.loads(ins["analysis"]) if ins["analysis"] else {}
+            except Exception:
+                data = {"_parse_error": "could not parse analysis JSON"}
+            slink = f"/admin/session/{_urlquote(ins['session_id'])}"
+            parts.append(
+                "<div class='panel'>"
+                f"<div class='meta'>session <a href='{slink}'>{_html.escape(ins['session_id'])}</a> · {_html.escape(ins['created_at'])}</div>"
+                f"<pre style='margin-top:8px'>{_html.escape(json.dumps(data, indent=2, ensure_ascii=False))}</pre>"
+                "</div>"
+            )
+    else:
+        parts.append("<div class='empty'>No insights yet.</div>")
+
+    title = f"User {prof['user_name'] or prof['user_id']}"
+    return web.Response(text=_admin_html_page(title, "".join(parts)), content_type="text/html")
+
+
+async def _admin_session_handler(request):
+    """Show a session's transcript + its insight (if any)."""
+    blk = _admin_auth_check(request)
+    if blk:
+        return blk
+    sid = request.match_info.get("session_id", "")
+    if not sid:
+        return web.Response(text="missing session_id", status=400)
+
+    P = db._P
+    conn = _admin_db_conn()
+    try:
+        cur = db._execute(conn, f"SELECT * FROM sessions WHERE session_id = {P}", (sid,))
+        session = db._fetchone(cur)
+        if not session:
+            body = (
+                "<div class='crumbs'><a href='/admin'>← Users</a></div>"
+                f"<h1>Session not found</h1><div class='empty'>{_html.escape(sid)}</div>"
+            )
+            return web.Response(text=_admin_html_page("Session not found", body),
+                                content_type="text/html", status=404)
+        cur = db._execute(conn,
+            f"SELECT role, content, timestamp FROM messages WHERE session_id = {P} ORDER BY id",
+            (sid,))
+        msgs = db._fetchall(cur)
+        cur = db._execute(conn,
+            f"SELECT analysis, created_at FROM insights WHERE session_id = {P} ORDER BY id DESC LIMIT 1",
+            (sid,))
+        insight = db._fetchone(cur)
+    finally:
+        conn.close()
+
+    user_link = f"/admin/user/{_urlquote(session['user_id'])}"
+    parts = [
+        f"<div class='crumbs'><a href='/admin'>← Users</a> · "
+        f"<a href='{user_link}'>{_html.escape(session['user_id'])}</a></div>",
+        f"<h1>Session {_html.escape(sid)}</h1>",
+        "<div class='panel'><div class='kv'>",
+        f"<div class='k'>topic</div><div>{_html.escape(session['study_topic'] or '—')}</div>",
+        f"<div class='k'>start</div><div class='meta'>{_html.escape(session['start_time'] or '')}</div>",
+        f"<div class='k'>end</div><div class='meta'>{_html.escape(session['end_time'] or '(active/orphan)')}</div>",
+        f"<div class='k'>messages</div><div>{len(msgs)}</div>",
+        "</div></div>",
+    ]
+
+    parts.append(f"<h2>Transcript ({len(msgs)} messages)</h2>")
+    if msgs:
+        for m in msgs:
+            role = m["role"] or "?"
+            cls = "user" if role == "user" else "coach"
+            parts.append(
+                f"<div class='msg {cls}'>"
+                f"<div class='msg-role'>{_html.escape(role)} <span class='meta'>· {_html.escape(m['timestamp'] or '')}</span></div>"
+                f"<pre>{_html.escape(m['content'] or '')}</pre>"
+                "</div>"
+            )
+    else:
+        parts.append("<div class='empty'>No messages.</div>")
+
+    parts.append("<h2>Insight</h2>")
+    if insight:
+        try:
+            data = json.loads(insight["analysis"]) if insight["analysis"] else {}
+        except Exception:
+            data = {"_parse_error": "could not parse analysis JSON"}
+        parts.append(
+            "<div class='panel'>"
+            f"<div class='meta'>analyzed at {_html.escape(insight['created_at'])}</div>"
+            f"<pre style='margin-top:8px'>{_html.escape(json.dumps(data, indent=2, ensure_ascii=False))}</pre>"
+            "</div>"
+        )
+    else:
+        parts.append("<div class='empty'>No insight saved for this session.</div>")
+
+    return web.Response(text=_admin_html_page(f"Session {sid}", "".join(parts)),
+                        content_type="text/html")
+
+
 @web.middleware
 async def _log_middleware(request, handler):
     """Log every incoming request for debugging."""
@@ -262,6 +721,12 @@ def start_ws_server():
         app.router.add_get("/health", _health_handler)
         app.router.add_get("/ws", ws_handler)
         app.router.add_get("/", _root_handler)
+        # Admin routes — registered BEFORE the static catch-all so they
+        # take precedence. Auth is enforced inside each handler via
+        # ADMIN_PASSWORD env var (returns 503 if unset, 401 otherwise).
+        app.router.add_get("/admin", _admin_users_handler)
+        app.router.add_get("/admin/user/{user_id}", _admin_user_handler)
+        app.router.add_get("/admin/session/{session_id}", _admin_session_handler)
         app.router.add_get("/{path:.*}", _static_handler)
 
         runner = web.AppRunner(app)
@@ -453,6 +918,12 @@ def handle_identify(msg, websocket):
             _set_ctx(ctx)
         study_topic = profile.get("studying", "")
 
+        # Drain any prior unfinished sessions for this user. These are
+        # sessions where the WS-disconnect handler never cleanly ran
+        # (process kill, OS sleep, daemon thread killed before save).
+        # Runs in background so the user gets connected immediately.
+        _cleanup_orphan_sessions_async(profile["user_id"])
+
         # Start DB session
         db.start_session(study_topic=study_topic)
         if ctx:
@@ -512,6 +983,10 @@ def handle_onboarding_submit(msg):
 
     _ctx().study_topic = studying
 
+    # Drain orphan sessions for this user (in case the user was already
+    # known under a different session_id and had unfinished sessions).
+    _cleanup_orphan_sessions_async(uid)
+
     # Start DB session
     db.start_session(study_topic=studying)
     _ctx().db_session_id = db.get_session_id()
@@ -559,7 +1034,208 @@ def handle_quiz_answer(msg):
 # ─── Chat with Claude ────────────────────────────────────────────────
 
 
+def _default_manim_python():
+    """Best-effort location of a Python interpreter with `manim` installed."""
+    candidates = [
+        os.environ.get("MANIM_PYTHON", ""),
+        "/Users/jeongmokwon/Desktop/manim-venv/bin/python",
+    ]
+    for c in candidates:
+        if c and os.path.exists(c):
+            return c
+    return sys.executable  # fallback; will fail at import if manim absent
+
+
+def _extract_manim_to_json(manim_code: str, class_name: str):
+    """Run animation_extractor/extract.py in a subprocess to convert a Manim
+    Scene into our JSON timeline. Returns the parsed dict on success, or
+    None on any failure (with diagnostics printed to the server log)."""
+    import subprocess
+    import tempfile
+
+    manim_python = _default_manim_python()
+    extract_script = os.path.join(PROJECT_DIR, "animation_extractor", "extract.py")
+    if not os.path.exists(extract_script):
+        print(f"  [Manim] ❌ extract.py not found at {extract_script}", flush=True)
+        return None
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".py", delete=False, encoding="utf-8"
+    ) as f:
+        f.write(manim_code)
+        tmp_path = f.name
+
+    keep_tmp = False
+    try:
+        result = subprocess.run(
+            [manim_python, extract_script, tmp_path, class_name],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            keep_tmp = True
+            print(
+                f"  [Manim] extract failed (code {result.returncode})\n"
+                f"  [Manim]   scene file kept at: {tmp_path}\n"
+                f"  [Manim]   repro: {manim_python} {extract_script} {tmp_path} {class_name}\n"
+                f"  [Manim] ─── stderr ───\n{result.stderr}\n"
+                f"  [Manim] ─── stdout (first 800) ───\n{result.stdout[:800]}",
+                flush=True,
+            )
+            return None
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            keep_tmp = True
+            print(f"  [Manim] extract output not JSON: {e}", flush=True)
+            print(f"  [Manim]   scene file kept at: {tmp_path}", flush=True)
+            print(f"  [Manim]   stdout (first 800): {result.stdout[:800]}", flush=True)
+            print(f"  [Manim]   stderr (first 800): {result.stderr[:800]}", flush=True)
+            return None
+    except subprocess.TimeoutExpired:
+        keep_tmp = True
+        print("  [Manim] extract timed out (60s)", flush=True)
+        print(f"  [Manim]   scene file kept at: {tmp_path}", flush=True)
+        return None
+    except Exception as e:
+        keep_tmp = True
+        print(f"  [Manim] extract exception: {e}", flush=True)
+        print(f"  [Manim]   scene file kept at: {tmp_path}", flush=True)
+        return None
+    finally:
+        if not keep_tmp:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
+def _try_parse_json(text: str):
+    """Tolerant JSON parser — handles stray prose around a JSON object."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    import re as _re
+    m = _re.search(r'\{[\s\S]*\}', text)
+    if m:
+        try:
+            return json.loads(m.group())
+        except Exception:
+            pass
+    return None
+
+
 def handle_explain_animation(msg):
+    """Generate a Manim scene for the chat topic, extract it to a JSON
+    timeline, and ship the timeline to the browser for live playback.
+
+    Replaces the legacy 12-template orchestrator. Kept the same message
+    signature so the existing `{"type": "animation", ...}` trigger from
+    chat_message continues to work unchanged.
+    """
+    selected_code = msg.get("selectedCode", "")
+    full_code = msg.get("fullCode", "")
+    context = msg.get("context", "")
+    title_hint = msg.get("title", "")
+
+    print(f"  [Manim] scene request: {title_hint or context[:60]}", flush=True)
+
+    # Import lazily so coach.py still starts when the package is absent.
+    try:
+        from animation_extractor.manim_prompt import build_manim_system_prompt
+    except Exception as e:
+        print(f"  [Manim] prompt module import failed: {e}", flush=True)
+        send_to_client({
+            "type": "animation_error",
+            "message": f"manim_prompt import failed: {e}",
+        })
+        return
+
+    user_ctx = get_user_context_str()
+    system = build_manim_system_prompt(extra_context=user_ctx)
+
+    task_parts = [
+        f"Title hint: {title_hint or 'an animated explanation'}",
+        f"Context: {context[:600]}",
+    ]
+    if selected_code.strip():
+        task_parts.append(f"Selected code:\n```\n{selected_code[:1500]}\n```")
+    if full_code.strip() and full_code.strip() != selected_code.strip():
+        task_parts.append(f"Full file:\n```python\n{full_code[:1500]}\n```")
+    task_parts.append(
+        "Produce a SINGLE Manim Scene that teaches ONE key concept from the "
+        "above. Return the JSON format described in OUTPUT FORMAT."
+    )
+    task = "\n\n".join(task_parts)
+
+    try:
+        response = get_client().messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=6000,
+            system=system,
+            messages=[{"role": "user", "content": task}],
+        )
+        raw = response.content[0].text
+
+        parsed = _try_parse_json(raw)
+        if not parsed:
+            print(f"  [Manim] could not parse Claude response as JSON", flush=True)
+            print(f"  [Manim] raw (first 400): {raw[:400]}", flush=True)
+            send_to_client({
+                "type": "animation_error",
+                "message": "Failed to parse Manim response JSON",
+            })
+            return
+
+        class_name = parsed.get("class_name") or ""
+        manim_code = parsed.get("manim_code") or ""
+        if not class_name or not manim_code:
+            print(f"  [Manim] response missing class_name/manim_code: keys={list(parsed.keys())}",
+                  flush=True)
+            send_to_client({
+                "type": "animation_error",
+                "message": "Incomplete Manim response",
+            })
+            return
+
+        print(f"  [Manim] generated {class_name}: {len(manim_code)} chars — extracting…",
+              flush=True)
+
+        timeline = _extract_manim_to_json(manim_code, class_name)
+        if timeline is None:
+            send_to_client({
+                "type": "animation_error",
+                "message": "Failed to extract Manim scene",
+            })
+            return
+
+        n_mobj = len(timeline.get("mobjects", {}))
+        n_ev = len(timeline.get("timeline", []))
+        dur = timeline.get("total_duration_ms", 0)
+        print(
+            f"  [Manim] timeline: {n_mobj} mobjects, {n_ev} events, {dur}ms",
+            flush=True,
+        )
+
+        send_to_client({
+            "type": "animation_timeline",
+            "title": title_hint or class_name,
+            "timeline": timeline,
+        })
+        return
+    except Exception as e:
+        print(f"  [Manim] error: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        send_to_client({
+            "type": "animation_error",
+            "message": str(e),
+        })
+        return
+
+
+# ─── Legacy 12-template explanation (deprecated — kept for rollback safety) ───
+def _legacy_handle_explain_animation(msg):
     """Template-based explanation: single orchestrator call classifies + extracts data, browser renders."""
     selected_code = msg.get("selectedCode", "")
     full_code = msg.get("fullCode", "")
@@ -709,6 +1385,40 @@ Return ONLY a JSON object:
         })
 
 
+def _sanitize_json_candidate(s: str) -> str:
+    """Walk a JSON candidate and escape raw \n/\r/\t that appear INSIDE
+    string values (where strict JSON requires them escaped). No-op for
+    already-valid JSON. The model occasionally emits multi-line strings
+    in animation/fill_blank JSON; without this, json.loads() rejects
+    them with a JSONDecodeError.
+    """
+    out = []
+    in_str = False
+    esc = False
+    for c in s:
+        if esc:
+            out.append(c)
+            esc = False
+            continue
+        if c == '\\':
+            out.append(c)
+            esc = True
+            continue
+        if c == '"':
+            out.append(c)
+            in_str = not in_str
+            continue
+        if in_str:
+            if c == '\n':
+                out.append('\\n'); continue
+            if c == '\r':
+                out.append('\\r'); continue
+            if c == '\t':
+                out.append('\\t'); continue
+        out.append(c)
+    return ''.join(out)
+
+
 def _extract_typed_json(text, type_value):
     """Extract the first balanced-brace JSON object in ``text`` whose top-level
     ``type`` field equals ``type_value``. Handles nested braces, string
@@ -741,12 +1451,17 @@ def _extract_typed_json(text, type_value):
                 depth -= 1
                 if depth == 0:
                     candidate = text[start:i + 1]
+                    obj = None
                     try:
                         obj = json.loads(candidate)
-                        if isinstance(obj, dict) and obj.get("type") == type_value:
-                            return candidate, obj
                     except Exception:
-                        pass
+                        # Retry after sanitizing raw control chars inside strings
+                        try:
+                            obj = json.loads(_sanitize_json_candidate(candidate))
+                        except Exception:
+                            obj = None
+                    if isinstance(obj, dict) and obj.get("type") == type_value:
+                        return candidate, obj
                     i += 1
                     break
             i += 1
@@ -755,7 +1470,7 @@ def _extract_typed_json(text, type_value):
             break
     return None, None
 
-TUTOR_SYSTEM_PROMPT = """You are a world-class personal tutor coaching a user through technical learning (currently: Karpathy's "Let's Build GPT" tutorial). Your teaching philosophy is based on these core principles:
+TUTOR_SYSTEM_PROMPT = """You are a world-class personal tutor coaching a user through technical learning. The specific topic the user is studying is injected further down in the user context — do not assume any particular subject a priori. Your teaching philosophy is based on these core principles:
 
 ## CORE PRINCIPLES
 
@@ -822,15 +1537,16 @@ TUTOR_SYSTEM_PROMPT = """You are a world-class personal tutor coaching a user th
 - Concise and direct (user is ex-Google SWE, treat as intelligent adult)
 - Push when appropriate, but read the room
 - Natural conversation, not rigid Q&A format
-- Korean or English based on what user writes
+- Match the language the user writes in (the user may write in any language;
+  mirror their language without commenting on the choice)
 
 ## WHEN TO USE ANIMATIONS (VERY IMPORTANT — DO NOT SKIP)
 
 ### YOU CAN GENERATE ANIMATIONS
-The frontend has a template-based animation engine. When you emit a JSON
-object with `"type": "animation"`, the UI automatically opens a side panel
-and renders a multi-section animated visual explanation. This is a first-
-class capability of this tutor app.
+The frontend has a Manim-backed animation engine. When you emit a JSON
+object with `"type": "animation"`, the server writes a Manim scene,
+extracts it to a JSON timeline, and ships it to the side panel for live
+SVG playback. This is a first-class capability of this tutor app.
 
 **NEVER say "I can't create animations", "I don't have animation tools",
 "I can only use text", or anything similar.** You CAN. You do it by
@@ -886,6 +1602,105 @@ Rules for the animation JSON:
 - NEVER wrap the JSON in markdown code fences — emit it as raw text.
 - NEVER explain first and animate later. The JSON comes FIRST.
 
+### ONE CONCEPT PER ANIMATION (VERY IMPORTANT)
+Each animation teaches ONE atomic concept (~8 seconds of Manim).
+Do NOT try to cram multiple ideas into one animation.
+
+When a topic has multiple sub-concepts (e.g. "how does idx turn into
+(B,T,C)?" decomposes into: (1) what (B,T) means, (2) what the embedding
+table looks like, (3) the lookup op, (4) stacking into (B,T,C)):
+
+1. Decide the sequence yourself before emitting anything.
+2. In this turn, emit a `description` that targets ONLY the first
+   sub-concept. Write prose that teaches that single piece alongside it.
+3. End the turn with a check-in question (e.g. "Make sense so far?",
+   "Any questions before we move on?", or its equivalent in the user's
+   language) — a prose question (NOT a fill_blank) that invites the
+   user to confirm or ask follow-ups.
+4. On the user's next acknowledgment, emit ANOTHER animation JSON for
+   the second sub-concept. Repeat until the decomposition is done.
+5. After the final sub-concept, use a fill_blank to lock in the whole
+   chain.
+
+Do NOT emit multiple animation JSON objects in one reply. Exactly one
+per turn, at the start.
+
+### PROSE SCOPE MUST MATCH ANIMATION SCOPE (key rule)
+The prose you write must talk about ONLY what the current animation
+visualizes. Everything else is deferred to the next turn.
+
+Forbidden:
+- Foreshadowing concepts you'll cover in the next turn ("later we'll
+  add positional embedding…" — don't; cover that when you cover it)
+- Stating shape/dimension numbers in prose that the animation does
+  not show
+- Jumping from concrete to abstract ("so generalized this is (B,T,C)")
+  — abstraction belongs in its own turn
+- Introducing more than one new term per turn (e.g. "embedding table"
+  and "lookup" are two distinct terms — pick the one the animation
+  is highlighting)
+
+Rule of thumb: if the animation shows only "X → Y", the prose says
+only that X → Y. Never describe in words what the learner cannot see
+on the screen.
+
+### CHECK-IN QUESTION IS MANDATORY
+Every coach turn (including ones with an animation) must end with a
+check-in question. Use a phrasing natural in the user's language —
+e.g. in English:
+- "Make sense so far?"
+- "Any questions before we move on?"
+- "Want me to dig deeper anywhere here?"
+
+(Use the equivalent in whatever language the user is writing in.)
+
+A turn without a check-in question is incomplete. Letting the user
+push forward with a single "ok" / acknowledgment moves at the
+coach's pace, not the learner's.
+
+The check-in question does NOT replace fill_blank — the check-in
+goes at the end of every turn; fill_blank goes at the end of a
+concept block.
+
+### NO STAGE SKIPPING
+Do not omit intermediate operations that actually exist in the code
+or algorithm. Example: in BigramLanguageModel, after tok_emb the
+next step is (pos_emb addition →) lm_head, not lm_head directly.
+Do not collapse the shape chain into something simpler "for clarity"
+— follow the real forward order. Skip a stage only if the user
+explicitly asks you to.
+
+### HANDLING MULTI-STAGE PROCESS REQUESTS
+When the user signals they want to understand a multi-step process
+end-to-end (signals: "the whole thing", "end-to-end", "flow",
+"overview", "from start to finish", or any question about a named
+function/pipeline/algorithm's overall behavior — and the same in
+other languages):
+
+1. Do NOT emit animation JSON in this turn.
+2. Instead, present a decomposition plan in prose:
+   - Numbered list of N stages
+   - Each stage must be small enough to be ONE animation
+   - Use the actual code/concept terms for stage names (not generic
+     "step 1, 2, 3")
+3. Ask which stage to start from ("Start with #1? Or jump to a
+   specific stage?").
+4. Only after the user confirms, emit the animation for the chosen
+   stage.
+
+Example (when the user asks about BigramLanguageModel forward pass):
+> "Here's how I'll break this down:
+>  1. idx (B,T) — the input shape
+>  2. tok_emb lookup → (B,T,C)
+>  3. add pos_emb → (B,T,C)
+>  4. lm_head → (B,T,vocab_size)
+>  5. loss computation
+>  Start with #1?"
+
+Never compress a multi-stage process into a single animation. When
+the user asks about "the whole thing", they want a map, not a
+3-second compressed video.
+
 ## INLINE COMPREHENSION CHECKS (VERY IMPORTANT — DO NOT SKIP)
 
 ### YOU MUST USE FILL-IN-THE-BLANK CHECKS REGULARLY
@@ -909,9 +1724,10 @@ You MUST emit a fill_blank in any of these situations:
    explanation turn, append a fill_blank JSON that tests the KEY idea
    you just explained. Do this even if the user didn't ask for a quiz.
 
-2. **After the user says "makes sense", "I get it", "ok", "understood",
-   "알겠어", "이해했어", "오케이", or similar acknowledgment.** Their
-   acknowledgment means it's time to verify with a concrete check.
+2. **After any user acknowledgment** — e.g. "makes sense", "I get
+   it", "ok", "understood", "got it", or the equivalent in whatever
+   language the user is writing in. Their acknowledgment means it's
+   time to verify with a concrete check.
 
 3. **After every 2-3 substantive exchanges on the same topic.** Don't
    go more than ~3 turns of explanation without a fill_blank check.
@@ -1007,6 +1823,16 @@ def handle_chat_message(msg):
     if not text:
         return
 
+    # If the user has been idle longer than IDLE_THRESHOLD_MINUTES,
+    # treat that as the natural end of the prior learning session:
+    # close + analyze it (in background) and start a new DB session
+    # for this incoming message. Done before we save the message so
+    # save_message lands in the new session's row.
+    try:
+        _rotate_session_if_idle()
+    except Exception as _re:
+        print(f"  [Session] _rotate_session_if_idle raised: {_re}", flush=True)
+
     # SAFETY: if the chat state is missing a system prompt (e.g. server
     # restarted mid-conversation, or the browser sent chat_message without
     # ever calling chat_init first), auto-initialize it. Without this, the
@@ -1084,6 +1910,730 @@ def handle_chat_message(msg):
             return
 
 
+# ═══════════════════════════════════════════════════════════════════
+# APPRENTICESHIP MODE — new architecture (eval → generator → panels)
+# ═══════════════════════════════════════════════════════════════════
+
+APPRENTICE_MODEL = "claude-sonnet-4-20250514"
+NUM_DIAGNOSTIC_QUESTIONS = 3
+
+# MVP: skip diagnostic, use a fixed beginner profile so we can focus on the teaching flow.
+# Revive the diagnostic phase later once the teaching UX is stable.
+APPRENTICE_SKIP_DIAGNOSTIC = True
+HARDCODED_USER_STATE = {
+    "tier": "lower",
+    "tier_reasoning": "Hardcoded for MVP testing — treat as absolute beginner with strong motivation.",
+    "dominant_error_patterns": [],
+    "current_emotional_states": [
+        {"state": "B007", "intensity": "mid"}
+    ],
+    "summary_for_generator": (
+        "This learner is a complete beginner — knows essentially nothing about ML yet. "
+        "However they are motivated and willing to put in serious effort. "
+        "Use maximum scaffolding, strict one-concept-per-turn (P018), errorless learning (P007), "
+        "heavy inline completion prompts (P019), and P022 barrier reduction. "
+        "For T002 practice, give only the single most important substep at a time."
+    ),
+}
+
+_ontology_cache = None
+
+
+def _load_ontology():
+    """Load and cache ontology.json from project dir."""
+    global _ontology_cache
+    if _ontology_cache is None:
+        path = os.path.join(PROJECT_DIR, "ontology.json")
+        with open(path) as f:
+            _ontology_cache = json.load(f)
+        print(f"  [Ontology] loaded: {len(_ontology_cache.get('user_states', []))} states, "
+              f"{len(_ontology_cache.get('pedagogical_principles', []))} principles, "
+              f"{len(_ontology_cache.get('panels', []))} panels", flush=True)
+    return _ontology_cache
+
+
+def _parse_json_response(text):
+    """Parse JSON from LLM response, tolerant to surrounding text."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        import re as _re
+        m = _re.search(r'\{[\s\S]*\}', text)
+        if m:
+            return json.loads(m.group())
+        raise
+
+
+def _call_apprentice_llm(system_prompt, user_message="proceed", max_tokens=2048):
+    """Single-shot LLM call for eval/generator, returns parsed JSON."""
+    response = get_client().messages.create(
+        model=APPRENTICE_MODEL,
+        max_tokens=max_tokens,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_message}],
+    )
+    return _parse_json_response(response.content[0].text)
+
+
+# ─── Eval agent prompts ────────────────────────────────────────────
+
+def _eval_question_prompt(ontology, topic, history):
+    return f"""You are a diagnostic evaluator for a learning coach. The user wants to learn: {topic}
+
+Your job: generate ONE short-answer diagnostic question that assesses the learner's current level.
+
+These questions follow the "short-answer diagnostic" principle:
+- Answerable in 1-20 words
+- Wrong answers are informative (see error_taxonomy)
+- Probes: pattern recognition, working memory, transfer ability, attention to detail
+- Start foundational; escalate only if earlier answers show strong signal
+
+You have asked {len(history)} diagnostic question(s) so far of {NUM_DIAGNOSTIC_QUESTIONS} total.
+
+Previous Q&A:
+{json.dumps(history, indent=2, ensure_ascii=False) if history else "(none yet)"}
+
+Reference — error_taxonomy (what wrong answers reveal):
+{json.dumps(ontology["error_taxonomy"], indent=2, ensure_ascii=False)}
+
+Reference — diagnostic_cues:
+{json.dumps(ontology["diagnostic_cues"], indent=2, ensure_ascii=False)}
+
+Output ONLY a JSON object:
+{{
+  "question": "the diagnostic question in the user's language",
+  "example_shown": "optional example shown before the question, or null",
+  "ideal_answer": "what a correct answer would look like",
+  "tests_for": "what this question is probing"
+}}"""
+
+
+def _eval_observe_prompt(ontology, topic, question_obj, user_answer):
+    return f"""You are a diagnostic evaluator analyzing a single user answer.
+
+Topic: {topic}
+
+Question asked:
+{json.dumps(question_obj, indent=2, ensure_ascii=False)}
+
+User's answer: "{user_answer}"
+
+Reference — error_taxonomy:
+{json.dumps(ontology["error_taxonomy"], indent=2, ensure_ascii=False)}
+
+Reference — diagnostic_cues:
+{json.dumps(ontology["diagnostic_cues"], indent=2, ensure_ascii=False)}
+
+Reference — user_states:
+{json.dumps(ontology["user_states"], indent=2, ensure_ascii=False)}
+
+Output ONLY a JSON object:
+{{
+  "error_type": "E001-E007 or null if correct",
+  "error_reasoning": "why you chose this error_type",
+  "cue_ratings": {{
+    "D001_relevance": "high | mid | low",
+    "D002_orthographic": "high | mid | low",
+    "D003_completeness": "high | mid | low"
+  }},
+  "observed_states": [
+    {{ "state": "B0XX", "intensity": "low | mid | high" }}
+  ],
+  "notes": "brief observation"
+}}"""
+
+
+def _eval_conclude_prompt(ontology, topic, diagnostic_log):
+    return f"""You are a diagnostic evaluator. The diagnostic phase is complete.
+
+Topic: {topic}
+
+Diagnostic log:
+{json.dumps(diagnostic_log, indent=2, ensure_ascii=False)}
+
+Synthesize the learner's profile.
+
+Tier definitions:
+- upper: pattern recognition + transfer + attention to detail all strong
+- upper-mid: mostly correct with minor syntactic or completeness issues
+- mid: can reproduce but struggles to modify; some orthographic slips
+- lower-mid: incomplete answers, fragments, low attention to detail
+- lower: single elements, no structure, minimal engagement
+- lowest: avoidance, irrelevant, or complete disconnect
+
+Output ONLY a JSON object:
+{{
+  "tier": "upper | upper-mid | mid | lower-mid | lower | lowest",
+  "tier_reasoning": "1-2 sentences",
+  "dominant_error_patterns": ["E0XX", ...],
+  "current_emotional_states": [
+    {{ "state": "B0XX", "intensity": "low | mid | high" }}
+  ],
+  "summary_for_generator": "3-5 sentence narrative in the voice of a tutor briefing another tutor"
+}}"""
+
+
+# ─── Generator agent prompt ────────────────────────────────────────
+
+def _generator_system_prompt(ontology, topic, user_state, lesson_plan):
+    plan_section = (
+        json.dumps(lesson_plan, indent=2, ensure_ascii=False)
+        if lesson_plan
+        else "(no lesson plan yet — create one in your next turn if T002 applies)"
+    )
+
+    return f"""You are an expert learning coach. Your job is to teach the user about: {topic}
+
+CRITICAL — TOPIC vs DIAGNOSTIC CONTEXT:
+- The user's ACTUAL learning goal is: "{topic}". This is what you teach.
+- The diagnostic phase may have touched on DIFFERENT sub-topics (e.g., specific prerequisites) only to assess the learner's level.
+- DO NOT teach the diagnostic sub-topics as the main lesson. DO NOT continue asking diagnostic-style questions.
+- DO NOT ask more short-answer assessment questions. The diagnostic phase is COMPLETE.
+- Your entire teaching arc must be about "{topic}".
+
+═══════════════════════════════════════════════════════════
+LEARNER PROFILE (from diagnostic phase — used to adapt your teaching style, NOT to choose what to teach)
+═══════════════════════════════════════════════════════════
+
+{json.dumps(user_state, indent=2, ensure_ascii=False)}
+
+Adapt your teaching STYLE (not your TOPIC) based on this profile:
+- If tier is lower/lower-mid: maximize scaffolding, strict P018, errorless learning (P007), heavy P019 inline prompts, P022 barrier reduction. For T002 practice: only the single most important substep.
+- If tier is mid: standard scaffolding, still err on errorless, frequent check-ins. For T002 practice: 1-2 key substeps.
+- If tier is upper-mid: standard approach, can use socratic questioning. For T002 practice: most substeps.
+- If tier is upper: socratic questioning (P020), desirable difficulty (P016), less scaffolding. For T002 practice: all substeps.
+
+═══════════════════════════════════════════════════════════
+CURRENT LESSON PLAN (fixed once created this session)
+═══════════════════════════════════════════════════════════
+
+{plan_section}
+
+═══════════════════════════════════════════════════════════
+OUTPUT FORMAT (always this exact JSON)
+═══════════════════════════════════════════════════════════
+
+{{
+  "message": "short chat message — keep it EMPTY or brief; the cell carries the lesson.",
+  "chat_mode": "minimized | expanded",
+  "await_user": false,
+  "panels": [
+    {{
+      "type": "panel_apprentice_demo",
+      "action": "open | update",
+      "content": {{
+        "title": "string",
+        "language": "string",
+        "substeps": [
+          {{
+            "substep_id": "s1",
+            "label": "short label",
+            "pass_1": {{ "big_display": "string", "caption": "string" }},
+            "pass_2": {{
+              "blocks": [
+                {{ "type": "comment", "text": "# planning comment" }},
+                {{ "type": "code", "text": "actual_code()" }},
+                {{ "type": "narrative", "text": "why this matters, context, gotchas" }}
+              ]
+            }}
+          }}
+        ],
+        "focused_substep_id": "s1"
+      }}
+    }}
+  ],
+  "lesson_plan": {{
+    "topic": "string",
+    "substeps": [
+      {{ "substep_id": "s1", "label": "short label", "key_idea": "what this substep accomplishes" }}
+    ],
+    "practice_substep_ids": ["s1"]
+  }},
+  "meta": {{
+    "principle_used": "P0XX",
+    "pattern": "T0XX or null",
+    "pattern_step": "step name or null"
+  }}
+}}
+
+Include "lesson_plan" ONLY on the plan turn (T002 step="plan"). Otherwise omit.
+Once a lesson_plan exists above, DO NOT modify it — it is fixed for the session.
+
+chat_mode guidance:
+- "minimized" (default): short message in collapsed chat handle
+- "expanded": use only when the user asks a question or needs a longer explanation that cannot fit next to the panels
+
+═══════════════════════════════════════════════════════════
+TEACHING PRINCIPLES
+═══════════════════════════════════════════════════════════
+
+{json.dumps(ontology["pedagogical_principles"], indent=2, ensure_ascii=False)}
+
+═══════════════════════════════════════════════════════════
+AVAILABLE PANELS
+═══════════════════════════════════════════════════════════
+
+{json.dumps(ontology["panels"], indent=2, ensure_ascii=False)}
+
+═══════════════════════════════════════════════════════════
+TEACHING PATTERNS
+═══════════════════════════════════════════════════════════
+
+{json.dumps(ontology["teaching_patterns"], indent=2, ensure_ascii=False)}
+
+═══════════════════════════════════════════════════════════
+RULES
+═══════════════════════════════════════════════════════════
+
+- Respond in the same language the user writes in
+- Apply ONE concept per turn/cell (P018)
+- Start concrete, move to abstract (P011)
+- panel_animation is NOT AVAILABLE in this build. Do not emit panel_animation.
+- panel_apprentice_practice is NOT AVAILABLE in this build (deferred).
+
+═══════════════════════════════════════════════════════════
+T002 FLOW — plan, then one-cell-per-turn
+═══════════════════════════════════════════════════════════
+
+TURN 1 (plan):
+  - Execute T002 step="plan". Emit the "lesson_plan" JSON field with substeps decomposed for the topic.
+  - Chat message: brief 1-liner like "Here's our plan — starting with the first step."
+  - NO panel updates in this turn. focused_substep_id is not yet set.
+
+TURN 2 (first cell) and every subsequent TURN (next cell):
+  - Emit ONE panel_apprentice_demo update.
+  - action: "open" on TURN 2, "update" thereafter.
+  - substeps: the full list of cells emitted so far, PLUS the new one. Always include prior cells so the
+    frontend can reconcile and keep them rendered with their pass_1 + pass_2 content intact.
+  - focused_substep_id: the NEW (most recently added) substep_id.
+  - Chat message empty or a single short sentence.
+  - await_user: false while cells remain in the lesson_plan; true only when the walkthrough is complete.
+
+═══════════════════════════════════════════════════════════
+CELL STRUCTURE (each substep cell deepens INSIDE itself)
+═══════════════════════════════════════════════════════════
+
+Each cell carries BOTH layers in the same update:
+
+  pass_1 — BIG PICTURE (rendered first)
+    - big_display: a concrete artifact shown at large font. The emotional hook — a real string, a short
+      list, a formula, a numeric example. Keep it simple. Empty string is allowed if label + caption
+      alone make the point.
+    - caption: one plain-language sentence saying what this step is about.
+
+  pass_2 — INTERLEAVED COMMENTS + CODE + NARRATIVE (types in under a divider)
+    - blocks: an ORDERED list of {{ type, text }} items. You (the coach) choose the order and count.
+    - Three block types, each with a distinct role:
+        * type: "comment"   — # planning comments an engineer would write BEFORE the next code block.
+                              Example: "# read the entire text into one long string\\n# this is our dataset"
+                              Each line must start with "#". Multiple lines allowed.
+        * type: "code"      — real Python (or target language) that IMPLEMENTS the preceding comment block.
+                              No "#" prefix. Actual, runnable code.
+                              Example: "with open('input.txt', 'r') as f:\\n    text = f.read()"
+        * type: "narrative" — the coach speaking TO the learner — context, reasoning, why this matters,
+                              gotchas, analogies. Prose style. NOT code, NOT # comments.
+                              Example: "This becomes the dataset the model learns from. The patterns in
+                              these characters are what it will try to mimic."
+
+    - Typical patterns (but NOT prescribed — coach decides):
+        comment → code → narrative
+        narrative → comment → code → comment → code
+        comment → code → narrative → code → comment → code
+      Pick the flow that best teaches THIS substep. Let the pedagogy lead the structure.
+
+    - Total blocks per cell: 3-7 is typical. More if the substep genuinely needs it.
+
+    - Block guidance:
+        * Comments state INTENT ("# ..."); code DELIVERS it. Keep them close — a comment block should
+          usually be followed by the code that implements it.
+        * Narrative explains WHY or REFRAMES — use it when the code alone won't land the concept,
+          or when the learner needs context before/after seeing the code.
+        * Never write comments that just re-describe the next line. Comments should teach the plan;
+          code should execute the plan.
+
+  NO blanks, NO questions in this build. Those are deferred to a future pass.
+
+═══════════════════════════════════════════════════════════
+CELL DESIGN GUIDANCE
+═══════════════════════════════════════════════════════════
+
+  - Each cell's big_display should be as CONCRETE as possible. Prefer an actual example the learner can
+    read over an abstract description.
+      GOOD: big_display = 'text = "First Citizen: Before we proceed any further, hear me speak."'
+      BAD : big_display = 'The raw text data'
+  - Captions: plain language, under ~15 words ideal.
+  - CONSISTENCY: caption and big_display must match. If the caption says "the complete works of
+    Shakespeare" the big_display MUST end with "..." to signal truncation. When big_display is a
+    snippet of something larger, end with "..." and phrase the caption accordingly ("Here's a snippet
+    of the training text").
+  - RESPECT THE SOURCE. If the topic references a specific source (tutorial, textbook, paper, lecture),
+    your artifacts and pseudo-code MUST match what that source actually uses — not a generic
+    reinvention. Example: "Karpathy's Let's Build GPT" uses slicing like
+    `x = data[i:i+block_size]; y = data[i+1:i+block_size+1]`, NOT `for i in range: ...` Python loops.
+    If the exact source conventions are uncertain, pick idiomatic library code over naive loops.
+  - Pseudo-code lines should carry WHY, not just WHAT. "# for each training pair" is weak.
+    "# for each training pair (x[i], y[i]), increment N[x[i], y[i]] — this accumulates the bigram
+    counts" is strong.
+
+EXAMPLE CELL (topic: Karpathy's Bigram Language Model, beginner learner):
+{{
+  "substep_id": "s2",
+  "label": "Build character vocabulary",
+  "pass_1": {{
+    "big_display": "[' ', '!', '$', '&', ',', '-', '.', ':', ';', '?', 'A', 'B', 'C', ..., 'z']",
+    "caption": "We collect every unique character in the text — this is our vocabulary."
+  }},
+  "pass_2": {{
+    "blocks": [
+      {{ "type": "comment", "text": "# take the set of characters that appear in text\\n# sort them so indexing is stable across runs" }},
+      {{ "type": "code", "text": "chars = sorted(list(set(text)))\\nvocab_size = len(chars)" }},
+      {{ "type": "narrative", "text": "The position of each character in this sorted list becomes its integer token id — the model will always see 'a' as the same number." }},
+      {{ "type": "comment", "text": "# build two lookup tables: char→int for encoding, int→char for decoding" }},
+      {{ "type": "code", "text": "stoi = {{ch: i for i, ch in enumerate(chars)}}\\nitos = {{i: ch for i, ch in enumerate(chars)}}" }}
+    ]
+  }}
+}}
+
+═══════════════════════════════════════════════════════════
+OUTPUT RULES
+═══════════════════════════════════════════════════════════
+
+- DO NOT narrate cells in chat. Caption + pseudo_code carry the lesson. Chat stays empty or one short
+  acknowledgment.
+- DO NOT emit panel_animation or panel_apprentice_practice updates.
+- EACH turn after plan delivers exactly ONE new cell, with ALL prior cells still present in the
+  substeps array (so the frontend can render stable state).
+- ALWAYS output valid JSON — no plain text.
+"""
+
+
+# ─── WS handlers ───────────────────────────────────────────────────
+
+def handle_apprentice_start(msg):
+    """Kick off a new apprenticeship session.
+
+    If APPRENTICE_SKIP_DIAGNOSTIC is True, uses a hardcoded beginner user_state
+    and jumps straight to the teaching phase. Otherwise runs the diagnostic flow.
+    """
+    topic = (msg.get("topic") or "").strip()
+    if not topic:
+        send_to_client({"type": "apprentice_error", "message": "topic is required"})
+        return
+
+    ctx = _ctx()
+    if not ctx:
+        return
+
+    ctx.apprentice["topic"] = topic
+    ctx.apprentice["diagnostic_log"] = []
+    ctx.apprentice["user_state"] = None
+    ctx.apprentice["lesson_plan"] = None
+    ctx.apprentice["messages"] = []
+
+    if APPRENTICE_SKIP_DIAGNOSTIC:
+        # Bypass diagnostic — hardcoded beginner profile
+        ctx.apprentice["user_state"] = dict(HARDCODED_USER_STATE)
+        print(f"  [Apprentice] start: topic='{topic}' (diagnostic SKIPPED, tier=lower hardcoded)",
+              flush=True)
+
+        send_to_client({
+            "type": "apprentice_greeting",
+            "message": f"Great — let's start on {topic}. I'll sketch a short plan tailored to your level first.",
+        })
+
+        # Also notify client that diagnostic is "done" so chat auto-expands
+        send_to_client({
+            "type": "apprentice_diagnostic_done",
+            "user_state": ctx.apprentice["user_state"],
+        })
+
+        # Prime generator with T002 plan directive
+        priming = (
+            f"[system] My learning goal is: {topic}. "
+            f"No diagnostic was run — assume I am a complete beginner with strong motivation. "
+            f"Please execute T002 step=\"plan\" NOW. "
+            f"Decompose {topic} into 4-8 substeps appropriate for tier=lower (small, gentle steps). "
+            f"Output the lesson_plan field in your JSON. "
+            f"In the chat message say one short line like 'Here's our plan — starting with the first step.'. "
+            f"Do NOT emit panel updates in this turn. The first substep cell will be delivered in the next turn."
+        )
+        # Plan turn: explicitly strip panels in case the generator ignores the instruction
+        _run_generator_turn(ctx, priming, strip_panels=True)
+
+        # After plan is created, auto-trigger the first cell (model step)
+        _request_first_cell(ctx)
+        return
+
+    # Full flow: run diagnostic
+    print(f"  [Apprentice] start: topic='{topic}'", flush=True)
+    send_to_client({
+        "type": "apprentice_greeting",
+        "message": f"Great — let's get started on {topic}. First, a few short questions to figure out your current level.",
+    })
+    _ask_next_diagnostic(ctx)
+
+
+def _ask_next_diagnostic(ctx):
+    """Generate and send the next diagnostic question (or conclude)."""
+    ontology = _load_ontology()
+    topic = ctx.apprentice["topic"]
+    log = ctx.apprentice["diagnostic_log"]
+
+    if len(log) >= NUM_DIAGNOSTIC_QUESTIONS:
+        _conclude_diagnostic(ctx)
+        return
+
+    try:
+        q = _call_apprentice_llm(_eval_question_prompt(ontology, topic, log))
+    except Exception as e:
+        print(f"  [Apprentice] eval question gen failed: {e}", flush=True)
+        send_to_client({"type": "apprentice_error", "message": "Failed to generate a diagnostic question. Please try again."})
+        return
+
+    # Store the current question on ctx so we know what the next answer is for
+    ctx.apprentice["_current_question"] = q
+
+    send_to_client({
+        "type": "apprentice_diagnostic_question",
+        "q_index": len(log),
+        "total": NUM_DIAGNOSTIC_QUESTIONS,
+        "question": q.get("question", ""),
+        "example_shown": q.get("example_shown"),
+        "tests_for": q.get("tests_for", ""),
+    })
+
+
+def handle_apprentice_diagnostic(msg):
+    """Receive an answer to a diagnostic question, observe, then ask next or conclude."""
+    answer = (msg.get("answer") or "").strip()
+    ctx = _ctx()
+    if not ctx:
+        return
+
+    q = ctx.apprentice.get("_current_question")
+    if not q:
+        send_to_client({"type": "apprentice_error", "message": "no active diagnostic question"})
+        return
+
+    ontology = _load_ontology()
+    topic = ctx.apprentice["topic"]
+
+    try:
+        observation = _call_apprentice_llm(_eval_observe_prompt(ontology, topic, q, answer))
+    except Exception as e:
+        print(f"  [Apprentice] eval observe failed: {e}", flush=True)
+        observation = {"error_type": None, "notes": f"(observation failed: {e})"}
+
+    ctx.apprentice["diagnostic_log"].append({
+        "question": q,
+        "answer": answer,
+        "observation": observation,
+    })
+
+    print(f"  [Apprentice] diag Q{len(ctx.apprentice['diagnostic_log'])}: "
+          f"error_type={observation.get('error_type')} notes={observation.get('notes', '')[:80]}",
+          flush=True)
+
+    _ask_next_diagnostic(ctx)
+
+
+def _conclude_diagnostic(ctx):
+    """Eval synthesizes user_state, send to client, ready for teaching."""
+    ontology = _load_ontology()
+    topic = ctx.apprentice["topic"]
+
+    try:
+        user_state = _call_apprentice_llm(
+            _eval_conclude_prompt(ontology, topic, ctx.apprentice["diagnostic_log"])
+        )
+    except Exception as e:
+        print(f"  [Apprentice] eval conclude failed: {e}", flush=True)
+        user_state = {
+            "tier": "mid",
+            "tier_reasoning": "diagnostic conclusion failed; defaulting to mid",
+            "dominant_error_patterns": [],
+            "current_emotional_states": [],
+            "summary_for_generator": "Diagnostic failed. Treat as mid-tier learner with unknown specifics.",
+        }
+
+    ctx.apprentice["user_state"] = user_state
+    print(f"  [Apprentice] diagnostic done: tier={user_state.get('tier')}", flush=True)
+
+    send_to_client({
+        "type": "apprentice_diagnostic_done",
+        "user_state": user_state,
+    })
+
+    # Auto-start teaching with a strong priming message that forces T002 plan on turn 1
+    priming = (
+        f"[system] Diagnostic is complete. My learning goal is: {topic}. "
+        f"Please execute T002 step=\"plan\" NOW. "
+        f"Decompose {topic} into substeps appropriate for my tier. "
+        f"Output the lesson_plan field in your JSON response. "
+        f"Do not ask any more diagnostic questions. Do not start teaching content in this turn — "
+        f"only produce the lesson plan and a brief acknowledgment message."
+    )
+    _run_generator_turn(ctx, priming)
+
+
+def handle_apprentice_chat(msg):
+    """User sends a chat message during the teaching phase."""
+    text = (msg.get("message") or "").strip()
+    if not text:
+        return
+    ctx = _ctx()
+    if not ctx:
+        return
+    if not ctx.apprentice.get("user_state"):
+        send_to_client({"type": "apprentice_error", "message": "diagnostic not complete"})
+        return
+    _run_generator_turn(ctx, text)
+
+
+def handle_apprentice_practice_submit(msg):
+    """User submits a practice attempt for a substep."""
+    substep_id = msg.get("substep_id", "")
+    code = msg.get("code", "")
+    ctx = _ctx()
+    if not ctx:
+        return
+
+    # Pass the submission to generator as a structured user turn
+    submission_msg = (
+        f"[practice_submit] substep_id={substep_id}\n"
+        f"```\n{code}\n```\n"
+        f"Please review and give red-pen feedback. Then decide if the user is ready for the next step."
+    )
+    _run_generator_turn(ctx, submission_msg)
+
+
+def _request_first_cell(ctx):
+    """After the plan turn, ask the generator to deliver the FIRST substep cell."""
+    priming = (
+        "[system] The lesson plan is set. Now deliver the FIRST substep cell.\n"
+        "- Emit a SINGLE panel_apprentice_demo update with action:\"open\", containing ONE substep "
+        "in the substeps array — the first substep from the lesson_plan.\n"
+        "- The substep must carry BOTH pass_1 AND pass_2 content:\n"
+        "    pass_1: { big_display, caption }\n"
+        "    pass_2: { pseudo_code }   # 3-6 lines of # comments\n"
+        "- focused_substep_id must equal the substep_id of the cell you just emitted.\n"
+        "- Keep the chat message empty or a single short sentence.\n"
+        "- Set await_user: false. The frontend will automatically ask for the next cell when this one "
+        "finishes rendering."
+    )
+    _run_generator_turn(ctx, priming)
+
+
+def handle_apprentice_continue(msg):
+    """Frontend finished rendering the current cell and wants the next one.
+
+    The current substep's blank answer (if any) is included so the generator knows
+    how the learner did.
+    """
+    ctx = _ctx()
+    if not ctx:
+        return
+
+    substep_id = msg.get("substep_id", "")
+    user_answer = msg.get("user_answer", "")
+    answer_correct = msg.get("answer_correct", None)
+
+    priming_parts = [
+        "[system] The learner finished rendering the current cell. Deliver the NEXT substep cell.",
+    ]
+    if substep_id:
+        priming_parts.append(f"Cell just completed: {substep_id}.")
+    if user_answer:
+        status = "correct" if answer_correct else "incorrect" if answer_correct is False else "(no check)"
+        priming_parts.append(f"Their blank answer: '{user_answer}' ({status}).")
+    priming_parts.append(
+        "Emit a SINGLE panel_apprentice_demo update with action:\"update\". "
+        "The substeps array must contain ALL substeps emitted so far (including prior cells) PLUS the "
+        "next one from the lesson_plan. Each substep MUST carry both pass_1 and pass_2 content. "
+        "Set focused_substep_id to the NEW substep_id. Chat message empty or one short sentence. "
+        "Set await_user: false. If the lesson_plan is exhausted, set await_user: true and message "
+        "the learner that the walkthrough is complete."
+    )
+    priming = " ".join(priming_parts)
+    _run_generator_turn(ctx, priming)
+
+
+def _run_generator_turn(ctx, user_message, strip_panels=False):
+    """One generator turn: build prompt, call, parse, dispatch panel updates.
+
+    strip_panels=True clears the `panels` field before dispatch — useful for
+    the plan turn, where the model is told not to emit panels but sometimes does.
+    """
+    ontology = _load_ontology()
+    topic = ctx.apprentice["topic"]
+    user_state = ctx.apprentice.get("user_state")
+    lesson_plan = ctx.apprentice.get("lesson_plan")
+    history = ctx.apprentice["messages"]
+
+    history.append({"role": "user", "content": user_message})
+
+    system = _generator_system_prompt(ontology, topic, user_state, lesson_plan)
+
+    try:
+        response = get_client().messages.create(
+            model=APPRENTICE_MODEL,
+            max_tokens=20000,  # large enough for detailed animation scenes (~40-80 timeline steps)
+            system=system,
+            messages=history,
+        )
+        raw = response.content[0].text
+    except Exception as e:
+        print(f"  [Apprentice] generator call failed: {e}", flush=True)
+        send_to_client({"type": "apprentice_error", "message": f"generator error: {e}"})
+        history.pop()  # drop the user message we just added so retry works
+        return
+
+    history.append({"role": "assistant", "content": raw})
+
+    try:
+        parsed = _parse_json_response(raw)
+    except Exception as e:
+        print(f"  [Apprentice] generator response not JSON: {e}; raw head: {raw[:200]}", flush=True)
+        send_to_client({
+            "type": "apprentice_teach",
+            "message": raw,  # fall back to raw text
+            "chat_mode": "expanded",
+            "panels": [],
+            "meta": {},
+        })
+        return
+
+    # Capture lesson_plan on first creation only (fixed after)
+    if parsed.get("lesson_plan") and ctx.apprentice.get("lesson_plan") is None:
+        ctx.apprentice["lesson_plan"] = parsed["lesson_plan"]
+        print(f"  [Apprentice] lesson_plan created: "
+              f"{len(parsed['lesson_plan'].get('substeps', []))} substeps, "
+              f"practice on {parsed['lesson_plan'].get('practice_substep_ids', [])}",
+              flush=True)
+
+    meta = parsed.get("meta", {}) or {}
+    panels_out = parsed.get("panels", []) or []
+    if strip_panels and panels_out:
+        print(f"  [Apprentice] stripping {len(panels_out)} unsolicited panel(s) from plan turn: "
+              f"{[p.get('type') for p in panels_out]}", flush=True)
+        panels_out = []
+
+    print(f"  [Apprentice] turn: principle={meta.get('principle_used')} "
+          f"pattern={meta.get('pattern')} step={meta.get('pattern_step')} "
+          f"panels={[p.get('type') for p in panels_out]}",
+          flush=True)
+
+    send_to_client({
+        "type": "apprentice_teach",
+        "message": parsed.get("message", ""),
+        "chat_mode": parsed.get("chat_mode", "minimized"),
+        "await_user": parsed.get("await_user", False),
+        "panels": panels_out,
+        "meta": meta,
+        "lesson_plan": ctx.apprentice.get("lesson_plan"),
+    })
+
+
 _teaching_style = {}  # Extracted from previous insights at session start
 
 
@@ -1106,14 +2656,14 @@ def extract_teaching_style():
 
     insights_block = "\n---\n".join(insights_text)
 
-    system = """아래 3개 세션 분석 결과를 보고, 이 학습자에게 최적화된 교육 방식을 추출해줘.
+    system = """Given the analysis of this learner's 3 most recent sessions, extract the teaching style that works best for them.
 
-다음 형태로만 리턴해줘:
+Return ONLY this JSON shape:
 {
-  "explanation_style": "구체적 선호 방식",
-  "pacing": "속도 관련 특성",
-  "challenge_level": "도전 수준 권장사항",
-  "conversation_flow": "대화 진행 방식 선호"
+  "explanation_style": "<specific preferred mode>",
+  "pacing": "<speed-related trait>",
+  "challenge_level": "<recommended challenge level>",
+  "conversation_flow": "<preferred conversational flow>"
 }
 
 - Be very specific and actionable, not generic
@@ -1130,7 +2680,7 @@ def extract_teaching_style():
                 max_tokens=400,
                 system=system,
                 messages=[
-                    {"role": "user", "content": f"과거 세션 분석 결과:\n{insights_block}"},
+                    {"role": "user", "content": f"Past session analysis results:\n{insights_block}"},
                     {"role": "assistant", "content": "{"},
                 ],
             ) as stream_resp:
@@ -1162,11 +2712,18 @@ def extract_teaching_style():
             return
 
 
-def analyze_session_and_save():
-    """Called when session ends. Analyze all messages and save insight."""
-    messages = db.get_session_messages()
+def analyze_session_and_save(session_id: str | None = None):
+    """Analyze a session's transcript and persist an insight row.
+
+    `session_id` lets the caller analyze a specific session (e.g. an
+    orphaned prior session, or the session being rotated out by the
+    idle-timeout helper). If omitted, falls back to the current
+    thread-local session via db._sid().
+    """
+    messages = db.get_session_messages(session_id)
     if len(messages) < 4:  # Need at least a few exchanges to analyze
-        print("  [Insight] Too few messages to analyze, skipping")
+        sid_label = session_id or 'current'
+        print(f"  [Insight] Too few messages to analyze ({len(messages)}) for session {sid_label}, skipping")
         return
 
     # Build transcript
@@ -1235,11 +2792,11 @@ def analyze_session_and_save():
                     raw = raw[:end_pos]
                 analysis = json.loads(raw)
                 print("\n" + "=" * 60)
-                print("📊 SESSION INSIGHT (saving to DB)")
+                print(f"📊 SESSION INSIGHT (saving to DB) — session {session_id or 'current'}")
                 print("=" * 60)
                 print(json.dumps(analysis, indent=2, ensure_ascii=False))
                 print("=" * 60 + "\n")
-                db.save_insight(analysis)
+                db.save_insight(analysis, session_id=session_id)
                 return
             except Exception as e:
                 if "overloaded" in str(e).lower() and attempt < 1:
@@ -1248,6 +2805,148 @@ def analyze_session_and_save():
                 raise
     except Exception as e:
         print(f"  [Insight] Analysis failed: {e}")
+
+
+# ─── Session lifecycle: idle rotation + orphan cleanup ────────────
+#
+# A "session" in this app means "one focused learning unit", not "one
+# WebSocket connection lifetime". Two helpers below realize that:
+#
+#   1. _rotate_session_if_idle(): on every chat_message we check the
+#      gap since the last message in the current session. If it
+#      exceeds IDLE_THRESHOLD_MINUTES, we close+analyze the prior
+#      session and open a fresh one for the incoming message. This is
+#      what makes a 3-hour "I closed my laptop and came back" gap
+#      register as two sessions instead of one.
+#
+#   2. _cleanup_orphan_sessions_async(): on connect, drain any of the
+#      user's prior sessions that still have end_time IS NULL. Those
+#      are sessions where the WS-disconnect handler never ran cleanly
+#      (process kill, OS sleep, daemon thread killed). Without this
+#      net, those sessions silently never get analyzed.
+
+IDLE_THRESHOLD_MINUTES = 20
+
+
+def _parse_db_timestamp(ts_str):
+    """Parse a DB timestamp string into datetime. Tolerant of either
+    isoformat (sessions/insights) or "YYYY-MM-DD HH:MM:SS" (messages)."""
+    if not ts_str:
+        return None
+    from datetime import datetime as _dt
+    for fmt in (None,):  # try fromisoformat first (handles both forms in py3.11+)
+        try:
+            return _dt.fromisoformat(ts_str)
+        except Exception:
+            pass
+    try:
+        return _dt.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return None
+
+
+def _rotate_session_if_idle():
+    """Called at the top of handle_chat_message. If the gap since the
+    last message in the current session exceeds IDLE_THRESHOLD_MINUTES,
+    end+analyze the prior session and start a new one for the user.
+
+    Done synchronously enough that the incoming message lands in the
+    NEW session — but the analyzer itself runs in a background thread
+    so the user doesn't wait on Claude.
+    """
+    ctx = _ctx()
+    if not ctx or not ctx.user_id:
+        return
+    prior_sid = ctx.db_session_id or db.get_session_id()
+    if not prior_sid:
+        return
+
+    last_ts_str = db.get_last_activity_time(prior_sid)
+    if not last_ts_str:
+        return  # no messages yet → nothing to rotate
+
+    from datetime import datetime as _dt
+    last_ts = _parse_db_timestamp(last_ts_str)
+    if not last_ts:
+        return
+    gap_min = (_dt.now() - last_ts).total_seconds() / 60.0
+    if gap_min < IDLE_THRESHOLD_MINUTES:
+        return
+
+    print(f"  [Session] Idle {gap_min:.1f}min > {IDLE_THRESHOLD_MINUTES}min — rotating "
+          f"session {prior_sid} → new session", flush=True)
+
+    # Close the prior session row immediately so it shows up as ended
+    # in queries, and so the orphan-cleanup pass on next connect won't
+    # pick it up.
+    try:
+        db.end_session(session_id=prior_sid)
+    except Exception as e:
+        print(f"  [Session] end_session({prior_sid}) failed: {e}", flush=True)
+
+    # Analyze in background — don't block the user's incoming message.
+    captured_uid = ctx.user_id
+    def _analyze_in_bg(_uid=captured_uid, _sid=prior_sid):
+        try:
+            db.set_thread_user(_uid, _sid)
+            analyze_session_and_save(session_id=_sid)
+        except Exception as e:
+            print(f"  [Session] background analyze of {_sid} failed: {e}", flush=True)
+    threading.Thread(target=_analyze_in_bg, daemon=True).start()
+
+    # Start a new DB session for the incoming message. set_thread_user
+    # rebinds db's per-thread session id; start_session creates the row
+    # and updates user_state.
+    db.set_thread_user(ctx.user_id, None)
+    db.start_session(study_topic=ctx.study_topic or "")
+    new_sid = db.get_session_id()
+    ctx.db_session_id = new_sid
+    print(f"  [Session] New session started for {ctx.user_id}: {new_sid}", flush=True)
+    # Note: we deliberately keep _chat_state.messages (LLM short-term
+    # context). Analytics splits, conversational continuity stays.
+
+
+def _cleanup_orphan_sessions_async(user_id):
+    """Find any prior sessions for `user_id` that were never cleanly
+    ended (end_time IS NULL) and run analyze + end on each, in a
+    background thread.
+
+    The orphan list is SNAPSHOTTED here (in the calling thread) before
+    the background work begins, so that any new session created right
+    after this call by start_session() will not be picked up. The
+    background thread then iterates that fixed snapshot — even if more
+    sessions become open later, they're not in scope for this drain.
+
+    Idempotent — safe to call repeatedly; sessions already analyzed
+    become end_time-stamped and won't reappear in future snapshots.
+    """
+    if not user_id:
+        return
+    try:
+        orphans = db.get_open_sessions_for_user(user_id)
+    except Exception as e:
+        print(f"  [Orphan] lookup failed for {user_id}: {e}", flush=True)
+        return
+    if not orphans:
+        return
+    snapshot = [(o["session_id"], o.get("n_msgs", 0)) for o in orphans]
+
+    def _do(_uid=user_id, _items=snapshot):
+        print(f"  [Orphan] Found {len(_items)} unfinished session(s) for {_uid} — draining", flush=True)
+        for sid, n in _items:
+            try:
+                db.set_thread_user(_uid, sid)
+                # analyze_session_and_save bails internally if msgs < 4
+                analyze_session_and_save(session_id=sid)
+            except Exception as e:
+                print(f"  [Orphan] analyze {sid} (n_msgs={n}) failed: {e}", flush=True)
+            try:
+                db.end_session(session_id=sid)
+            except Exception as e:
+                print(f"  [Orphan] end {sid} failed: {e}", flush=True)
+        print(f"  [Orphan] Drain complete for {_uid}", flush=True)
+
+    threading.Thread(target=_do, daemon=True).start()
 
 
 def main_web_only():
