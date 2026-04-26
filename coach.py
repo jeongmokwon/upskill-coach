@@ -244,6 +244,447 @@ async def _static_handler(request):
     return web.Response(text="Not Found", status=404)
 
 
+
+
+# ─── Admin (read-only) ────────────────────────────────────────────────
+#
+# Three routes — all gated by HTTP Basic Auth backed by the
+# ADMIN_PASSWORD env var. If the env var is unset the routes return 503
+# (admin disabled). Username is ignored; password must match.
+#
+# WARNING: Basic Auth over plain HTTP is fine for localhost dev. Do NOT
+# expose this to the public internet without putting it behind TLS or
+# a stronger auth layer.
+
+import base64 as _b64
+import html as _html
+from collections import Counter as _Counter
+from urllib.parse import quote as _urlquote
+
+
+def _admin_auth_check(request):
+    """Returns None if the request is authorized, otherwise an aiohttp
+    Response that the caller must return to abort the handler."""
+    pw = os.environ.get("ADMIN_PASSWORD", "")
+    if not pw:
+        return web.Response(
+            text="Admin disabled. Set ADMIN_PASSWORD env var to enable.",
+            status=503,
+        )
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Basic "):
+        return web.Response(
+            status=401,
+            headers={"WWW-Authenticate": 'Basic realm="Upskill Admin"'},
+            text="Authorization required",
+        )
+    try:
+        decoded = _b64.b64decode(auth[6:].strip()).decode("utf-8", errors="replace")
+        _, _, password = decoded.partition(":")
+    except Exception:
+        password = ""
+    if password != pw:
+        return web.Response(
+            status=401,
+            headers={"WWW-Authenticate": 'Basic realm="Upskill Admin"'},
+            text="Invalid credentials",
+        )
+    return None
+
+
+def _admin_db_conn():
+    """Open a read-only DB connection via the cross-DB helper in
+    db.py. Routes through db.get_conn() so it works the same on
+    SQLite (local dev) and PostgreSQL (Render via DATABASE_URL)."""
+    return db.get_conn()
+
+
+def _admin_html_page(title: str, body: str) -> str:
+    """Wrap admin page body in a minimal dark-themed HTML shell."""
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="UTF-8">
+<title>{_html.escape(title)} — Admin</title>
+<style>
+  body {{ margin:0; padding:24px; background:#0d1117; color:#e6edf3;
+         font-family:"SF Mono","Fira Code",monospace; font-size:13px;
+         line-height:1.5; }}
+  h1 {{ font-size:18px; color:#58a6ff; margin:0 0 8px; }}
+  h2 {{ font-size:14px; color:#f0883e; margin:24px 0 8px; }}
+  a {{ color:#58a6ff; text-decoration:none; }}
+  a:hover {{ text-decoration:underline; }}
+  .crumbs {{ font-size:12px; color:#8b949e; margin-bottom:16px; }}
+  table {{ width:100%; border-collapse:collapse; margin-bottom:16px;
+          font-size:12px; }}
+  th, td {{ padding:8px 12px; text-align:left;
+           border-bottom:1px solid #21262d; vertical-align:top; }}
+  th {{ color:#8b949e; font-weight:600; background:#161b22;
+        position:sticky; top:0; }}
+  tr:hover td {{ background:#161b22; }}
+  .meta {{ color:#8b949e; }}
+  .right {{ text-align:right; }}
+  .muted {{ color:#484f58; }}
+  .empty {{ color:#484f58; font-style:italic; padding:8px 0; }}
+  .tag {{ display:inline-block; padding:2px 8px; background:#21262d;
+         border-radius:4px; font-size:11px; color:#e6edf3;
+         margin:2px 4px 2px 0; }}
+  .tag.weak {{ background:#f8514922; color:#f85149;
+               border:1px solid #f8514944; }}
+  .tag.strong {{ background:#3fb95022; color:#3fb950;
+                 border:1px solid #3fb95044; }}
+  .tag.deep {{ background:#58a6ff22; color:#58a6ff;
+               border:1px solid #58a6ff44; }}
+  .tag.surface {{ background:#bc8cff22; color:#bc8cff;
+                  border:1px solid #bc8cff44; }}
+  .tag.memorized {{ background:#f0883e22; color:#f0883e;
+                    border:1px solid #f0883e44; }}
+  .panel {{ background:#161b22; border:1px solid #21262d;
+           border-radius:6px; padding:16px; margin-bottom:16px; }}
+  .msg {{ padding:8px 12px; margin:6px 0; border-radius:4px;
+         border-left:3px solid #30363d; background:#161b22; }}
+  .msg.user {{ border-left-color:#1f6feb; background:#1f6feb15; }}
+  .msg.coach {{ border-left-color:#58a6ff; }}
+  .msg-role {{ font-size:11px; color:#8b949e;
+              text-transform:uppercase; letter-spacing:0.5px;
+              margin-bottom:4px; }}
+  pre {{ white-space:pre-wrap; word-wrap:break-word; margin:0;
+        font-family:inherit; font-size:12px; }}
+  .warn {{ background:#f0883e22; border:1px solid #f0883e44;
+          color:#f0883e; padding:10px 14px; border-radius:6px;
+          margin-bottom:16px; font-size:12px; }}
+  .kv {{ display:grid; grid-template-columns:140px 1fr; gap:6px 16px;
+        font-size:12px; }}
+  .kv .k {{ color:#8b949e; }}
+</style></head>
+<body>
+<div class="warn">⚠️ Read-only admin. Do NOT deploy publicly without proper auth (Basic Auth + ADMIN_PASSWORD is a dev-only gate).</div>
+{body}
+</body></html>"""
+
+
+def _admin_format_pct(num, denom):
+    if not denom:
+        return "—"
+    return f"{int(round(100 * num / denom))}% ({num}/{denom})"
+
+
+async def _admin_users_handler(request):
+    """List all users with quick stats. Click → user detail."""
+    blk = _admin_auth_check(request)
+    if blk:
+        return blk
+    conn = _admin_db_conn()
+    try:
+        cur = db._execute(conn, """
+            SELECT
+                up.user_id, up.user_name, up.studying, up.hint_preference,
+                up.difficulty, up.created_at,
+                (SELECT COUNT(*) FROM sessions s WHERE s.user_id = up.user_id) AS n_sessions,
+                (SELECT COUNT(*) FROM messages m WHERE m.user_id = up.user_id) AS n_messages,
+                (SELECT MAX(m.timestamp) FROM messages m WHERE m.user_id = up.user_id) AS last_activity,
+                (SELECT COUNT(*) FROM interactions i
+                   WHERE i.user_id = up.user_id AND i.interaction_type = 'practice'
+                ) AS n_practice,
+                (SELECT COUNT(*) FROM interactions i
+                   WHERE i.user_id = up.user_id AND i.interaction_type = 'practice'
+                     AND i.is_correct = 1
+                ) AS n_correct,
+                (SELECT COUNT(*) FROM insights ins WHERE ins.user_id = up.user_id) AS n_insights
+            FROM user_profiles up
+            ORDER BY (last_activity IS NULL), last_activity DESC
+        """)
+        rows = db._fetchall(cur)
+    finally:
+        conn.close()
+
+    if not rows:
+        body = "<h1>Users</h1><div class='empty'>No users yet.</div>"
+        return web.Response(text=_admin_html_page("Users", body), content_type="text/html")
+
+    parts = ["<h1>Users</h1>",
+             "<table><thead><tr>",
+             "<th>User</th><th>Studying</th><th>Hint pref</th>",
+             "<th class='right'>Sessions</th><th class='right'>Messages</th>",
+             "<th class='right'>Practice ✓</th><th class='right'>Insights</th>",
+             "<th>Last activity</th>",
+             "</tr></thead><tbody>"]
+    for r in rows:
+        link = f"/admin/user/{_urlquote(r['user_id'])}"
+        parts.append(
+            "<tr>"
+            f"<td><a href='{link}'>{_html.escape(r['user_name'] or r['user_id'])}</a>"
+            f"<div class='meta'>{_html.escape(r['user_id'])}</div></td>"
+            f"<td>{_html.escape(r['studying'] or '')}</td>"
+            f"<td>{_html.escape(r['hint_preference'] or '')}</td>"
+            f"<td class='right'>{r['n_sessions']}</td>"
+            f"<td class='right'>{r['n_messages']}</td>"
+            f"<td class='right'>{_admin_format_pct(r['n_correct'], r['n_practice'])}</td>"
+            f"<td class='right'>{r['n_insights']}</td>"
+            f"<td class='meta'>{_html.escape(r['last_activity'] or '—')}</td>"
+            "</tr>"
+        )
+    parts.append("</tbody></table>")
+    return web.Response(text=_admin_html_page("Users", "".join(parts)), content_type="text/html")
+
+
+async def _admin_user_handler(request):
+    """Per-user detail: profile, sessions, accuracy, sticking points, insights."""
+    blk = _admin_auth_check(request)
+    if blk:
+        return blk
+    user_id = request.match_info.get("user_id", "")
+    if not user_id:
+        return web.Response(text="missing user_id", status=400)
+
+    P = db._P
+    conn = _admin_db_conn()
+    try:
+        cur = db._execute(conn, f"SELECT * FROM user_profiles WHERE user_id = {P}", (user_id,))
+        prof = db._fetchone(cur)
+        if not prof:
+            body = (
+                "<div class='crumbs'><a href='/admin'>← Users</a></div>"
+                f"<h1>User not found</h1><div class='empty'>{_html.escape(user_id)}</div>"
+            )
+            return web.Response(text=_admin_html_page("User not found", body),
+                                content_type="text/html", status=404)
+
+        cur = db._execute(conn, f"""
+            SELECT s.session_id, s.start_time, s.end_time, s.study_topic,
+                   (SELECT COUNT(*) FROM messages m WHERE m.session_id = s.session_id) AS n_msgs,
+                   (SELECT 1 FROM insights i WHERE i.session_id = s.session_id LIMIT 1) AS has_insight
+            FROM sessions s
+            WHERE s.user_id = {P}
+            ORDER BY s.start_time DESC
+        """, (user_id,))
+        sessions = db._fetchall(cur)
+
+        cur = db._execute(conn, f"""
+            SELECT timestamp, practice_question, user_answer, is_correct,
+                   time_taken_seconds, study_topic, session_id
+            FROM interactions
+            WHERE user_id = {P} AND interaction_type = 'practice'
+            ORDER BY id DESC
+        """, (user_id,))
+        practice = db._fetchall(cur)
+
+        cur = db._execute(conn, f"""
+            SELECT session_id, analysis, created_at
+            FROM insights
+            WHERE user_id = {P}
+            ORDER BY id DESC
+        """, (user_id,))
+        insights = db._fetchall(cur)
+    finally:
+        conn.close()
+
+    # ─── Aggregate weak/strong concepts across all insights ───
+    weak_counter = _Counter()
+    strong_counter = _Counter()
+    for ins in insights:
+        try:
+            data = json.loads(ins["analysis"]) if ins["analysis"] else {}
+        except Exception:
+            data = {}
+        for w in data.get("weak_concepts", []) or []:
+            weak_counter[str(w)] += 1
+        for s in data.get("strong_concepts", []) or []:
+            strong_counter[str(s)] += 1
+
+    n_practice = len(practice)
+    n_correct = sum(1 for p in practice if p["is_correct"])
+
+    parts = [
+        "<div class='crumbs'><a href='/admin'>← Users</a></div>",
+        f"<h1>{_html.escape(prof['user_name'] or prof['user_id'])}</h1>",
+        "<div class='panel'><div class='kv'>",
+        f"<div class='k'>user_id</div><div>{_html.escape(prof['user_id'])}</div>",
+        f"<div class='k'>studying</div><div>{_html.escape(prof['studying'] or '—')}</div>",
+        f"<div class='k'>goal</div><div>{_html.escape(prof['goal'] or '—')}</div>",
+        f"<div class='k'>background</div><div>{_html.escape(prof['background'] or '—')}</div>",
+        f"<div class='k'>hint_preference</div><div>{_html.escape(prof['hint_preference'] or '—')}</div>",
+        f"<div class='k'>difficulty</div><div>{prof['difficulty']}</div>",
+        f"<div class='k'>condition</div><div>{prof['user_condition']}</div>",
+        f"<div class='k'>created_at</div><div class='meta'>{_html.escape(prof['created_at'])}</div>",
+        "</div></div>",
+    ]
+
+    # ─── Practice accuracy ───
+    parts.append(f"<h2>Practice accuracy — {_admin_format_pct(n_correct, n_practice)}</h2>")
+    if practice:
+        parts.append("<table><thead><tr>"
+                     "<th>When</th><th>Question</th><th>Answer</th>"
+                     "<th class='right'>Result</th><th class='right'>Time</th>"
+                     "</tr></thead><tbody>")
+        for p in practice[:50]:
+            ok = "✓" if p["is_correct"] else "✗"
+            ok_color = "#3fb950" if p["is_correct"] else "#f85149"
+            t = p["time_taken_seconds"]
+            t_str = f"{t:.1f}s" if t else "—"
+            parts.append(
+                "<tr>"
+                f"<td class='meta'>{_html.escape(p['timestamp'] or '')}</td>"
+                f"<td>{_html.escape((p['practice_question'] or '')[:160])}</td>"
+                f"<td>{_html.escape(p['user_answer'] or '')}</td>"
+                f"<td class='right' style='color:{ok_color};font-weight:bold'>{ok}</td>"
+                f"<td class='right meta'>{t_str}</td>"
+                "</tr>"
+            )
+        parts.append("</tbody></table>")
+        if len(practice) > 50:
+            parts.append(f"<div class='meta'>(showing 50 of {len(practice)})</div>")
+    else:
+        parts.append("<div class='empty'>No practice attempts yet.</div>")
+
+    # ─── Sticking points ───
+    parts.append("<h2>Recurring weak concepts (sticking points)</h2>")
+    if weak_counter:
+        parts.append("<div>")
+        for concept, cnt in weak_counter.most_common(20):
+            parts.append(
+                f"<span class='tag weak'>{_html.escape(concept)}"
+                f"{'  ×' + str(cnt) if cnt > 1 else ''}</span>"
+            )
+        parts.append("</div>")
+    else:
+        parts.append("<div class='empty'>None recorded yet.</div>")
+
+    parts.append("<h2>Recurring strong concepts</h2>")
+    if strong_counter:
+        parts.append("<div>")
+        for concept, cnt in strong_counter.most_common(20):
+            parts.append(
+                f"<span class='tag strong'>{_html.escape(concept)}"
+                f"{'  ×' + str(cnt) if cnt > 1 else ''}</span>"
+            )
+        parts.append("</div>")
+    else:
+        parts.append("<div class='empty'>None recorded yet.</div>")
+
+    # ─── Sessions list ───
+    parts.append(f"<h2>Sessions ({len(sessions)})</h2>")
+    if sessions:
+        parts.append("<table><thead><tr>"
+                     "<th>Session</th><th>Started</th><th>Ended</th>"
+                     "<th>Topic</th><th class='right'>Msgs</th>"
+                     "<th class='right'>Insight</th>"
+                     "</tr></thead><tbody>")
+        for s in sessions:
+            slink = f"/admin/session/{_urlquote(s['session_id'])}"
+            ended = s['end_time'] or "<span class='muted'>(active/orphan)</span>"
+            insight_mark = "✓" if s['has_insight'] else "<span class='muted'>—</span>"
+            parts.append(
+                "<tr>"
+                f"<td><a href='{slink}'>{_html.escape(s['session_id'])}</a></td>"
+                f"<td class='meta'>{_html.escape(s['start_time'] or '')}</td>"
+                f"<td class='meta'>{ended}</td>"
+                f"<td>{_html.escape(s['study_topic'] or '')}</td>"
+                f"<td class='right'>{s['n_msgs']}</td>"
+                f"<td class='right'>{insight_mark}</td>"
+                "</tr>"
+            )
+        parts.append("</tbody></table>")
+    else:
+        parts.append("<div class='empty'>No sessions yet.</div>")
+
+    # ─── Recent insights (full bodies) ───
+    parts.append("<h2>Recent insights (most recent 3)</h2>")
+    if insights:
+        for ins in insights[:3]:
+            try:
+                data = json.loads(ins["analysis"]) if ins["analysis"] else {}
+            except Exception:
+                data = {"_parse_error": "could not parse analysis JSON"}
+            slink = f"/admin/session/{_urlquote(ins['session_id'])}"
+            parts.append(
+                "<div class='panel'>"
+                f"<div class='meta'>session <a href='{slink}'>{_html.escape(ins['session_id'])}</a> · {_html.escape(ins['created_at'])}</div>"
+                f"<pre style='margin-top:8px'>{_html.escape(json.dumps(data, indent=2, ensure_ascii=False))}</pre>"
+                "</div>"
+            )
+    else:
+        parts.append("<div class='empty'>No insights yet.</div>")
+
+    title = f"User {prof['user_name'] or prof['user_id']}"
+    return web.Response(text=_admin_html_page(title, "".join(parts)), content_type="text/html")
+
+
+async def _admin_session_handler(request):
+    """Show a session's transcript + its insight (if any)."""
+    blk = _admin_auth_check(request)
+    if blk:
+        return blk
+    sid = request.match_info.get("session_id", "")
+    if not sid:
+        return web.Response(text="missing session_id", status=400)
+
+    P = db._P
+    conn = _admin_db_conn()
+    try:
+        cur = db._execute(conn, f"SELECT * FROM sessions WHERE session_id = {P}", (sid,))
+        session = db._fetchone(cur)
+        if not session:
+            body = (
+                "<div class='crumbs'><a href='/admin'>← Users</a></div>"
+                f"<h1>Session not found</h1><div class='empty'>{_html.escape(sid)}</div>"
+            )
+            return web.Response(text=_admin_html_page("Session not found", body),
+                                content_type="text/html", status=404)
+        cur = db._execute(conn,
+            f"SELECT role, content, timestamp FROM messages WHERE session_id = {P} ORDER BY id",
+            (sid,))
+        msgs = db._fetchall(cur)
+        cur = db._execute(conn,
+            f"SELECT analysis, created_at FROM insights WHERE session_id = {P} ORDER BY id DESC LIMIT 1",
+            (sid,))
+        insight = db._fetchone(cur)
+    finally:
+        conn.close()
+
+    user_link = f"/admin/user/{_urlquote(session['user_id'])}"
+    parts = [
+        f"<div class='crumbs'><a href='/admin'>← Users</a> · "
+        f"<a href='{user_link}'>{_html.escape(session['user_id'])}</a></div>",
+        f"<h1>Session {_html.escape(sid)}</h1>",
+        "<div class='panel'><div class='kv'>",
+        f"<div class='k'>topic</div><div>{_html.escape(session['study_topic'] or '—')}</div>",
+        f"<div class='k'>start</div><div class='meta'>{_html.escape(session['start_time'] or '')}</div>",
+        f"<div class='k'>end</div><div class='meta'>{_html.escape(session['end_time'] or '(active/orphan)')}</div>",
+        f"<div class='k'>messages</div><div>{len(msgs)}</div>",
+        "</div></div>",
+    ]
+
+    parts.append(f"<h2>Transcript ({len(msgs)} messages)</h2>")
+    if msgs:
+        for m in msgs:
+            role = m["role"] or "?"
+            cls = "user" if role == "user" else "coach"
+            parts.append(
+                f"<div class='msg {cls}'>"
+                f"<div class='msg-role'>{_html.escape(role)} <span class='meta'>· {_html.escape(m['timestamp'] or '')}</span></div>"
+                f"<pre>{_html.escape(m['content'] or '')}</pre>"
+                "</div>"
+            )
+    else:
+        parts.append("<div class='empty'>No messages.</div>")
+
+    parts.append("<h2>Insight</h2>")
+    if insight:
+        try:
+            data = json.loads(insight["analysis"]) if insight["analysis"] else {}
+        except Exception:
+            data = {"_parse_error": "could not parse analysis JSON"}
+        parts.append(
+            "<div class='panel'>"
+            f"<div class='meta'>analyzed at {_html.escape(insight['created_at'])}</div>"
+            f"<pre style='margin-top:8px'>{_html.escape(json.dumps(data, indent=2, ensure_ascii=False))}</pre>"
+            "</div>"
+        )
+    else:
+        parts.append("<div class='empty'>No insight saved for this session.</div>")
+
+    return web.Response(text=_admin_html_page(f"Session {sid}", "".join(parts)),
+                        content_type="text/html")
 @web.middleware
 async def _log_middleware(request, handler):
     """Log every incoming request for debugging."""
@@ -262,6 +703,12 @@ def start_ws_server():
         app.router.add_get("/health", _health_handler)
         app.router.add_get("/ws", ws_handler)
         app.router.add_get("/", _root_handler)
+        # Admin routes — registered BEFORE the static catch-all so they
+        # take precedence. Auth is enforced inside each handler via
+        # ADMIN_PASSWORD env var (returns 503 if unset, 401 otherwise).
+        app.router.add_get("/admin", _admin_users_handler)
+        app.router.add_get("/admin/user/{user_id}", _admin_user_handler)
+        app.router.add_get("/admin/session/{session_id}", _admin_session_handler)
         app.router.add_get("/{path:.*}", _static_handler)
 
         runner = web.AppRunner(app)
