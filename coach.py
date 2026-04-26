@@ -1193,6 +1193,88 @@ def _try_parse_json(text: str):
     return None
 
 
+def _enforce_font_inter(manim_code: str):
+    """Walk every Text(...) call in `manim_code` and ensure it carries
+    font="Inter". Returns (before_audit, after_audit, rewritten_code).
+
+    Why: server-side Pango measures Text widths in whatever font the
+    Text(...) call specified (defaulting to DejaVu when font= is
+    omitted). The browser renders all SVG text with Inter (via
+    @font-face). When server uses DejaVu and browser uses Inter, the
+    two measurements disagree and any layout the LLM expressed via
+    .next_to() / absolute coords drifts — adjacent labels overlap.
+
+    The proper paren-tracking walk (vs a regex) is needed because
+    Text(...) often nests other calls, e.g. `Text(str(idx[b][t]))`.
+    """
+    import re as _re
+
+    def _audit(code):
+        # Note: this regex is shallow (won't see nested-paren cases)
+        # but is good enough for a count + sample of obviously bad
+        # calls. The real injection below uses the proper walker.
+        calls = _re.findall(r'\bText\([^)]*\)', code)
+        missing = [c for c in calls if 'font=' not in c]
+        return {
+            'total': len(calls),
+            'with_font': len(calls) - len(missing),
+            'missing': len(missing),
+            'samples': missing,
+        }
+
+    before = _audit(manim_code)
+
+    out = []
+    i = 0
+    n = len(manim_code)
+    while i < n:
+        # Locate the next bare Text( — \b prevents matching MarkupText(.
+        m = _re.search(r'\bText\(', manim_code[i:])
+        if not m:
+            out.append(manim_code[i:])
+            break
+        out.append(manim_code[i:i + m.start()])
+        out.append('Text(')
+
+        # Walk to the matching close paren, tracking string state so
+        # quote-enclosed parens don't confuse the depth counter.
+        j = i + m.end()
+        depth = 1
+        in_str = None  # '"' or "'" while inside a string literal
+        esc = False
+        while j < n and depth:
+            c = manim_code[j]
+            if esc:
+                esc = False
+            elif c == '\\':
+                esc = True
+            elif in_str:
+                if c == in_str:
+                    in_str = None
+            elif c in ('"', "'"):
+                in_str = c
+            elif c == '(':
+                depth += 1
+            elif c == ')':
+                depth -= 1
+            j += 1
+        # j is now one past the matching ')'.
+        args = manim_code[i + m.end():j - 1]  # interior of Text(...)
+
+        if 'font=' in args:
+            # Already specifies a font (Inter or otherwise) — leave alone.
+            out.append(args + ')')
+        else:
+            stripped = args.rstrip()
+            sep = ', ' if stripped and not stripped.endswith(',') else ''
+            out.append(stripped + sep + 'font="Inter")')
+        i = j
+
+    rewritten = ''.join(out)
+    after = _audit(rewritten)
+    return before, after, rewritten
+
+
 def handle_explain_animation(msg):
     """Generate a Manim scene for the chat topic, extract it to a JSON
     timeline, and ship the timeline to the browser for live playback.
@@ -1268,25 +1350,33 @@ def handle_explain_animation(msg):
 
         print(f"  [Manim] generated {class_name}: {len(manim_code)} chars — extracting…",
               flush=True)
-        # Diagnostic: surface a count of Text(...) calls that DO vs DON'T
-        # specify font="Inter". Lets us see at-a-glance whether the LLM
-        # is honoring the prompt's "every Text MUST pass font='Inter'"
-        # directive. If `without_font` > 0, those Text mobjects fall back
-        # to Pango's default font on the server, while the browser
-        # renders with Inter — same metric-mismatch problem we tried
-        # to fix.
-        import re as _re
-        _text_calls = _re.findall(r'\bText\([^)]*\)', manim_code)
-        _without_inter = [c for c in _text_calls if 'font=' not in c]
+
+        # Audit + post-process the LLM output to enforce font="Inter" on
+        # every Text(...) call. The LLM ignores the prompt's "every Text
+        # MUST pass font='Inter'" directive ~half the time, and when a
+        # Text falls through to Pango's default font (DejaVu) the server
+        # measures it with different metrics than the browser renders
+        # with Inter — that's the layout-overlap bug we kept hitting.
+        # Doing the injection here makes layout correctness independent
+        # of LLM compliance.
+        before_audit, after_audit, manim_code = _enforce_font_inter(manim_code)
         print(
-            f"  [Manim] Text() audit: {len(_text_calls)} total, "
-            f"{len(_text_calls) - len(_without_inter)} with font=, "
-            f"{len(_without_inter)} WITHOUT font=",
+            f"  [Manim] Text() audit BEFORE inject: "
+            f"{before_audit['total']} total, {before_audit['with_font']} with font=, "
+            f"{before_audit['missing']} WITHOUT font=",
             flush=True,
         )
-        if _without_inter:
-            for c in _without_inter[:3]:
-                print(f"  [Manim]   ⚠ Text() missing font=: {c[:120]}", flush=True)
+        if before_audit['samples']:
+            for c in before_audit['samples'][:3]:
+                print(f"  [Manim]   ⚠ injected font='Inter' into: {c[:120]}", flush=True)
+        if after_audit['missing'] > 0:
+            # Should always be 0 after injection; if not, the injector
+            # missed something pathological in the LLM output.
+            print(
+                f"  [Manim] ⚠⚠ {after_audit['missing']} Text(...) calls "
+                f"STILL missing font= after injection — investigate",
+                flush=True,
+            )
 
         timeline = _extract_manim_to_json(manim_code, class_name)
         if timeline is None:
