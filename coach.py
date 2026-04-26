@@ -1268,6 +1268,25 @@ def handle_explain_animation(msg):
 
         print(f"  [Manim] generated {class_name}: {len(manim_code)} chars — extracting…",
               flush=True)
+        # Diagnostic: surface a count of Text(...) calls that DO vs DON'T
+        # specify font="Inter". Lets us see at-a-glance whether the LLM
+        # is honoring the prompt's "every Text MUST pass font='Inter'"
+        # directive. If `without_font` > 0, those Text mobjects fall back
+        # to Pango's default font on the server, while the browser
+        # renders with Inter — same metric-mismatch problem we tried
+        # to fix.
+        import re as _re
+        _text_calls = _re.findall(r'\bText\([^)]*\)', manim_code)
+        _without_inter = [c for c in _text_calls if 'font=' not in c]
+        print(
+            f"  [Manim] Text() audit: {len(_text_calls)} total, "
+            f"{len(_text_calls) - len(_without_inter)} with font=, "
+            f"{len(_without_inter)} WITHOUT font=",
+            flush=True,
+        )
+        if _without_inter:
+            for c in _without_inter[:3]:
+                print(f"  [Manim]   ⚠ Text() missing font=: {c[:120]}", flush=True)
 
         timeline = _extract_manim_to_json(manim_code, class_name)
         if timeline is None:
