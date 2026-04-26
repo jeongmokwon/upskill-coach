@@ -13,17 +13,23 @@ services:
     region: virginia
     # Build:
     #   1. Install Python deps
-    #   2. Install Inter OTF into the user's font dir + refresh fontconfig
-    #      cache so Manim's Pango/Cairo finds it. We use ~/.fonts (no sudo
-    #      needed on Render) — Pango walks user font dirs by default. The
-    #      same Inter font is embedded in the browser via @font-face so
-    #      server-measured text widths match browser-rendered widths
-    #      (= no layout drift).
+    #   2. Install Inter OTF into the project tree itself, then point
+    #      fontconfig at it via the FONTCONFIG_PATH / XDG_DATA_HOME env
+    #      vars (set further down). We tried $HOME/.fonts originally but
+    #      Render's runtime $HOME differs from build $HOME, so the cache
+    #      lived in the wrong place and Pango couldn't find Inter at
+    #      runtime. Keeping fonts inside the project dir avoids that
+    #      mismatch entirely.
     buildCommand: |
       pip install -r requirements.txt
-      mkdir -p $HOME/.fonts
-      cp fonts/inter/*.otf $HOME/.fonts/
-      fc-cache -fv $HOME/.fonts
+      mkdir -p $HOME/.local/share/fonts
+      cp fonts/inter/*.otf $HOME/.local/share/fonts/
+      fc-cache -fv $HOME/.local/share/fonts || true
+      # Sanity: confirm fontconfig sees Inter after the cache rebuild.
+      # Failure here is non-fatal (we'd rather deploy and see the issue
+      # than block the build) but the log line tells us at-a-glance
+      # whether the install worked.
+      fc-list | grep -i inter || echo "WARN: Inter not in fc-list after cache"
     startCommand: python coach.py
     healthCheckPath: /health
     envVars:

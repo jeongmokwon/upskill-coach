@@ -20,9 +20,32 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import os
 import sys
 from pathlib import Path
+
+# IMPORTANT — protect stdout from Manim/Pango chatter.
+#
+# Manim emits log lines (font warnings, deprecations, render hints) via
+# its `manim` Rich logger AND prints from internal libs go to stdout by
+# default. Anything on stdout BEFORE we serialize the JSON corrupts the
+# parent process's parse (we hit `Expecting ',' delimiter: line 1
+# column 3` because a "WARNING Font Inter not in [...]" line arrived
+# ahead of the JSON).
+#
+# Two defenses:
+#   1) Lift Manim's own logger to ERROR so info/warning lines are dropped.
+#   2) Redirect anything that does still print() during Scene execution
+#      to stderr. We do that by swapping sys.stdout for sys.stderr at
+#      module import time and only restoring the real stdout right
+#      before we write the final JSON.
+_REAL_STDOUT = sys.stdout
+sys.stdout = sys.stderr  # everything until restored is treated as logging
+
+logging.getLogger("manim").setLevel(logging.ERROR)
+# Manim Community ≥ 0.18 also configures a "manimce" logger.
+logging.getLogger("manimce").setLevel(logging.ERROR)
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -593,7 +616,13 @@ def main():
             f"{result['total_duration_ms']}ms → {output_path}"
         )
     else:
+        # Restore the real stdout (we redirected it at import time so
+        # Manim's own prints/warnings can't pollute our JSON output).
+        # Anything remaining on the redirected stdout is already on
+        # stderr where the caller can still see it via subprocess.
+        sys.stdout = _REAL_STDOUT
         sys.stdout.write(text)
+        sys.stdout.flush()
 
 
 if __name__ == "__main__":
