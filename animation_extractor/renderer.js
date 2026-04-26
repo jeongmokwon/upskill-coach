@@ -151,7 +151,11 @@ const ManimRenderer = (() => {
       el.setAttribute('fill', m.color || m.fill_color || '#e6edf3');
       el.setAttribute('stroke', 'none');
       el.setAttribute('font-size', manimFontSizeToUnits(m.font_size));
-      el.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif');
+      // Inter is loaded via @font-face in index.html and is the same font
+      // Manim/Pango uses on the server (installed by render.yaml). Falling
+      // back to system fonts would re-introduce the metric mismatch that
+      // breaks .next_to()-based layouts, so Inter must come first.
+      el.setAttribute('font-family', 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif');
       if ((m.slant || 'NORMAL') !== 'NORMAL') el.setAttribute('font-style', 'italic');
       if ((m.weight || 'NORMAL') !== 'NORMAL') el.setAttribute('font-weight', 'bold');
       el.textContent = m.text || '';

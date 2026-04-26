@@ -27,7 +27,7 @@ class Lookup(Scene):
         ]
 
         # ═══ Title ═══
-        title = Text("What is a lookup?", font_size=32).to_edge(UP, buff=0.5)
+        title = Text("What is a lookup?", font_size=32, font="Inter").to_edge(UP, buff=0.5)
         self.play(Write(title), run_time=0.7)
 
         # ═══ Stage 1: a single token id on the left ═══
@@ -35,11 +35,9 @@ class Lookup(Scene):
             side_length=1.0, stroke_color=BLUE_C, stroke_width=2.5,
         ).shift(LEFT * 4.8 + UP * 0.3)
         token_text = Text(
-            str(TARGET_ID), font_size=48, color=WHITE
-        ).move_to(token_cell.get_center())
+            str(TARGET_ID), font_size=48, color=WHITE, font="Inter").move_to(token_cell.get_center())
         token_caption = Text(
-            "token id", font_size=16, color=BLUE_B
-        ).next_to(token_cell, DOWN, buff=0.25)
+            "token id", font_size=16, color=BLUE_B, font="Inter").next_to(token_cell, DOWN, buff=0.25)
 
         self.play(FadeIn(token_cell), Write(token_text), run_time=0.8)
         self.play(Write(token_caption), run_time=0.3)
@@ -58,7 +56,7 @@ class Lookup(Scene):
                 side_length=vocab_cell_h, stroke_color=BLUE_C, stroke_width=1,
             )
             idc.move_to([base_x, base_y - v * vocab_cell_h, 0])
-            num = Text(str(v), font_size=13, color=WHITE).move_to(idc.get_center())
+            num = Text(str(v), font_size=13, color=WHITE, font="Inter").move_to(idc.get_center())
             vocab_cells.add(VGroup(idc, num))
 
             row = VGroup(*[
@@ -75,8 +73,7 @@ class Lookup(Scene):
 
         rows_group = VGroup(*embedding_rows)
         table_label = Text(
-            "embedding table", font_size=16, color=YELLOW_B
-        ).next_to(rows_group, UP, buff=0.2)
+            "embedding table", font_size=16, color=YELLOW_B, font="Inter").next_to(rows_group, UP, buff=0.2)
 
         self.play(
             FadeIn(vocab_cells, lag_ratio=0.04),
@@ -126,7 +123,6 @@ class Lookup(Scene):
 
         vector_label = Text(
             f"embedding vector for token {TARGET_ID}   —   shape (C,) = (16,)",
-            font_size=18, color=ORANGE,
-        ).next_to(extracted, DOWN, buff=0.3)
+            font_size=18, color=ORANGE,font="Inter").next_to(extracted, DOWN, buff=0.3)
         self.play(Write(vector_label), run_time=0.7)
         self.wait(1.0)
