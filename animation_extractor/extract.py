@@ -210,6 +210,38 @@ def _serialize_mobject(m: Mobject, mid: str, registry: _Registry) -> dict:
         if fs is None:
             fs = _safe(lambda: max(8.0, float(m.get_height()) * 50.0), 24.0)
         data["font_size"] = float(fs)
+
+        # PROD DIAGNOSTIC — log every Manim-internal value so we can pin
+        # down WHY font_size drifts on Render but not locally. For each
+        # Text we serialize, dump:
+        #   _font_size        ← the constructor-time value (Manim stores)
+        #   initial_height    ← height at construction (after Manim's own
+        #                       TEXT_MOB_SCALE_FACTOR scale step)
+        #   current_height    ← height NOW (post move_to/next_to/play)
+        #   prop_font_size    ← Manim's font_size property = height /
+        #                       initial_height * _font_size
+        #   _uc_font_size     ← our helper's marker (None = raw Text())
+        # If current_height != initial_height, SOMETHING scaled the
+        # mobject — and that something only happens on Render. Compare
+        # this output to the local extract.py output (which is always
+        # height==initial_height) to find what differs.
+        try:
+            _stored = getattr(m, "_font_size", None)
+            _initial_h = getattr(m, "initial_height", None)
+            _current_h = _safe(lambda: float(m.get_height()), None)
+            _prop_fs = _safe(lambda: float(m.font_size), None)
+            _uc_marker = getattr(m, "_uc_font_size", None)
+            _txt = (data.get("text") or "")[:50].replace("\n", " ")
+            print(
+                f"  [serialize] text={_txt!r:55s} "
+                f"_font_size={_stored} initial_h={_initial_h} "
+                f"current_h={_current_h} prop_font_size={_prop_fs} "
+                f"_uc_marker={_uc_marker} chosen_fs={data['font_size']}",
+                file=sys.stderr, flush=True,
+            )
+        except Exception as _diag_e:
+            print(f"  [serialize] diag failed: {_diag_e}",
+                  file=sys.stderr, flush=True)
         data["slant"] = getattr(m, "slant", "NORMAL")
         data["weight"] = getattr(m, "weight", "NORMAL")
         # Color: Manim Text is a VGroup of letter submobjects — the real color
