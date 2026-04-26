@@ -1193,6 +1193,89 @@ def _try_parse_json(text: str):
     return None
 
 
+# ─── Typography helper prelude ─────────────────────────────────────
+#
+# Eight Text() factories with hardcoded font="Inter" + a fixed font_size
+# per visual role. The runtime injects this prelude AHEAD of the
+# LLM-generated Manim code so the Scene's construct() can call e.g.
+# Title("Foo") and get back a properly sized Text("Foo", font="Inter",
+# font_size=28, weight=BOLD) — without trusting the LLM to remember
+# the right kwargs.
+#
+# Both server-side Pango (when measuring widths for .next_to() etc.)
+# and the browser SVG renderer use Inter, so these sizes translate
+# 1:1 across the rendering boundary. No clamp, no injector.
+#
+# Helpers SET font + font_size directly on kw, overriding any value
+# the LLM may have passed — so the size discipline holds regardless
+# of LLM compliance. weight has setdefault so callers can still
+# upgrade Caption to bold etc. when they really want.
+_HELPER_PRELUDE = '''\
+# === Typography helpers (injected by the upskill-coach runtime). ===
+# Use these factories instead of raw Text() so font sizes are
+# deterministic and server/browser metrics stay matched.
+def Title(s, **kw):
+    """Animation title — large, bold."""
+    kw['font'] = 'Inter'; kw['font_size'] = 28
+    kw.setdefault('weight', BOLD)
+    return Text(s, **kw)
+
+def Subtitle(s, **kw):
+    """Section heading."""
+    kw['font'] = 'Inter'; kw['font_size'] = 22
+    return Text(s, **kw)
+
+def Caption(s, **kw):
+    """Bottom-of-frame summary."""
+    kw['font'] = 'Inter'; kw['font_size'] = 18
+    return Text(s, **kw)
+
+def AxisLabel(s, **kw):
+    """Brace labels (e.g. \"T = 4 (sequence length)\")."""
+    kw['font'] = 'Inter'; kw['font_size'] = 16
+    return Text(s, **kw)
+
+def CellDigit(s, **kw):
+    """Numbers shown inside matrix cells."""
+    kw['font'] = 'Inter'; kw['font_size'] = 18
+    return Text(s, **kw)
+
+def RowLabel(s, **kw):
+    """Row identifiers (e.g. \"batch 0\")."""
+    kw['font'] = 'Inter'; kw['font_size'] = 14
+    return Text(s, **kw)
+
+def ColLabel(s, **kw):
+    """Column identifiers."""
+    kw['font'] = 'Inter'; kw['font_size'] = 14
+    return Text(s, **kw)
+
+def CodeText(s, **kw):
+    """Inline code-like text (variable names, short snippets)."""
+    kw['font'] = 'Inter'; kw['font_size'] = 16
+    return Text(s, **kw)
+# === end helpers ===
+
+'''
+
+
+def _inject_typography_helpers(manim_code: str) -> str:
+    """Prepend the helper definitions right after the LLM's manim
+    `import *` line so Title/Subtitle/etc. (and BOLD) are in scope
+    when the Scene's construct() runs.
+
+    If we don't see a `from manim import *`, prepend our own at the
+    very top — the LLM's later `from manim import *` (if any) is
+    idempotent.
+    """
+    import re as _re
+    m = _re.search(r'^\s*from\s+manim\s+import\s+\*\s*$', manim_code, _re.MULTILINE)
+    if m:
+        insert_at = m.end()
+        return manim_code[:insert_at] + '\n\n' + _HELPER_PRELUDE + manim_code[insert_at:]
+    return 'from manim import *\n\n' + _HELPER_PRELUDE + manim_code
+
+
 def handle_explain_animation(msg):
     """Generate a Manim scene for the chat topic, extract it to a JSON
     timeline, and ship the timeline to the browser for live playback.
@@ -1268,6 +1351,12 @@ def handle_explain_animation(msg):
 
         print(f"  [Manim] generated {class_name}: {len(manim_code)} chars — extracting…",
               flush=True)
+
+        # Prepend the typography helper prelude so Title/Subtitle/...
+        # are in scope inside the Scene's construct(). Layout sizes
+        # are deterministic regardless of what font_size the LLM may
+        # have tried to put on a raw Text() call.
+        manim_code = _inject_typography_helpers(manim_code)
 
         timeline = _extract_manim_to_json(manim_code, class_name)
         if timeline is None:

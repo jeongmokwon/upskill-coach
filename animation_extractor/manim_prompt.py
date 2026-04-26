@@ -64,16 +64,36 @@ FORBIDDEN (will break the extractor or renderer):
     arbitrary points, etc.
   • Anything outside the supported Mobject/Animation list above.
 
-REQUIRED FONT (critical for layout correctness):
-  EVERY Text(...) call MUST pass font="Inter" explicitly. Example:
-      Text("hello", font_size=18, color=BLUE_C, font="Inter")
-  The browser SVG renderer uses Inter via @font-face, and the server
-  has Inter installed for Pango/Cairo. If you omit `font="Inter"`,
-  Manim measures text widths with whatever the system default is —
-  but the browser renders with Inter, and the metric mismatch causes
-  adjacent labels to overlap (we have seen this break layouts).
-  This is non-negotiable. Apply to every Text mobject without
-  exception — including small cell digits and brace labels.
+REQUIRED TYPOGRAPHY HELPERS (use instead of raw Text(...)):
+  The runtime injects these factory functions BEFORE your Scene.
+  They hardcode font="Inter" + a deterministic font_size for each
+  visual role. You MUST use them in place of Text(...) — calling
+  Text() directly will fall back to default fonts/sizes that don't
+  match the browser's rendering and will break layout.
+
+      Title(s)       → big bold, font_size 28. Animation title.
+      Subtitle(s)    → font_size 22. Section heads.
+      Caption(s)     → font_size 18. Bottom-of-frame summary.
+      AxisLabel(s)   → font_size 16. Brace labels (e.g. "T = 4 (sequence length)").
+      CellDigit(s)   → font_size 18. Digits inside matrix cells.
+      RowLabel(s)    → font_size 14. Row identifiers (e.g. "batch 0").
+      ColLabel(s)    → font_size 14. Column identifiers.
+      CodeText(s)    → font_size 16. Inline code-like text (variable names, snippets).
+
+  All helpers accept color= and any other Text() kwarg — only `font`
+  and `font_size` are locked. Override `weight` only when you really
+  need bold/medium/etc. — defaults are tuned per role.
+
+  Example:
+      title = Title("idx tensor structure")
+      caption = Caption("Each row = one sequence", color=YELLOW_B)
+      lbl = RowLabel("batch 0", color=GREEN)
+
+  WHY locked: server measures text widths in Inter; browser renders
+  in Inter; fixed sizes prevent surprise viewport overflow and
+  preserve the small/large hierarchy. If you must use raw Text(...)
+  for some reason not covered by a helper, ALWAYS pass font="Inter"
+  yourself.
 
 COLOR SUPPORT:
   Use Manim's built-in constants (WHITE, BLACK, BLUE_C, YELLOW_B, GREEN,
@@ -129,22 +149,13 @@ DESIGN PRINCIPLES (apply even when the user prompt is vague)
 3. Minimal ink. Each element on screen must earn its place. Avoid
    decorative titles/labels that don't teach.
 
-4. Typography for hierarchy:
-   • Title: font_size=28-32
-   • Axis labels via Brace + Text: font_size=16-18
-   • Cell labels / digits: font_size=12-18 depending on cell size
-   • Caption: font_size=20-24
-   Keep Text(color=...) explicit so the extractor sees the right color.
-
-   ⚠️ HARD CAP — font_size MUST be between 10 and 36. The browser
-   renderer scales Manim's font_size to SVG user units against a
-   14-unit-wide viewBox; values above 36 render as text larger than
-   the entire viewport (text overflows the canvas, layout breaks).
-   The renderer enforces a clamp at the upper end, but if you emit
-   the recommended ranges above you don't have to rely on it.
-   Do NOT use font_size 48, 60, 72, 80, 96, or 120 even if Manim's
-   defaults nudge you that way — those values are tuned for Manim's
-   1080p Cairo output, not our SVG playback.
+4. Typography for hierarchy: pick the right helper from the
+   REQUIRED TYPOGRAPHY HELPERS section (Title / Subtitle / Caption /
+   AxisLabel / CellDigit / RowLabel / ColLabel / CodeText). Do NOT
+   call Text() directly. The helpers' font_sizes are deterministic
+   and tuned to look right inside the SVG viewBox — overriding sizes
+   defeats the purpose. Pass color= and other visual kwargs through
+   the helper as needed.
 
 5. Sequencing:
    • Stage 1: set the stage (pieces appear)
