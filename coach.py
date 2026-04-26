@@ -1150,6 +1150,14 @@ def _extract_manim_to_json(manim_code: str, class_name: str):
                 flush=True,
             )
             return None
+        # Surface the per-Text [serialize] / DEBUG_UC diagnostic lines from
+        # extract.py's stderr even on success — without this they're
+        # silently dropped (subprocess captures stderr but we only print
+        # it on failure). Filter out Manim's WARNING noise.
+        if result.stderr:
+            for _line in result.stderr.splitlines():
+                if "[serialize]" in _line or "DEBUG_UC" in _line:
+                    print(f"  [Manim] {_line}", flush=True)
         try:
             return json.loads(result.stdout)
         except json.JSONDecodeError as e:
@@ -1232,8 +1240,21 @@ def _uc_make(text, fs, weight=None, **kw):
     return t
 
 def Title(s, **kw):
-    """Animation title — large, bold."""
-    return _uc_make(s, 28, weight=BOLD, **kw)
+    """Animation title — large, bold, auto-positioned at top.
+
+    Manim's built-in `Title` class auto-positions itself to the top
+    edge. The LLM relies on that convention and rarely calls
+    .to_edge(UP) explicitly. Our helper has to do the same or the
+    title lands at the default origin (0,0,0) and overlaps the rest
+    of the scene. The LLM can still override by calling
+    .to_edge() / .move_to() / .shift() afterwards.
+    """
+    t = _uc_make(s, 28, weight=BOLD, **kw)
+    try:
+        t.to_edge(UP, buff=0.5)
+    except Exception:
+        pass
+    return t
 
 def Subtitle(s, **kw):
     """Section heading."""
