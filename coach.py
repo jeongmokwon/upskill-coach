@@ -55,7 +55,7 @@ class ClientCtx:
     """Per-WebSocket-connection session state."""
     __slots__ = ("ws", "user_id", "user_profile", "study_topic",
                  "section_id", "followups_stopped", "db_session_id",
-                 "teaching_style")
+                 "teaching_style", "apprentice")
 
     def __init__(self, ws):
         self.ws = ws
@@ -66,6 +66,14 @@ class ClientCtx:
         self.followups_stopped = False
         self.db_session_id = ""
         self.teaching_style = {}
+        # Apprenticeship mode state — separate from legacy chat flow
+        self.apprentice = {
+            "topic": "",
+            "diagnostic_log": [],  # [{question, answer, observation}]
+            "user_state": None,    # filled after diagnostic
+            "lesson_plan": None,   # fixed once created
+            "messages": [],        # generator conversation history
+        }
 
 
 # Map websocket → ClientCtx
@@ -173,6 +181,16 @@ async def ws_handler(request):
                     elif msg_type == "stop_followups":
                         ctx.followups_stopped = True
                         print("  [WS] Follow-ups stopped by user")
+                    elif msg_type == "apprentice_start":
+                        _spawn(handle_apprentice_start, (msg,), websocket)
+                    elif msg_type == "apprentice_diagnostic":
+                        _spawn(handle_apprentice_diagnostic, (msg,), websocket)
+                    elif msg_type == "apprentice_chat":
+                        _spawn(handle_apprentice_chat, (msg,), websocket)
+                    elif msg_type == "apprentice_practice_submit":
+                        _spawn(handle_apprentice_practice_submit, (msg,), websocket)
+                    elif msg_type == "apprentice_continue":
+                        _spawn(handle_apprentice_continue, (msg,), websocket)
                 except json.JSONDecodeError:
                     pass
                 except Exception as _outer_e:
@@ -242,8 +260,6 @@ async def _static_handler(request):
     if os.path.isfile(file_path):
         return web.FileResponse(file_path)
     return web.Response(text="Not Found", status=404)
-
-
 
 
 # ─── Admin (read-only) ────────────────────────────────────────────────
@@ -685,6 +701,8 @@ async def _admin_session_handler(request):
 
     return web.Response(text=_admin_html_page(f"Session {sid}", "".join(parts)),
                         content_type="text/html")
+
+
 @web.middleware
 async def _log_middleware(request, handler):
     """Log every incoming request for debugging."""
@@ -1452,7 +1470,7 @@ def _extract_typed_json(text, type_value):
             break
     return None, None
 
-TUTOR_SYSTEM_PROMPT = """You are a world-class personal tutor coaching a user through technical learning (currently: Karpathy's "Let's Build GPT" tutorial). Your teaching philosophy is based on these core principles:
+TUTOR_SYSTEM_PROMPT = """You are a world-class personal tutor coaching a user through technical learning. The specific topic the user is studying is injected further down in the user context — do not assume any particular subject a priori. Your teaching philosophy is based on these core principles:
 
 ## CORE PRINCIPLES
 
@@ -1519,15 +1537,16 @@ TUTOR_SYSTEM_PROMPT = """You are a world-class personal tutor coaching a user th
 - Concise and direct (user is ex-Google SWE, treat as intelligent adult)
 - Push when appropriate, but read the room
 - Natural conversation, not rigid Q&A format
-- Korean or English based on what user writes
+- Match the language the user writes in (the user may write in any language;
+  mirror their language without commenting on the choice)
 
 ## WHEN TO USE ANIMATIONS (VERY IMPORTANT — DO NOT SKIP)
 
 ### YOU CAN GENERATE ANIMATIONS
-The frontend has a template-based animation engine. When you emit a JSON
-object with `"type": "animation"`, the UI automatically opens a side panel
-and renders a multi-section animated visual explanation. This is a first-
-class capability of this tutor app.
+The frontend has a Manim-backed animation engine. When you emit a JSON
+object with `"type": "animation"`, the server writes a Manim scene,
+extracts it to a JSON timeline, and ships it to the side panel for live
+SVG playback. This is a first-class capability of this tutor app.
 
 **NEVER say "I can't create animations", "I don't have animation tools",
 "I can only use text", or anything similar.** You CAN. You do it by
@@ -1583,6 +1602,105 @@ Rules for the animation JSON:
 - NEVER wrap the JSON in markdown code fences — emit it as raw text.
 - NEVER explain first and animate later. The JSON comes FIRST.
 
+### ONE CONCEPT PER ANIMATION (VERY IMPORTANT)
+Each animation teaches ONE atomic concept (~8 seconds of Manim).
+Do NOT try to cram multiple ideas into one animation.
+
+When a topic has multiple sub-concepts (e.g. "how does idx turn into
+(B,T,C)?" decomposes into: (1) what (B,T) means, (2) what the embedding
+table looks like, (3) the lookup op, (4) stacking into (B,T,C)):
+
+1. Decide the sequence yourself before emitting anything.
+2. In this turn, emit a `description` that targets ONLY the first
+   sub-concept. Write prose that teaches that single piece alongside it.
+3. End the turn with a check-in question (e.g. "Make sense so far?",
+   "Any questions before we move on?", or its equivalent in the user's
+   language) — a prose question (NOT a fill_blank) that invites the
+   user to confirm or ask follow-ups.
+4. On the user's next acknowledgment, emit ANOTHER animation JSON for
+   the second sub-concept. Repeat until the decomposition is done.
+5. After the final sub-concept, use a fill_blank to lock in the whole
+   chain.
+
+Do NOT emit multiple animation JSON objects in one reply. Exactly one
+per turn, at the start.
+
+### PROSE SCOPE MUST MATCH ANIMATION SCOPE (key rule)
+The prose you write must talk about ONLY what the current animation
+visualizes. Everything else is deferred to the next turn.
+
+Forbidden:
+- Foreshadowing concepts you'll cover in the next turn ("later we'll
+  add positional embedding…" — don't; cover that when you cover it)
+- Stating shape/dimension numbers in prose that the animation does
+  not show
+- Jumping from concrete to abstract ("so generalized this is (B,T,C)")
+  — abstraction belongs in its own turn
+- Introducing more than one new term per turn (e.g. "embedding table"
+  and "lookup" are two distinct terms — pick the one the animation
+  is highlighting)
+
+Rule of thumb: if the animation shows only "X → Y", the prose says
+only that X → Y. Never describe in words what the learner cannot see
+on the screen.
+
+### CHECK-IN QUESTION IS MANDATORY
+Every coach turn (including ones with an animation) must end with a
+check-in question. Use a phrasing natural in the user's language —
+e.g. in English:
+- "Make sense so far?"
+- "Any questions before we move on?"
+- "Want me to dig deeper anywhere here?"
+
+(Use the equivalent in whatever language the user is writing in.)
+
+A turn without a check-in question is incomplete. Letting the user
+push forward with a single "ok" / acknowledgment moves at the
+coach's pace, not the learner's.
+
+The check-in question does NOT replace fill_blank — the check-in
+goes at the end of every turn; fill_blank goes at the end of a
+concept block.
+
+### NO STAGE SKIPPING
+Do not omit intermediate operations that actually exist in the code
+or algorithm. Example: in BigramLanguageModel, after tok_emb the
+next step is (pos_emb addition →) lm_head, not lm_head directly.
+Do not collapse the shape chain into something simpler "for clarity"
+— follow the real forward order. Skip a stage only if the user
+explicitly asks you to.
+
+### HANDLING MULTI-STAGE PROCESS REQUESTS
+When the user signals they want to understand a multi-step process
+end-to-end (signals: "the whole thing", "end-to-end", "flow",
+"overview", "from start to finish", or any question about a named
+function/pipeline/algorithm's overall behavior — and the same in
+other languages):
+
+1. Do NOT emit animation JSON in this turn.
+2. Instead, present a decomposition plan in prose:
+   - Numbered list of N stages
+   - Each stage must be small enough to be ONE animation
+   - Use the actual code/concept terms for stage names (not generic
+     "step 1, 2, 3")
+3. Ask which stage to start from ("Start with #1? Or jump to a
+   specific stage?").
+4. Only after the user confirms, emit the animation for the chosen
+   stage.
+
+Example (when the user asks about BigramLanguageModel forward pass):
+> "Here's how I'll break this down:
+>  1. idx (B,T) — the input shape
+>  2. tok_emb lookup → (B,T,C)
+>  3. add pos_emb → (B,T,C)
+>  4. lm_head → (B,T,vocab_size)
+>  5. loss computation
+>  Start with #1?"
+
+Never compress a multi-stage process into a single animation. When
+the user asks about "the whole thing", they want a map, not a
+3-second compressed video.
+
 ## INLINE COMPREHENSION CHECKS (VERY IMPORTANT — DO NOT SKIP)
 
 ### YOU MUST USE FILL-IN-THE-BLANK CHECKS REGULARLY
@@ -1606,9 +1724,10 @@ You MUST emit a fill_blank in any of these situations:
    explanation turn, append a fill_blank JSON that tests the KEY idea
    you just explained. Do this even if the user didn't ask for a quiz.
 
-2. **After the user says "makes sense", "I get it", "ok", "understood",
-   "알겠어", "이해했어", "오케이", or similar acknowledgment.** Their
-   acknowledgment means it's time to verify with a concrete check.
+2. **After any user acknowledgment** — e.g. "makes sense", "I get
+   it", "ok", "understood", "got it", or the equivalent in whatever
+   language the user is writing in. Their acknowledgment means it's
+   time to verify with a concrete check.
 
 3. **After every 2-3 substantive exchanges on the same topic.** Don't
    go more than ~3 turns of explanation without a fill_blank check.
@@ -1791,6 +1910,730 @@ def handle_chat_message(msg):
             return
 
 
+# ═══════════════════════════════════════════════════════════════════
+# APPRENTICESHIP MODE — new architecture (eval → generator → panels)
+# ═══════════════════════════════════════════════════════════════════
+
+APPRENTICE_MODEL = "claude-sonnet-4-20250514"
+NUM_DIAGNOSTIC_QUESTIONS = 3
+
+# MVP: skip diagnostic, use a fixed beginner profile so we can focus on the teaching flow.
+# Revive the diagnostic phase later once the teaching UX is stable.
+APPRENTICE_SKIP_DIAGNOSTIC = True
+HARDCODED_USER_STATE = {
+    "tier": "lower",
+    "tier_reasoning": "Hardcoded for MVP testing — treat as absolute beginner with strong motivation.",
+    "dominant_error_patterns": [],
+    "current_emotional_states": [
+        {"state": "B007", "intensity": "mid"}
+    ],
+    "summary_for_generator": (
+        "This learner is a complete beginner — knows essentially nothing about ML yet. "
+        "However they are motivated and willing to put in serious effort. "
+        "Use maximum scaffolding, strict one-concept-per-turn (P018), errorless learning (P007), "
+        "heavy inline completion prompts (P019), and P022 barrier reduction. "
+        "For T002 practice, give only the single most important substep at a time."
+    ),
+}
+
+_ontology_cache = None
+
+
+def _load_ontology():
+    """Load and cache ontology.json from project dir."""
+    global _ontology_cache
+    if _ontology_cache is None:
+        path = os.path.join(PROJECT_DIR, "ontology.json")
+        with open(path) as f:
+            _ontology_cache = json.load(f)
+        print(f"  [Ontology] loaded: {len(_ontology_cache.get('user_states', []))} states, "
+              f"{len(_ontology_cache.get('pedagogical_principles', []))} principles, "
+              f"{len(_ontology_cache.get('panels', []))} panels", flush=True)
+    return _ontology_cache
+
+
+def _parse_json_response(text):
+    """Parse JSON from LLM response, tolerant to surrounding text."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        import re as _re
+        m = _re.search(r'\{[\s\S]*\}', text)
+        if m:
+            return json.loads(m.group())
+        raise
+
+
+def _call_apprentice_llm(system_prompt, user_message="proceed", max_tokens=2048):
+    """Single-shot LLM call for eval/generator, returns parsed JSON."""
+    response = get_client().messages.create(
+        model=APPRENTICE_MODEL,
+        max_tokens=max_tokens,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_message}],
+    )
+    return _parse_json_response(response.content[0].text)
+
+
+# ─── Eval agent prompts ────────────────────────────────────────────
+
+def _eval_question_prompt(ontology, topic, history):
+    return f"""You are a diagnostic evaluator for a learning coach. The user wants to learn: {topic}
+
+Your job: generate ONE short-answer diagnostic question that assesses the learner's current level.
+
+These questions follow the "short-answer diagnostic" principle:
+- Answerable in 1-20 words
+- Wrong answers are informative (see error_taxonomy)
+- Probes: pattern recognition, working memory, transfer ability, attention to detail
+- Start foundational; escalate only if earlier answers show strong signal
+
+You have asked {len(history)} diagnostic question(s) so far of {NUM_DIAGNOSTIC_QUESTIONS} total.
+
+Previous Q&A:
+{json.dumps(history, indent=2, ensure_ascii=False) if history else "(none yet)"}
+
+Reference — error_taxonomy (what wrong answers reveal):
+{json.dumps(ontology["error_taxonomy"], indent=2, ensure_ascii=False)}
+
+Reference — diagnostic_cues:
+{json.dumps(ontology["diagnostic_cues"], indent=2, ensure_ascii=False)}
+
+Output ONLY a JSON object:
+{{
+  "question": "the diagnostic question in the user's language",
+  "example_shown": "optional example shown before the question, or null",
+  "ideal_answer": "what a correct answer would look like",
+  "tests_for": "what this question is probing"
+}}"""
+
+
+def _eval_observe_prompt(ontology, topic, question_obj, user_answer):
+    return f"""You are a diagnostic evaluator analyzing a single user answer.
+
+Topic: {topic}
+
+Question asked:
+{json.dumps(question_obj, indent=2, ensure_ascii=False)}
+
+User's answer: "{user_answer}"
+
+Reference — error_taxonomy:
+{json.dumps(ontology["error_taxonomy"], indent=2, ensure_ascii=False)}
+
+Reference — diagnostic_cues:
+{json.dumps(ontology["diagnostic_cues"], indent=2, ensure_ascii=False)}
+
+Reference — user_states:
+{json.dumps(ontology["user_states"], indent=2, ensure_ascii=False)}
+
+Output ONLY a JSON object:
+{{
+  "error_type": "E001-E007 or null if correct",
+  "error_reasoning": "why you chose this error_type",
+  "cue_ratings": {{
+    "D001_relevance": "high | mid | low",
+    "D002_orthographic": "high | mid | low",
+    "D003_completeness": "high | mid | low"
+  }},
+  "observed_states": [
+    {{ "state": "B0XX", "intensity": "low | mid | high" }}
+  ],
+  "notes": "brief observation"
+}}"""
+
+
+def _eval_conclude_prompt(ontology, topic, diagnostic_log):
+    return f"""You are a diagnostic evaluator. The diagnostic phase is complete.
+
+Topic: {topic}
+
+Diagnostic log:
+{json.dumps(diagnostic_log, indent=2, ensure_ascii=False)}
+
+Synthesize the learner's profile.
+
+Tier definitions:
+- upper: pattern recognition + transfer + attention to detail all strong
+- upper-mid: mostly correct with minor syntactic or completeness issues
+- mid: can reproduce but struggles to modify; some orthographic slips
+- lower-mid: incomplete answers, fragments, low attention to detail
+- lower: single elements, no structure, minimal engagement
+- lowest: avoidance, irrelevant, or complete disconnect
+
+Output ONLY a JSON object:
+{{
+  "tier": "upper | upper-mid | mid | lower-mid | lower | lowest",
+  "tier_reasoning": "1-2 sentences",
+  "dominant_error_patterns": ["E0XX", ...],
+  "current_emotional_states": [
+    {{ "state": "B0XX", "intensity": "low | mid | high" }}
+  ],
+  "summary_for_generator": "3-5 sentence narrative in the voice of a tutor briefing another tutor"
+}}"""
+
+
+# ─── Generator agent prompt ────────────────────────────────────────
+
+def _generator_system_prompt(ontology, topic, user_state, lesson_plan):
+    plan_section = (
+        json.dumps(lesson_plan, indent=2, ensure_ascii=False)
+        if lesson_plan
+        else "(no lesson plan yet — create one in your next turn if T002 applies)"
+    )
+
+    return f"""You are an expert learning coach. Your job is to teach the user about: {topic}
+
+CRITICAL — TOPIC vs DIAGNOSTIC CONTEXT:
+- The user's ACTUAL learning goal is: "{topic}". This is what you teach.
+- The diagnostic phase may have touched on DIFFERENT sub-topics (e.g., specific prerequisites) only to assess the learner's level.
+- DO NOT teach the diagnostic sub-topics as the main lesson. DO NOT continue asking diagnostic-style questions.
+- DO NOT ask more short-answer assessment questions. The diagnostic phase is COMPLETE.
+- Your entire teaching arc must be about "{topic}".
+
+═══════════════════════════════════════════════════════════
+LEARNER PROFILE (from diagnostic phase — used to adapt your teaching style, NOT to choose what to teach)
+═══════════════════════════════════════════════════════════
+
+{json.dumps(user_state, indent=2, ensure_ascii=False)}
+
+Adapt your teaching STYLE (not your TOPIC) based on this profile:
+- If tier is lower/lower-mid: maximize scaffolding, strict P018, errorless learning (P007), heavy P019 inline prompts, P022 barrier reduction. For T002 practice: only the single most important substep.
+- If tier is mid: standard scaffolding, still err on errorless, frequent check-ins. For T002 practice: 1-2 key substeps.
+- If tier is upper-mid: standard approach, can use socratic questioning. For T002 practice: most substeps.
+- If tier is upper: socratic questioning (P020), desirable difficulty (P016), less scaffolding. For T002 practice: all substeps.
+
+═══════════════════════════════════════════════════════════
+CURRENT LESSON PLAN (fixed once created this session)
+═══════════════════════════════════════════════════════════
+
+{plan_section}
+
+═══════════════════════════════════════════════════════════
+OUTPUT FORMAT (always this exact JSON)
+═══════════════════════════════════════════════════════════
+
+{{
+  "message": "short chat message — keep it EMPTY or brief; the cell carries the lesson.",
+  "chat_mode": "minimized | expanded",
+  "await_user": false,
+  "panels": [
+    {{
+      "type": "panel_apprentice_demo",
+      "action": "open | update",
+      "content": {{
+        "title": "string",
+        "language": "string",
+        "substeps": [
+          {{
+            "substep_id": "s1",
+            "label": "short label",
+            "pass_1": {{ "big_display": "string", "caption": "string" }},
+            "pass_2": {{
+              "blocks": [
+                {{ "type": "comment", "text": "# planning comment" }},
+                {{ "type": "code", "text": "actual_code()" }},
+                {{ "type": "narrative", "text": "why this matters, context, gotchas" }}
+              ]
+            }}
+          }}
+        ],
+        "focused_substep_id": "s1"
+      }}
+    }}
+  ],
+  "lesson_plan": {{
+    "topic": "string",
+    "substeps": [
+      {{ "substep_id": "s1", "label": "short label", "key_idea": "what this substep accomplishes" }}
+    ],
+    "practice_substep_ids": ["s1"]
+  }},
+  "meta": {{
+    "principle_used": "P0XX",
+    "pattern": "T0XX or null",
+    "pattern_step": "step name or null"
+  }}
+}}
+
+Include "lesson_plan" ONLY on the plan turn (T002 step="plan"). Otherwise omit.
+Once a lesson_plan exists above, DO NOT modify it — it is fixed for the session.
+
+chat_mode guidance:
+- "minimized" (default): short message in collapsed chat handle
+- "expanded": use only when the user asks a question or needs a longer explanation that cannot fit next to the panels
+
+═══════════════════════════════════════════════════════════
+TEACHING PRINCIPLES
+═══════════════════════════════════════════════════════════
+
+{json.dumps(ontology["pedagogical_principles"], indent=2, ensure_ascii=False)}
+
+═══════════════════════════════════════════════════════════
+AVAILABLE PANELS
+═══════════════════════════════════════════════════════════
+
+{json.dumps(ontology["panels"], indent=2, ensure_ascii=False)}
+
+═══════════════════════════════════════════════════════════
+TEACHING PATTERNS
+═══════════════════════════════════════════════════════════
+
+{json.dumps(ontology["teaching_patterns"], indent=2, ensure_ascii=False)}
+
+═══════════════════════════════════════════════════════════
+RULES
+═══════════════════════════════════════════════════════════
+
+- Respond in the same language the user writes in
+- Apply ONE concept per turn/cell (P018)
+- Start concrete, move to abstract (P011)
+- panel_animation is NOT AVAILABLE in this build. Do not emit panel_animation.
+- panel_apprentice_practice is NOT AVAILABLE in this build (deferred).
+
+═══════════════════════════════════════════════════════════
+T002 FLOW — plan, then one-cell-per-turn
+═══════════════════════════════════════════════════════════
+
+TURN 1 (plan):
+  - Execute T002 step="plan". Emit the "lesson_plan" JSON field with substeps decomposed for the topic.
+  - Chat message: brief 1-liner like "Here's our plan — starting with the first step."
+  - NO panel updates in this turn. focused_substep_id is not yet set.
+
+TURN 2 (first cell) and every subsequent TURN (next cell):
+  - Emit ONE panel_apprentice_demo update.
+  - action: "open" on TURN 2, "update" thereafter.
+  - substeps: the full list of cells emitted so far, PLUS the new one. Always include prior cells so the
+    frontend can reconcile and keep them rendered with their pass_1 + pass_2 content intact.
+  - focused_substep_id: the NEW (most recently added) substep_id.
+  - Chat message empty or a single short sentence.
+  - await_user: false while cells remain in the lesson_plan; true only when the walkthrough is complete.
+
+═══════════════════════════════════════════════════════════
+CELL STRUCTURE (each substep cell deepens INSIDE itself)
+═══════════════════════════════════════════════════════════
+
+Each cell carries BOTH layers in the same update:
+
+  pass_1 — BIG PICTURE (rendered first)
+    - big_display: a concrete artifact shown at large font. The emotional hook — a real string, a short
+      list, a formula, a numeric example. Keep it simple. Empty string is allowed if label + caption
+      alone make the point.
+    - caption: one plain-language sentence saying what this step is about.
+
+  pass_2 — INTERLEAVED COMMENTS + CODE + NARRATIVE (types in under a divider)
+    - blocks: an ORDERED list of {{ type, text }} items. You (the coach) choose the order and count.
+    - Three block types, each with a distinct role:
+        * type: "comment"   — # planning comments an engineer would write BEFORE the next code block.
+                              Example: "# read the entire text into one long string\\n# this is our dataset"
+                              Each line must start with "#". Multiple lines allowed.
+        * type: "code"      — real Python (or target language) that IMPLEMENTS the preceding comment block.
+                              No "#" prefix. Actual, runnable code.
+                              Example: "with open('input.txt', 'r') as f:\\n    text = f.read()"
+        * type: "narrative" — the coach speaking TO the learner — context, reasoning, why this matters,
+                              gotchas, analogies. Prose style. NOT code, NOT # comments.
+                              Example: "This becomes the dataset the model learns from. The patterns in
+                              these characters are what it will try to mimic."
+
+    - Typical patterns (but NOT prescribed — coach decides):
+        comment → code → narrative
+        narrative → comment → code → comment → code
+        comment → code → narrative → code → comment → code
+      Pick the flow that best teaches THIS substep. Let the pedagogy lead the structure.
+
+    - Total blocks per cell: 3-7 is typical. More if the substep genuinely needs it.
+
+    - Block guidance:
+        * Comments state INTENT ("# ..."); code DELIVERS it. Keep them close — a comment block should
+          usually be followed by the code that implements it.
+        * Narrative explains WHY or REFRAMES — use it when the code alone won't land the concept,
+          or when the learner needs context before/after seeing the code.
+        * Never write comments that just re-describe the next line. Comments should teach the plan;
+          code should execute the plan.
+
+  NO blanks, NO questions in this build. Those are deferred to a future pass.
+
+═══════════════════════════════════════════════════════════
+CELL DESIGN GUIDANCE
+═══════════════════════════════════════════════════════════
+
+  - Each cell's big_display should be as CONCRETE as possible. Prefer an actual example the learner can
+    read over an abstract description.
+      GOOD: big_display = 'text = "First Citizen: Before we proceed any further, hear me speak."'
+      BAD : big_display = 'The raw text data'
+  - Captions: plain language, under ~15 words ideal.
+  - CONSISTENCY: caption and big_display must match. If the caption says "the complete works of
+    Shakespeare" the big_display MUST end with "..." to signal truncation. When big_display is a
+    snippet of something larger, end with "..." and phrase the caption accordingly ("Here's a snippet
+    of the training text").
+  - RESPECT THE SOURCE. If the topic references a specific source (tutorial, textbook, paper, lecture),
+    your artifacts and pseudo-code MUST match what that source actually uses — not a generic
+    reinvention. Example: "Karpathy's Let's Build GPT" uses slicing like
+    `x = data[i:i+block_size]; y = data[i+1:i+block_size+1]`, NOT `for i in range: ...` Python loops.
+    If the exact source conventions are uncertain, pick idiomatic library code over naive loops.
+  - Pseudo-code lines should carry WHY, not just WHAT. "# for each training pair" is weak.
+    "# for each training pair (x[i], y[i]), increment N[x[i], y[i]] — this accumulates the bigram
+    counts" is strong.
+
+EXAMPLE CELL (topic: Karpathy's Bigram Language Model, beginner learner):
+{{
+  "substep_id": "s2",
+  "label": "Build character vocabulary",
+  "pass_1": {{
+    "big_display": "[' ', '!', '$', '&', ',', '-', '.', ':', ';', '?', 'A', 'B', 'C', ..., 'z']",
+    "caption": "We collect every unique character in the text — this is our vocabulary."
+  }},
+  "pass_2": {{
+    "blocks": [
+      {{ "type": "comment", "text": "# take the set of characters that appear in text\\n# sort them so indexing is stable across runs" }},
+      {{ "type": "code", "text": "chars = sorted(list(set(text)))\\nvocab_size = len(chars)" }},
+      {{ "type": "narrative", "text": "The position of each character in this sorted list becomes its integer token id — the model will always see 'a' as the same number." }},
+      {{ "type": "comment", "text": "# build two lookup tables: char→int for encoding, int→char for decoding" }},
+      {{ "type": "code", "text": "stoi = {{ch: i for i, ch in enumerate(chars)}}\\nitos = {{i: ch for i, ch in enumerate(chars)}}" }}
+    ]
+  }}
+}}
+
+═══════════════════════════════════════════════════════════
+OUTPUT RULES
+═══════════════════════════════════════════════════════════
+
+- DO NOT narrate cells in chat. Caption + pseudo_code carry the lesson. Chat stays empty or one short
+  acknowledgment.
+- DO NOT emit panel_animation or panel_apprentice_practice updates.
+- EACH turn after plan delivers exactly ONE new cell, with ALL prior cells still present in the
+  substeps array (so the frontend can render stable state).
+- ALWAYS output valid JSON — no plain text.
+"""
+
+
+# ─── WS handlers ───────────────────────────────────────────────────
+
+def handle_apprentice_start(msg):
+    """Kick off a new apprenticeship session.
+
+    If APPRENTICE_SKIP_DIAGNOSTIC is True, uses a hardcoded beginner user_state
+    and jumps straight to the teaching phase. Otherwise runs the diagnostic flow.
+    """
+    topic = (msg.get("topic") or "").strip()
+    if not topic:
+        send_to_client({"type": "apprentice_error", "message": "topic is required"})
+        return
+
+    ctx = _ctx()
+    if not ctx:
+        return
+
+    ctx.apprentice["topic"] = topic
+    ctx.apprentice["diagnostic_log"] = []
+    ctx.apprentice["user_state"] = None
+    ctx.apprentice["lesson_plan"] = None
+    ctx.apprentice["messages"] = []
+
+    if APPRENTICE_SKIP_DIAGNOSTIC:
+        # Bypass diagnostic — hardcoded beginner profile
+        ctx.apprentice["user_state"] = dict(HARDCODED_USER_STATE)
+        print(f"  [Apprentice] start: topic='{topic}' (diagnostic SKIPPED, tier=lower hardcoded)",
+              flush=True)
+
+        send_to_client({
+            "type": "apprentice_greeting",
+            "message": f"Great — let's start on {topic}. I'll sketch a short plan tailored to your level first.",
+        })
+
+        # Also notify client that diagnostic is "done" so chat auto-expands
+        send_to_client({
+            "type": "apprentice_diagnostic_done",
+            "user_state": ctx.apprentice["user_state"],
+        })
+
+        # Prime generator with T002 plan directive
+        priming = (
+            f"[system] My learning goal is: {topic}. "
+            f"No diagnostic was run — assume I am a complete beginner with strong motivation. "
+            f"Please execute T002 step=\"plan\" NOW. "
+            f"Decompose {topic} into 4-8 substeps appropriate for tier=lower (small, gentle steps). "
+            f"Output the lesson_plan field in your JSON. "
+            f"In the chat message say one short line like 'Here's our plan — starting with the first step.'. "
+            f"Do NOT emit panel updates in this turn. The first substep cell will be delivered in the next turn."
+        )
+        # Plan turn: explicitly strip panels in case the generator ignores the instruction
+        _run_generator_turn(ctx, priming, strip_panels=True)
+
+        # After plan is created, auto-trigger the first cell (model step)
+        _request_first_cell(ctx)
+        return
+
+    # Full flow: run diagnostic
+    print(f"  [Apprentice] start: topic='{topic}'", flush=True)
+    send_to_client({
+        "type": "apprentice_greeting",
+        "message": f"Great — let's get started on {topic}. First, a few short questions to figure out your current level.",
+    })
+    _ask_next_diagnostic(ctx)
+
+
+def _ask_next_diagnostic(ctx):
+    """Generate and send the next diagnostic question (or conclude)."""
+    ontology = _load_ontology()
+    topic = ctx.apprentice["topic"]
+    log = ctx.apprentice["diagnostic_log"]
+
+    if len(log) >= NUM_DIAGNOSTIC_QUESTIONS:
+        _conclude_diagnostic(ctx)
+        return
+
+    try:
+        q = _call_apprentice_llm(_eval_question_prompt(ontology, topic, log))
+    except Exception as e:
+        print(f"  [Apprentice] eval question gen failed: {e}", flush=True)
+        send_to_client({"type": "apprentice_error", "message": "Failed to generate a diagnostic question. Please try again."})
+        return
+
+    # Store the current question on ctx so we know what the next answer is for
+    ctx.apprentice["_current_question"] = q
+
+    send_to_client({
+        "type": "apprentice_diagnostic_question",
+        "q_index": len(log),
+        "total": NUM_DIAGNOSTIC_QUESTIONS,
+        "question": q.get("question", ""),
+        "example_shown": q.get("example_shown"),
+        "tests_for": q.get("tests_for", ""),
+    })
+
+
+def handle_apprentice_diagnostic(msg):
+    """Receive an answer to a diagnostic question, observe, then ask next or conclude."""
+    answer = (msg.get("answer") or "").strip()
+    ctx = _ctx()
+    if not ctx:
+        return
+
+    q = ctx.apprentice.get("_current_question")
+    if not q:
+        send_to_client({"type": "apprentice_error", "message": "no active diagnostic question"})
+        return
+
+    ontology = _load_ontology()
+    topic = ctx.apprentice["topic"]
+
+    try:
+        observation = _call_apprentice_llm(_eval_observe_prompt(ontology, topic, q, answer))
+    except Exception as e:
+        print(f"  [Apprentice] eval observe failed: {e}", flush=True)
+        observation = {"error_type": None, "notes": f"(observation failed: {e})"}
+
+    ctx.apprentice["diagnostic_log"].append({
+        "question": q,
+        "answer": answer,
+        "observation": observation,
+    })
+
+    print(f"  [Apprentice] diag Q{len(ctx.apprentice['diagnostic_log'])}: "
+          f"error_type={observation.get('error_type')} notes={observation.get('notes', '')[:80]}",
+          flush=True)
+
+    _ask_next_diagnostic(ctx)
+
+
+def _conclude_diagnostic(ctx):
+    """Eval synthesizes user_state, send to client, ready for teaching."""
+    ontology = _load_ontology()
+    topic = ctx.apprentice["topic"]
+
+    try:
+        user_state = _call_apprentice_llm(
+            _eval_conclude_prompt(ontology, topic, ctx.apprentice["diagnostic_log"])
+        )
+    except Exception as e:
+        print(f"  [Apprentice] eval conclude failed: {e}", flush=True)
+        user_state = {
+            "tier": "mid",
+            "tier_reasoning": "diagnostic conclusion failed; defaulting to mid",
+            "dominant_error_patterns": [],
+            "current_emotional_states": [],
+            "summary_for_generator": "Diagnostic failed. Treat as mid-tier learner with unknown specifics.",
+        }
+
+    ctx.apprentice["user_state"] = user_state
+    print(f"  [Apprentice] diagnostic done: tier={user_state.get('tier')}", flush=True)
+
+    send_to_client({
+        "type": "apprentice_diagnostic_done",
+        "user_state": user_state,
+    })
+
+    # Auto-start teaching with a strong priming message that forces T002 plan on turn 1
+    priming = (
+        f"[system] Diagnostic is complete. My learning goal is: {topic}. "
+        f"Please execute T002 step=\"plan\" NOW. "
+        f"Decompose {topic} into substeps appropriate for my tier. "
+        f"Output the lesson_plan field in your JSON response. "
+        f"Do not ask any more diagnostic questions. Do not start teaching content in this turn — "
+        f"only produce the lesson plan and a brief acknowledgment message."
+    )
+    _run_generator_turn(ctx, priming)
+
+
+def handle_apprentice_chat(msg):
+    """User sends a chat message during the teaching phase."""
+    text = (msg.get("message") or "").strip()
+    if not text:
+        return
+    ctx = _ctx()
+    if not ctx:
+        return
+    if not ctx.apprentice.get("user_state"):
+        send_to_client({"type": "apprentice_error", "message": "diagnostic not complete"})
+        return
+    _run_generator_turn(ctx, text)
+
+
+def handle_apprentice_practice_submit(msg):
+    """User submits a practice attempt for a substep."""
+    substep_id = msg.get("substep_id", "")
+    code = msg.get("code", "")
+    ctx = _ctx()
+    if not ctx:
+        return
+
+    # Pass the submission to generator as a structured user turn
+    submission_msg = (
+        f"[practice_submit] substep_id={substep_id}\n"
+        f"```\n{code}\n```\n"
+        f"Please review and give red-pen feedback. Then decide if the user is ready for the next step."
+    )
+    _run_generator_turn(ctx, submission_msg)
+
+
+def _request_first_cell(ctx):
+    """After the plan turn, ask the generator to deliver the FIRST substep cell."""
+    priming = (
+        "[system] The lesson plan is set. Now deliver the FIRST substep cell.\n"
+        "- Emit a SINGLE panel_apprentice_demo update with action:\"open\", containing ONE substep "
+        "in the substeps array — the first substep from the lesson_plan.\n"
+        "- The substep must carry BOTH pass_1 AND pass_2 content:\n"
+        "    pass_1: { big_display, caption }\n"
+        "    pass_2: { pseudo_code }   # 3-6 lines of # comments\n"
+        "- focused_substep_id must equal the substep_id of the cell you just emitted.\n"
+        "- Keep the chat message empty or a single short sentence.\n"
+        "- Set await_user: false. The frontend will automatically ask for the next cell when this one "
+        "finishes rendering."
+    )
+    _run_generator_turn(ctx, priming)
+
+
+def handle_apprentice_continue(msg):
+    """Frontend finished rendering the current cell and wants the next one.
+
+    The current substep's blank answer (if any) is included so the generator knows
+    how the learner did.
+    """
+    ctx = _ctx()
+    if not ctx:
+        return
+
+    substep_id = msg.get("substep_id", "")
+    user_answer = msg.get("user_answer", "")
+    answer_correct = msg.get("answer_correct", None)
+
+    priming_parts = [
+        "[system] The learner finished rendering the current cell. Deliver the NEXT substep cell.",
+    ]
+    if substep_id:
+        priming_parts.append(f"Cell just completed: {substep_id}.")
+    if user_answer:
+        status = "correct" if answer_correct else "incorrect" if answer_correct is False else "(no check)"
+        priming_parts.append(f"Their blank answer: '{user_answer}' ({status}).")
+    priming_parts.append(
+        "Emit a SINGLE panel_apprentice_demo update with action:\"update\". "
+        "The substeps array must contain ALL substeps emitted so far (including prior cells) PLUS the "
+        "next one from the lesson_plan. Each substep MUST carry both pass_1 and pass_2 content. "
+        "Set focused_substep_id to the NEW substep_id. Chat message empty or one short sentence. "
+        "Set await_user: false. If the lesson_plan is exhausted, set await_user: true and message "
+        "the learner that the walkthrough is complete."
+    )
+    priming = " ".join(priming_parts)
+    _run_generator_turn(ctx, priming)
+
+
+def _run_generator_turn(ctx, user_message, strip_panels=False):
+    """One generator turn: build prompt, call, parse, dispatch panel updates.
+
+    strip_panels=True clears the `panels` field before dispatch — useful for
+    the plan turn, where the model is told not to emit panels but sometimes does.
+    """
+    ontology = _load_ontology()
+    topic = ctx.apprentice["topic"]
+    user_state = ctx.apprentice.get("user_state")
+    lesson_plan = ctx.apprentice.get("lesson_plan")
+    history = ctx.apprentice["messages"]
+
+    history.append({"role": "user", "content": user_message})
+
+    system = _generator_system_prompt(ontology, topic, user_state, lesson_plan)
+
+    try:
+        response = get_client().messages.create(
+            model=APPRENTICE_MODEL,
+            max_tokens=20000,  # large enough for detailed animation scenes (~40-80 timeline steps)
+            system=system,
+            messages=history,
+        )
+        raw = response.content[0].text
+    except Exception as e:
+        print(f"  [Apprentice] generator call failed: {e}", flush=True)
+        send_to_client({"type": "apprentice_error", "message": f"generator error: {e}"})
+        history.pop()  # drop the user message we just added so retry works
+        return
+
+    history.append({"role": "assistant", "content": raw})
+
+    try:
+        parsed = _parse_json_response(raw)
+    except Exception as e:
+        print(f"  [Apprentice] generator response not JSON: {e}; raw head: {raw[:200]}", flush=True)
+        send_to_client({
+            "type": "apprentice_teach",
+            "message": raw,  # fall back to raw text
+            "chat_mode": "expanded",
+            "panels": [],
+            "meta": {},
+        })
+        return
+
+    # Capture lesson_plan on first creation only (fixed after)
+    if parsed.get("lesson_plan") and ctx.apprentice.get("lesson_plan") is None:
+        ctx.apprentice["lesson_plan"] = parsed["lesson_plan"]
+        print(f"  [Apprentice] lesson_plan created: "
+              f"{len(parsed['lesson_plan'].get('substeps', []))} substeps, "
+              f"practice on {parsed['lesson_plan'].get('practice_substep_ids', [])}",
+              flush=True)
+
+    meta = parsed.get("meta", {}) or {}
+    panels_out = parsed.get("panels", []) or []
+    if strip_panels and panels_out:
+        print(f"  [Apprentice] stripping {len(panels_out)} unsolicited panel(s) from plan turn: "
+              f"{[p.get('type') for p in panels_out]}", flush=True)
+        panels_out = []
+
+    print(f"  [Apprentice] turn: principle={meta.get('principle_used')} "
+          f"pattern={meta.get('pattern')} step={meta.get('pattern_step')} "
+          f"panels={[p.get('type') for p in panels_out]}",
+          flush=True)
+
+    send_to_client({
+        "type": "apprentice_teach",
+        "message": parsed.get("message", ""),
+        "chat_mode": parsed.get("chat_mode", "minimized"),
+        "await_user": parsed.get("await_user", False),
+        "panels": panels_out,
+        "meta": meta,
+        "lesson_plan": ctx.apprentice.get("lesson_plan"),
+    })
+
+
 _teaching_style = {}  # Extracted from previous insights at session start
 
 
@@ -1813,14 +2656,14 @@ def extract_teaching_style():
 
     insights_block = "\n---\n".join(insights_text)
 
-    system = """아래 3개 세션 분석 결과를 보고, 이 학습자에게 최적화된 교육 방식을 추출해줘.
+    system = """Given the analysis of this learner's 3 most recent sessions, extract the teaching style that works best for them.
 
-다음 형태로만 리턴해줘:
+Return ONLY this JSON shape:
 {
-  "explanation_style": "구체적 선호 방식",
-  "pacing": "속도 관련 특성",
-  "challenge_level": "도전 수준 권장사항",
-  "conversation_flow": "대화 진행 방식 선호"
+  "explanation_style": "<specific preferred mode>",
+  "pacing": "<speed-related trait>",
+  "challenge_level": "<recommended challenge level>",
+  "conversation_flow": "<preferred conversational flow>"
 }
 
 - Be very specific and actionable, not generic
@@ -1837,7 +2680,7 @@ def extract_teaching_style():
                 max_tokens=400,
                 system=system,
                 messages=[
-                    {"role": "user", "content": f"과거 세션 분석 결과:\n{insights_block}"},
+                    {"role": "user", "content": f"Past session analysis results:\n{insights_block}"},
                     {"role": "assistant", "content": "{"},
                 ],
             ) as stream_resp:

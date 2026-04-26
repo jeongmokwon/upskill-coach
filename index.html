@@ -478,6 +478,10 @@
      ══════════════════════════════════════════════════════════════ */
 
   .home-apprentice-btn {
+    /* Apprentice mode entry hidden for the small-user release.
+       Keep the button + handler code intact so we can re-enable
+       by removing this `display: none` line. */
+    display: none;
     margin-top: 20px; padding: 10px 24px; background: transparent;
     color: #bc8cff; border: 1px solid #bc8cff60; border-radius: 10px;
     font-size: 13px; cursor: pointer; transition: all 0.2s;
