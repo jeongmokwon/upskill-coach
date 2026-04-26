@@ -1289,20 +1289,37 @@ def CodeText(s, **kw):
 
 
 def _inject_typography_helpers(manim_code: str) -> str:
-    """Prepend the helper definitions right after the LLM's manim
-    `import *` line so Title/Subtitle/etc. (and BOLD) are in scope
-    when the Scene's construct() runs.
+    """Inject typography helpers so Title/Subtitle/etc. point at our
+    factory functions inside the Scene's construct().
 
-    If we don't see a `from manim import *`, prepend our own at the
-    very top — the LLM's later `from manim import *` (if any) is
-    idempotent.
+    Prepending alone wasn't enough: prod logs showed the LLM defines
+    its OWN `def Title(text, **kwargs): return Text(text, font="Inter",
+    font_size=28, ...)` at the top of the script (it copies the names
+    from the prompt's helper catalog). Python resolves later `def`
+    statements as overwrites at module level — so the LLM's def
+    silently shadowed ours, the `_uc_font_size` marker never got
+    stamped (logged as `_uc_marker=None` for every Text), and we
+    fell back to Manim's `font_size` property (which drifts on
+    Render — see height/initial_height divergence in the [serialize]
+    log for any text containing `(`, `=`, `,`, `→`).
+
+    Strategy:
+      1. Ensure `from manim import *` is at the top so Text / BOLD
+         are available inside the helpers' bodies.
+      2. APPEND the helper prelude AFTER the LLM's code. Python's
+         module-level lookup uses the latest binding, so when
+         construct() finally runs and looks up `Title`, it finds OUR
+         def (the appended one) — regardless of whether the LLM
+         defined its own `def Title` earlier in the file.
     """
     import re as _re
-    m = _re.search(r'^\s*from\s+manim\s+import\s+\*\s*$', manim_code, _re.MULTILINE)
-    if m:
-        insert_at = m.end()
-        return manim_code[:insert_at] + '\n\n' + _HELPER_PRELUDE + manim_code[insert_at:]
-    return 'from manim import *\n\n' + _HELPER_PRELUDE + manim_code
+    has_import = bool(_re.search(r'^\s*from\s+manim\s+import\s+\*\s*$',
+                                 manim_code, _re.MULTILINE))
+    head = '' if has_import else 'from manim import *\n\n'
+    # Trailing newline + blank line to keep the appended block visually
+    # separate from whatever LLM code ends with (often a class def with
+    # no trailing newline).
+    return head + manim_code + '\n\n' + _HELPER_PRELUDE
 
 
 def handle_explain_animation(msg):
