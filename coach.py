@@ -1825,6 +1825,17 @@ Rules for the animation JSON:
 Each animation teaches ONE atomic concept (~8 seconds of Manim).
 Do NOT try to cram multiple ideas into one animation.
 
+CONCRETE LIMIT: an animation should reveal 1-2 teaching steps,
+absolute maximum 3. Counting "steps" = how many distinct things
+the learner has to track (an axis label, a matrix, an arrow showing
+a transformation, a result tensor — that's already 4 things, too
+many). If your scene has 4+ things appearing in sequence, you're
+trying to fit two animations' worth of content into one — split it.
+
+A scene with too many steps is the #1 source of layout drift /
+overlap problems. Fewer things on screen = each thing has more
+room and the learner has more attention budget.
+
 When a topic has multiple sub-concepts (e.g. "how does idx turn into
 (B,T,C)?" decomposes into: (1) what (B,T) means, (2) what the embedding
 table looks like, (3) the lookup op, (4) stacking into (B,T,C)):
@@ -1898,7 +1909,14 @@ other languages):
 
 1. Do NOT emit animation JSON in this turn.
 2. Instead, present a decomposition plan in prose:
-   - Numbered list of N stages
+   - Numbered list of stages — DECOMPOSE AS FINELY AS POSSIBLE.
+     There is NO upper bound on stage count and a finer split is
+     ALWAYS preferable to a coarse one. 8-15 stages for a complex
+     topic is normal and good. The constraint is the OPPOSITE
+     direction: each stage must fit in 1-2 (max 3) reveal steps
+     of a single animation (see ONE CONCEPT PER ANIMATION). When
+     in doubt, split a stage into two — never merge two stages
+     into one.
    - Each stage must be small enough to be ONE animation
    - Use the actual code/concept terms for stage names (not generic
      "step 1, 2, 3")
