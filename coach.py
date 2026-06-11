@@ -780,7 +780,7 @@ async def _admin_session_handler(request):
 #
 #   POST /sms/cron-tick  Triggered by Render Cron Jobs (which run
 #                        `curl -X POST -H 'X-Cron-Secret: $CRON_SECRET'
-#                        https://upskill-coach.onrender.com/sms/cron-tick?slot=X`).
+#                        https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=X`).
 #                        Verified via shared-secret header.
 #
 # Both run their LLM/Twilio work in a background thread so we can
