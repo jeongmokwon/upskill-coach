@@ -46,3 +46,115 @@ services:
         value: "3.11.9"
       - key: PYTHONUNBUFFERED
         value: "1"
+      # SMS tutor — all set manually in Render dashboard. The web
+      # service needs them for /sms/inbound (Twilio signature) and
+      # /sms/cron-tick (CRON_SECRET). The cron services below reuse
+      # the same values via fromService.
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: TUTOR_USER_PHONE
+        sync: false
+      - key: TUTOR_USER_ID
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+
+  # ─── SMS scheduled-slot triggers ───────────────────────────────────
+  #
+  # Render Cron Jobs are tiny containers that run a shell command on a
+  # cron schedule. Each one curls /sms/cron-tick on the web service
+  # above. The web service does the actual LLM call + Twilio send so
+  # we keep all the heavy deps (anthropic, twilio, db pool) in one
+  # place.
+  #
+  # Schedule is in UTC. The user is on PT, so:
+  #   10am PT (morning)   = 17:00 UTC (PST) / 18:00 UTC (PDT)
+  #    1pm PT (lunch)     = 20:00 UTC      / 21:00 UTC
+  #    4pm PT (afternoon) = 23:00 UTC      / 00:00 UTC (next day)
+  #    9pm PT (evening)   = 04:00 UTC next / 05:00 UTC
+  # Cron times below are pinned to PST (winter). When PDT kicks in
+  # (March), bump every hour by -1. Or vice-versa in November. Setting
+  # a calendar reminder for the user is the MVP plan; auto-DST is v2.
+  # Each cron job is just `curl -fsS -X POST ...` against the web
+  # service. No app code in the cron container — keeps the deployable
+  # surface tiny. Uses Render's prebuilt `curlimages/curl` Docker
+  # image, which has nothing else in it.
+  - type: cron
+    name: sms-morning
+    runtime: image
+    image:
+      url: docker.io/curlimages/curl:latest
+    plan: starter
+    region: virginia
+    schedule: "0 17 * * *"
+    startCommand: |
+      curl -fsS -X POST \
+        -H "X-Cron-Secret: $CRON_SECRET" \
+        "https://upskill-coach.onrender.com/sms/cron-tick?slot=morning"
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          name: upskill-coach
+          type: web
+          envVarKey: CRON_SECRET
+
+  - type: cron
+    name: sms-lunch
+    runtime: image
+    image:
+      url: docker.io/curlimages/curl:latest
+    plan: starter
+    region: virginia
+    schedule: "0 20 * * *"
+    startCommand: |
+      curl -fsS -X POST \
+        -H "X-Cron-Secret: $CRON_SECRET" \
+        "https://upskill-coach.onrender.com/sms/cron-tick?slot=lunch"
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          name: upskill-coach
+          type: web
+          envVarKey: CRON_SECRET
+
+  - type: cron
+    name: sms-afternoon
+    runtime: image
+    image:
+      url: docker.io/curlimages/curl:latest
+    plan: starter
+    region: virginia
+    schedule: "0 23 * * *"
+    startCommand: |
+      curl -fsS -X POST \
+        -H "X-Cron-Secret: $CRON_SECRET" \
+        "https://upskill-coach.onrender.com/sms/cron-tick?slot=afternoon"
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          name: upskill-coach
+          type: web
+          envVarKey: CRON_SECRET
+
+  - type: cron
+    name: sms-evening
+    runtime: image
+    image:
+      url: docker.io/curlimages/curl:latest
+    plan: starter
+    region: virginia
+    schedule: "0 4 * * *"
+    startCommand: |
+      curl -fsS -X POST \
+        -H "X-Cron-Secret: $CRON_SECRET" \
+        "https://upskill-coach.onrender.com/sms/cron-tick?slot=evening"
+    envVars:
+      - key: CRON_SECRET
+        fromService:
+          name: upskill-coach
+          type: web
+          envVarKey: CRON_SECRET
