@@ -1,0 +1,431 @@
+"""
+SMS tutor — Twilio + Claude glue.
+
+Lives alongside the web tutor in coach.py. Same DB, same Claude, just
+a different channel. Single-user MVP: one phone number maps to one
+user_id via env vars.
+
+Public entry points (called from coach.py route handlers):
+
+    handle_inbound(from_number, body) -> reply text or None
+        Called by /sms/inbound webhook. Returns the text to reply with
+        (already sent — return value is for logging/debugging).
+
+    handle_cron_tick(slot) -> reply text or None
+        Called by /sms/cron-tick at scheduled times. Builds prompt for
+        the slot, calls Claude, sends via Twilio.
+
+Slot prompts live in prompts/sms_*.md and are re-read on every call —
+edit + push to deploy a new prompt, no restart needed.
+
+Env vars expected (all set in Render dashboard):
+
+    ANTHROPIC_API_KEY        — already used by coach.py
+    TWILIO_ACCOUNT_SID
+    TWILIO_AUTH_TOKEN
+    TWILIO_FROM_NUMBER       — the number Twilio gave us, E.164
+    TUTOR_USER_PHONE         — the user's phone, E.164
+    TUTOR_USER_ID            — user_id in our DB to map SMS thread to
+    CRON_SECRET              — shared secret for /sms/cron-tick auth
+"""
+
+import os
+import re
+import time
+import json
+from datetime import datetime, timedelta, timezone
+
+import anthropic
+
+import db
+
+# ─── Config ──────────────────────────────────────────────────────────
+
+PROMPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
+
+SLOTS = ("morning", "lunch", "afternoon", "evening")
+
+# Max one Anthropic Sonnet call per slot. Cheap enough we just always
+# use the same model as the web tutor for now — consistency beats
+# pennies of savings.
+MODEL = "claude-sonnet-4-5"
+
+# How much SMS history to feed back into Claude as conversation. 20
+# messages ≈ 10 round-trips, plenty for one-user context.
+HISTORY_LIMIT = 20
+
+# A reply of exactly one of these (case-insensitive, strip
+# punctuation) is treated as a meta-command, not conversation.
+SKIP_TOKENS = {"skip", "stop", "pause", "mute"}
+LATER_TOKENS = {"later", "tonight", "9pm", "evening"}
+
+
+# ─── Twilio (lazy import to keep coach.py boot working without it) ──
+
+_twilio_client = None
+
+
+def _twilio():
+    """Lazy Twilio REST client. None if env vars missing."""
+    global _twilio_client
+    if _twilio_client is not None:
+        return _twilio_client
+    sid = os.environ.get("TWILIO_ACCOUNT_SID")
+    token = os.environ.get("TWILIO_AUTH_TOKEN")
+    if not (sid and token):
+        return None
+    try:
+        from twilio.rest import Client
+    except ImportError:
+        print("[SMS] twilio package not installed — pip install twilio", flush=True)
+        return None
+    _twilio_client = Client(sid, token)
+    return _twilio_client
+
+
+def send_sms(to_number, body):
+    """Send `body` to `to_number` (E.164). Returns Twilio SID or None.
+
+    Splits on lines containing only '---' so the LLM can emit two
+    "SMS bubbles" by separating them, and we send each as a real
+    distinct SMS with a small gap. If body has no separator it sends
+    as one message.
+    """
+    client = _twilio()
+    from_number = os.environ.get("TWILIO_FROM_NUMBER")
+    if not (client and from_number):
+        print(f"[SMS] skipping send — Twilio not configured. Would have sent: {body[:80]}...", flush=True)
+        return None
+
+    # Split on a line that is exactly '---' (with optional surrounding
+    # whitespace). Leaves '---' inside code/text alone.
+    parts = re.split(r"\n\s*---\s*\n", body.strip())
+    parts = [p.strip() for p in parts if p.strip()]
+    if not parts:
+        return None
+
+    last_sid = None
+    for i, part in enumerate(parts):
+        try:
+            msg = client.messages.create(
+                from_=from_number,
+                to=to_number,
+                body=part,
+            )
+            last_sid = msg.sid
+            print(f"[SMS] sent ({len(part)} chars) sid={msg.sid}", flush=True)
+        except Exception as e:
+            print(f"[SMS] ❌ send failed: {e}", flush=True)
+            break
+        # Tiny gap between messages so they arrive in order on the
+        # user's device. Twilio doesn't guarantee order across
+        # back-to-back API calls.
+        if i < len(parts) - 1:
+            time.sleep(1.0)
+    return last_sid
+
+
+def verify_twilio_signature(url, params, signature):
+    """Verify a Twilio webhook signature.
+
+    Returns True if valid, False otherwise. If the auth token is
+    missing we fail closed (return False) — better to reject than to
+    silently accept unsigned traffic.
+    """
+    token = os.environ.get("TWILIO_AUTH_TOKEN")
+    if not (token and signature):
+        return False
+    try:
+        from twilio.request_validator import RequestValidator
+    except ImportError:
+        return False
+    validator = RequestValidator(token)
+    return validator.validate(url, params, signature)
+
+
+# ─── Prompt loading (re-read on every call, no cache) ───────────────
+
+def _read_prompt(name):
+    """Read prompts/{name}.md — fresh from disk every call.
+
+    No caching is intentional: the user edits prompts in their editor,
+    git pushes, Render redeploys, and the NEXT slot picks up the new
+    prompt. If they want to A/B mid-day they can ship a small change
+    and the next slot fires the new version.
+    """
+    path = os.path.join(PROMPTS_DIR, f"{name}.md")
+    with open(path, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+# ─── Context builder ────────────────────────────────────────────────
+
+def _format_recent_insights(user_id):
+    """Pull last N insights, format as a short bulleted block for the
+    prompt. Empty string if none — the prompt template handles that
+    gracefully ("if recent_insights is sparse").
+    """
+    rows = []
+    # get_recent_insights() uses thread-local user_id; for SMS we run
+    # off-request and need to set it explicitly.
+    db.set_thread_user(user_id)
+    try:
+        rows = db.get_recent_insights(limit=3)
+    except Exception as e:
+        print(f"[SMS] failed to load insights: {e}", flush=True)
+    if not rows:
+        return "(no recent insights — first few SMS sessions, or fresh user)"
+
+    lines = []
+    for r in rows:
+        analysis = r.get("analysis")
+        if not analysis:
+            continue
+        # `analysis` is a JSON string (or already-parsed dict
+        # depending on DB driver). Normalize.
+        if isinstance(analysis, str):
+            try:
+                analysis = json.loads(analysis)
+            except Exception:
+                lines.append(f"- {analysis[:200]}")
+                continue
+        # Best-effort pull of the human-readable bits the analyzer
+        # writes. Schema can drift — be defensive.
+        summary = (
+            analysis.get("summary")
+            or analysis.get("pedagogy_notes")
+            or analysis.get("weak_concepts")
+            or analysis
+        )
+        if isinstance(summary, (dict, list)):
+            summary = json.dumps(summary)[:200]
+        lines.append(f"- {str(summary)[:200]}")
+    return "\n".join(lines) if lines else "(insights present but unreadable)"
+
+
+def _format_today_sessions(user_id):
+    try:
+        rows = db.get_today_sessions_for_user(user_id)
+    except Exception as e:
+        print(f"[SMS] failed to load today's sessions: {e}", flush=True)
+        rows = []
+    if not rows:
+        return "(no web sessions today)"
+    lines = []
+    for r in rows:
+        topic = r.get("study_topic") or "(no topic recorded)"
+        start = r.get("start_time", "")[:16]  # YYYY-MM-DD HH:MM
+        end = r.get("end_time")
+        duration = ""
+        if end:
+            try:
+                t0 = datetime.fromisoformat(r["start_time"])
+                t1 = datetime.fromisoformat(end)
+                mins = round((t1 - t0).total_seconds() / 60)
+                duration = f", ~{mins}min"
+            except Exception:
+                pass
+        lines.append(f"- {start}: {topic}{duration}")
+    return "\n".join(lines)
+
+
+def _build_system_prompt(slot, user_id):
+    """Assemble shared + slot prompt with user context interpolated."""
+    shared = _read_prompt("sms_shared")
+    slot_prompt = _read_prompt(f"sms_{slot}")
+
+    profile = db.get_user_profile_by_id(user_id) or {}
+    fields = {
+        "user_name": profile.get("user_name") or "you",
+        "goal": profile.get("goal") or "(not set)",
+        "studying": profile.get("studying") or "(not set)",
+        "recent_insights": _format_recent_insights(user_id),
+        "today_sessions": _format_today_sessions(user_id),
+    }
+
+    # Render placeholders. We use str.format with a defaultdict so a
+    # stray {brace} in the prompt body doesn't crash — it just leaves
+    # the literal text alone. (LLM prompts often have JSON examples
+    # with braces.)
+    class _SafeDict(dict):
+        def __missing__(self, k):
+            return "{" + k + "}"
+    rendered_shared = shared.format_map(_SafeDict(**fields))
+    rendered_slot = slot_prompt.format_map(_SafeDict(**fields))
+    return rendered_shared + "\n\n---\n\n" + rendered_slot
+
+
+# ─── Inbound message handling ───────────────────────────────────────
+
+def _is_command(body, token_set):
+    """Match body as a single-word command, case-insensitive,
+    ignoring surrounding whitespace and trailing punctuation."""
+    cleaned = body.strip().lower().rstrip(".!?")
+    return cleaned in token_set
+
+
+# Marker file for "skip the rest of today's slots". Written when user
+# texts "skip"; cron-tick checks it before sending. File path keyed by
+# user_id and YYYYMMDD so it auto-expires at midnight UTC (close
+# enough — DST drift here is harmless).
+_SKIP_DIR = "/tmp/upskill_sms_skip"
+
+
+def _skip_marker_path(user_id):
+    os.makedirs(_SKIP_DIR, exist_ok=True)
+    day = datetime.now(timezone.utc).strftime("%Y%m%d")
+    return os.path.join(_SKIP_DIR, f"{user_id}_{day}")
+
+
+def _mark_skip_today(user_id):
+    path = _skip_marker_path(user_id)
+    with open(path, "w") as f:
+        f.write(datetime.now(timezone.utc).isoformat())
+
+
+def _is_skipped_today(user_id):
+    return os.path.exists(_skip_marker_path(user_id))
+
+
+# "later" defers a slot to evening. We keep it simple: when user texts
+# "later", we just acknowledge — the evening 9pm cron will fire
+# regardless. (The deferred-message-replay path is a v2 nicety; for
+# now the user gets the evening slot's normal content.)
+
+
+def _resolve_user_from_phone(from_number):
+    """Map an inbound phone number to a user_id. Single-user MVP: env
+    var TUTOR_USER_PHONE must match exactly.
+    """
+    expected = os.environ.get("TUTOR_USER_PHONE", "").strip()
+    user_id = os.environ.get("TUTOR_USER_ID", "").strip()
+    if not (expected and user_id):
+        return None
+    if from_number.strip() != expected:
+        print(f"[SMS] inbound from unknown number {from_number}, ignoring", flush=True)
+        return None
+    return user_id
+
+
+def handle_inbound(from_number, body):
+    """Process an inbound SMS. Returns the text we replied with (or
+    None if we chose not to reply)."""
+    user_id = _resolve_user_from_phone(from_number)
+    if not user_id:
+        return None
+
+    # Log the user's message FIRST so it's part of history before we
+    # build context for our reply.
+    db.save_sms_message(user_id, "user", body, "in")
+
+    # Meta-commands short-circuit the LLM.
+    if _is_command(body, SKIP_TOKENS):
+        _mark_skip_today(user_id)
+        reply = "ok, no more pings today. talk tomorrow."
+        send_sms(from_number, reply)
+        db.save_sms_message(user_id, "assistant", reply, "out")
+        return reply
+    if _is_command(body, LATER_TOKENS):
+        reply = "got it — picking this back up at 9."
+        send_sms(from_number, reply)
+        db.save_sms_message(user_id, "assistant", reply, "out")
+        return reply
+
+    # Regular conversation: feed full history + shared persona to
+    # Claude, get a reply, send it.
+    history = db.get_recent_sms_messages(user_id, limit=HISTORY_LIMIT)
+    # `history` ends with the user message we just inserted, which is
+    # what the Anthropic API expects (last message = user turn).
+
+    # For inbound replies (not a scheduled slot), only the shared
+    # persona applies — no slot-specific instruction.
+    system_prompt = _build_system_prompt_for_reply(user_id)
+
+    try:
+        client = anthropic.Anthropic()
+        resp = client.messages.create(
+            model=MODEL,
+            max_tokens=400,
+            system=system_prompt,
+            messages=history,
+        )
+        reply_text = resp.content[0].text.strip()
+    except Exception as e:
+        print(f"[SMS] ❌ Claude call failed on inbound: {e}", flush=True)
+        return None
+
+    send_sms(from_number, reply_text)
+    db.save_sms_message(user_id, "assistant", reply_text, "out")
+    return reply_text
+
+
+def _build_system_prompt_for_reply(user_id):
+    """Shared persona only, with placeholders filled — used for
+    inbound conversational replies (not scheduled slots)."""
+    shared = _read_prompt("sms_shared")
+    profile = db.get_user_profile_by_id(user_id) or {}
+    fields = {
+        "user_name": profile.get("user_name") or "you",
+        "goal": profile.get("goal") or "(not set)",
+        "studying": profile.get("studying") or "(not set)",
+        "recent_insights": _format_recent_insights(user_id),
+        "today_sessions": _format_today_sessions(user_id),
+    }
+    class _SafeDict(dict):
+        def __missing__(self, k):
+            return "{" + k + "}"
+    return shared.format_map(_SafeDict(**fields))
+
+
+# ─── Scheduled slot handling ────────────────────────────────────────
+
+def handle_cron_tick(slot):
+    """Run a scheduled slot: load prompt, call Claude, send SMS.
+
+    Returns the sent text, or None if we declined to send (env not
+    configured, user skipped today, etc.)
+    """
+    if slot not in SLOTS:
+        print(f"[SMS] unknown slot {slot!r}", flush=True)
+        return None
+
+    user_id = os.environ.get("TUTOR_USER_ID", "").strip()
+    to_number = os.environ.get("TUTOR_USER_PHONE", "").strip()
+    if not (user_id and to_number):
+        print(f"[SMS] {slot}: TUTOR_USER_ID/PHONE not set — skipping", flush=True)
+        return None
+
+    if _is_skipped_today(user_id):
+        print(f"[SMS] {slot}: user skipped today — not sending", flush=True)
+        return None
+
+    system_prompt = _build_system_prompt(slot, user_id)
+    history = db.get_recent_sms_messages(user_id, limit=HISTORY_LIMIT)
+
+    # If there's no recent SMS history, prime with a single user-turn
+    # placeholder. Anthropic requires the messages array to start with
+    # a user role and to be non-empty.
+    if not history:
+        history = [{"role": "user", "content": f"(scheduled {slot} slot — no prior thread)"}]
+    elif history[-1]["role"] == "assistant":
+        # Last turn was us. Add a synthetic user-turn so Claude has
+        # something to respond to. The slot prompt itself is in the
+        # system message; this is just a "go" signal.
+        history.append({"role": "user", "content": f"(scheduled {slot} slot fired)"})
+
+    try:
+        client = anthropic.Anthropic()
+        resp = client.messages.create(
+            model=MODEL,
+            max_tokens=500,
+            system=system_prompt,
+            messages=history,
+        )
+        text = resp.content[0].text.strip()
+    except Exception as e:
+        print(f"[SMS] ❌ Claude call failed on {slot}: {e}", flush=True)
+        return None
+
+    send_sms(to_number, text)
+    db.save_sms_message(user_id, "assistant", text, "out")
+    return text

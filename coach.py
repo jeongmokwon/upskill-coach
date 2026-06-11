@@ -771,6 +771,85 @@ async def _admin_session_handler(request):
                         content_type="text/html")
 
 
+# ─── SMS endpoints ────────────────────────────────────────────────────
+#
+# Two routes wire the SMS tutor (sms.py) to the outside world:
+#
+#   POST /sms/inbound    Twilio webhook for incoming texts. Verified
+#                        via X-Twilio-Signature.
+#
+#   POST /sms/cron-tick  Triggered by Render Cron Jobs (which run
+#                        `curl -X POST -H 'X-Cron-Secret: $CRON_SECRET'
+#                        https://upskill-coach.onrender.com/sms/cron-tick?slot=X`).
+#                        Verified via shared-secret header.
+#
+# Both run their LLM/Twilio work in a background thread so we can
+# return the HTTP response promptly (Twilio retries if we take too
+# long; Render Cron doesn't care but the principle is the same).
+
+async def _sms_inbound_handler(request):
+    """Twilio webhook → sms.handle_inbound() in a thread."""
+    import sms
+
+    # Twilio POSTs form-encoded. Parse before verifying so we have
+    # both params and signature.
+    form = await request.post()
+    params = {k: form[k] for k in form}
+    signature = request.headers.get("X-Twilio-Signature", "")
+
+    # Reconstruct the public URL Twilio used. Behind Render's
+    # Cloudflare proxy the scheme is https even though aiohttp may
+    # see http. Honor X-Forwarded-Proto when present.
+    scheme = request.headers.get("X-Forwarded-Proto", request.scheme)
+    host = request.headers.get("X-Forwarded-Host") or request.host
+    url = f"{scheme}://{host}{request.path_qs}"
+
+    if not sms.verify_twilio_signature(url, params, signature):
+        print(f"[SMS] ❌ inbound signature failed (url={url}, sig={signature[:12]}...)", flush=True)
+        return web.Response(status=403, text="bad signature")
+
+    from_number = params.get("From", "")
+    body = params.get("Body", "")
+    print(f"[SMS] inbound from={from_number} body={body[:80]!r}", flush=True)
+
+    # Run the LLM + Twilio send in a thread so we can ack quickly.
+    asyncio.get_event_loop().run_in_executor(
+        None, sms.handle_inbound, from_number, body
+    )
+
+    # Empty TwiML response — we send our reply out-of-band via the
+    # REST API rather than returning <Message> inline. Lets us send
+    # multiple SMS bubbles cleanly.
+    return web.Response(
+        text='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+        content_type="application/xml",
+    )
+
+
+async def _sms_cron_tick_handler(request):
+    """Render Cron Job → sms.handle_cron_tick(slot)."""
+    import sms
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = request.headers.get("X-Cron-Secret", "").strip()
+    if not expected or provided != expected:
+        print(f"[SMS] ❌ cron-tick auth failed (provided={provided[:8]}...)", flush=True)
+        return web.Response(status=403, text="bad secret")
+
+    slot = request.query.get("slot", "").strip().lower()
+    if slot not in sms.SLOTS:
+        return web.Response(status=400, text=f"slot must be one of {sms.SLOTS}")
+
+    print(f"[SMS] cron-tick slot={slot}", flush=True)
+
+    # Run the LLM + send in a thread — same reasoning as inbound.
+    asyncio.get_event_loop().run_in_executor(
+        None, sms.handle_cron_tick, slot
+    )
+
+    return web.json_response({"ok": True, "slot": slot})
+
+
 @web.middleware
 async def _log_middleware(request, handler):
     """Log every incoming request for debugging."""
@@ -795,6 +874,9 @@ def start_ws_server():
         app.router.add_get("/admin", _admin_users_handler)
         app.router.add_get("/admin/user/{user_id}", _admin_user_handler)
         app.router.add_get("/admin/session/{session_id}", _admin_session_handler)
+        # SMS — POST endpoints, registered before the static catch-all.
+        app.router.add_post("/sms/inbound", _sms_inbound_handler)
+        app.router.add_post("/sms/cron-tick", _sms_cron_tick_handler)
         app.router.add_get("/{path:.*}", _static_handler)
 
         runner = web.AppRunner(app)

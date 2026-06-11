@@ -174,6 +174,22 @@ def init_db():
             conn.commit()
         except Exception:
             conn.rollback()  # clear aborted-transaction state
+
+        # Migrate: messages.channel + messages.direction (added with SMS
+        # tutor). channel='web' is the historical row type; 'sms' rows are
+        # written by the SMS slot handlers. direction is only meaningful
+        # for SMS ('in' = user→us, 'out' = us→user); web rows leave it ''.
+        # Each ALTER in its own transaction so a duplicate-column error on
+        # one column does not poison the other.
+        for col, ddl in [
+            ("channel", "TEXT DEFAULT 'web'"),
+            ("direction", "TEXT DEFAULT ''"),
+        ]:
+            try:
+                conn.cursor().execute(f"ALTER TABLE messages ADD COLUMN {col} {ddl}")
+                conn.commit()
+            except Exception:
+                conn.rollback()
     else:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS sessions (
@@ -253,6 +269,15 @@ def init_db():
         ]:
             try:
                 conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {default}")
+            except Exception:
+                pass
+        # SMS tutor migration — see Postgres branch above for rationale.
+        for col, default in [
+            ("channel", "TEXT DEFAULT 'web'"),
+            ("direction", "TEXT DEFAULT ''"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE messages ADD COLUMN {col} {default}")
             except Exception:
                 pass
 
@@ -752,6 +777,90 @@ def get_open_sessions_for_user(user_id, exclude_session_id=None):
           {('AND s.session_id != ' + _P) if exclude_session_id else ''}
         ORDER BY s.start_time ASC
     """, (user_id, exclude_session_id) if exclude_session_id else (user_id,))
+    rows = _fetchall(cur)
+    conn.close()
+    return rows
+
+
+# ─── SMS tutor helpers ───────────────────────────────────────────
+#
+# SMS conversations don't follow the web "session per study sitting"
+# model — they're an ambient, ongoing thread. We store them in the same
+# `messages` table (channel='sms') under a stable synthetic session_id
+# `sms-<user_id>` so they're easy to fetch as one rolling thread without
+# adding a second table. No row is needed in `sessions` for this — the
+# schema has no FK, and SMS history is logically separate from study
+# sessions anyway.
+
+def _sms_sid(user_id):
+    return f"sms-{user_id}"
+
+
+def save_sms_message(user_id, role, content, direction):
+    """Append one SMS message to the rolling thread for `user_id`.
+
+    role: 'user' or 'assistant' (matches Anthropic API shape so the
+          thread can be fed straight back into Claude)
+    direction: 'in' (user → us) or 'out' (us → user)
+    """
+    conn = get_conn()
+    _execute(conn,
+        f"INSERT INTO messages "
+        f"(session_id, user_id, role, content, channel, direction) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+        (_sms_sid(user_id), user_id, role, content, "sms", direction)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_recent_sms_messages(user_id, limit=20):
+    """Return last N SMS messages for `user_id`, oldest-first.
+
+    Format matches Anthropic's messages array — [{role, content}, ...] —
+    so it can be passed straight into a Claude call as conversation
+    history.
+    """
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT role, content FROM messages "
+        f"WHERE session_id = {_P} AND channel = 'sms' "
+        f"ORDER BY id DESC LIMIT {_P}",
+        (_sms_sid(user_id), limit)
+    )
+    rows = _fetchall(cur)
+    conn.close()
+    rows.reverse()  # oldest-first for the LLM
+    return [{"role": r["role"], "content": r["content"]} for r in rows]
+
+
+def get_today_sessions_for_user(user_id, tz_offset_hours=-8):
+    """Web (channel='web') sessions started today, in the user's local TZ.
+
+    Used by the 9pm evening slot to say "you covered X today, do one
+    more small step". tz_offset_hours defaults to PT (-8 PST, -7 PDT —
+    DST drift is acceptable for an MVP single user; we'll only be off
+    near the date boundary).
+
+    Returns list of dicts (session_id, study_topic, start_time,
+    end_time), oldest-first.
+    """
+    from datetime import datetime, timedelta, timezone
+    tz = timezone(timedelta(hours=tz_offset_hours))
+    now_local = datetime.now(tz)
+    today_start_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Sessions store start_time as naive ISO (datetime.now().isoformat() in
+    # start_session). Compare lex on the local-naive ISO — close enough
+    # for one-user MVP and avoids needing to bulk-rewrite the timestamp
+    # storage convention.
+    threshold_iso = today_start_local.replace(tzinfo=None).isoformat()
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT session_id, study_topic, start_time, end_time "
+        f"FROM sessions WHERE user_id = {_P} AND start_time >= {_P} "
+        f"ORDER BY start_time ASC",
+        (user_id, threshold_iso)
+    )
     rows = _fetchall(cur)
     conn.close()
     return rows
