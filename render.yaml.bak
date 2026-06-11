@@ -94,7 +94,7 @@ services:
     startCommand: |
       curl -fsS -X POST \
         -H "X-Cron-Secret: $CRON_SECRET" \
-        "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=morning"
+        "https://upskill-coach.onrender.com/sms/cron-tick?slot=morning"
     envVars:
       - key: CRON_SECRET
         fromService:
@@ -113,7 +113,7 @@ services:
     startCommand: |
       curl -fsS -X POST \
         -H "X-Cron-Secret: $CRON_SECRET" \
-        "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=lunch"
+        "https://upskill-coach.onrender.com/sms/cron-tick?slot=lunch"
     envVars:
       - key: CRON_SECRET
         fromService:
@@ -132,7 +132,7 @@ services:
     startCommand: |
       curl -fsS -X POST \
         -H "X-Cron-Secret: $CRON_SECRET" \
-        "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=afternoon"
+        "https://upskill-coach.onrender.com/sms/cron-tick?slot=afternoon"
     envVars:
       - key: CRON_SECRET
         fromService:
@@ -151,7 +151,7 @@ services:
     startCommand: |
       curl -fsS -X POST \
         -H "X-Cron-Secret: $CRON_SECRET" \
-        "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=evening"
+        "https://upskill-coach.onrender.com/sms/cron-tick?slot=evening"
     envVars:
       - key: CRON_SECRET
         fromService:

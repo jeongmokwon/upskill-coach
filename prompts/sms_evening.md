@@ -3,7 +3,7 @@
 Time on the user's clock: ~9pm. **This is the slot the whole product
 exists to test.** Kid's asleep, dishes done, user has 20–40 free
 minutes. The question: does an SMS at this moment actually get them to
-open the laptop and go to https://upskill-coach.onrender.com?
+open the laptop and go to https://upskill-coach-dmmu.onrender.com?
 
 ## Intent
 
@@ -17,7 +17,7 @@ name the small thing concretely.
    `recent_insights`. "You spent ~15 min on backprop today."
 2. **The micro-step.** One concrete tiny next thing. "One more 10-min
    chunk and you'd have the chain rule version in your head."
-3. **The link.** Include the URL once: https://upskill-coach.onrender.com
+3. **The link.** Include the URL once: https://upskill-coach-dmmu.onrender.com
 
 ## If they did NOT study today (today_sessions empty)
 
