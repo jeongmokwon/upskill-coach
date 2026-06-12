@@ -83,6 +83,31 @@ def _twilio():
     return _twilio_client
 
 
+def _channel_prefix():
+    """Return Twilio API prefix for the active messaging channel.
+
+    Twilio uses the same Messages API for SMS and WhatsApp, but
+    WhatsApp endpoints are addressed as 'whatsapp:+15551234567'.
+    SMS endpoints are bare 'E.164'. Set MESSAGING_CHANNEL=whatsapp
+    in env to flip the whole pipeline to WhatsApp without touching
+    code — useful while A2P 10DLC / Toll-Free verification is
+    pending and we want to keep iterating via WhatsApp Sandbox.
+    """
+    return "whatsapp:" if os.environ.get("MESSAGING_CHANNEL", "sms").lower() == "whatsapp" else ""
+
+
+def _addr(phone):
+    """Render `phone` (raw E.164) as the right Twilio address for the
+    active channel. Idempotent: leaves already-prefixed addresses
+    alone, so it's safe to call twice or to pass values that already
+    have the prefix in env."""
+    if not phone:
+        return phone
+    if phone.startswith("whatsapp:") or phone.startswith("sms:"):
+        return phone
+    return f"{_channel_prefix()}{phone}"
+
+
 def send_sms(to_number, body):
     """Send `body` to `to_number` (E.164). Returns Twilio SID or None.
 
@@ -90,6 +115,10 @@ def send_sms(to_number, body):
     "SMS bubbles" by separating them, and we send each as a real
     distinct SMS with a small gap. If body has no separator it sends
     as one message.
+
+    Despite the name, this also handles WhatsApp when
+    MESSAGING_CHANNEL=whatsapp — the Twilio Messages API is the same
+    for both, only the address format differs.
     """
     client = _twilio()
     from_number = os.environ.get("TWILIO_FROM_NUMBER")
@@ -104,12 +133,15 @@ def send_sms(to_number, body):
     if not parts:
         return None
 
+    from_addr = _addr(from_number)
+    to_addr = _addr(to_number)
+
     last_sid = None
     for i, part in enumerate(parts):
         try:
             msg = client.messages.create(
-                from_=from_number,
-                to=to_number,
+                from_=from_addr,
+                to=to_addr,
                 body=part,
             )
             last_sid = msg.sid
@@ -293,16 +325,29 @@ def _is_skipped_today(user_id):
 # now the user gets the evening slot's normal content.)
 
 
+def _strip_channel(addr):
+    """Strip 'whatsapp:' / 'sms:' prefix from a Twilio address so we
+    compare raw E.164 numbers on inbound. TUTOR_USER_PHONE in env is
+    stored as bare E.164; Twilio webhooks deliver inbound `From` with
+    the channel prefix on WhatsApp."""
+    for p in ("whatsapp:", "sms:"):
+        if addr.startswith(p):
+            return addr[len(p):]
+    return addr
+
+
 def _resolve_user_from_phone(from_number):
     """Map an inbound phone number to a user_id. Single-user MVP: env
-    var TUTOR_USER_PHONE must match exactly.
+    var TUTOR_USER_PHONE must match exactly (after stripping any
+    channel prefix Twilio added).
     """
     expected = os.environ.get("TUTOR_USER_PHONE", "").strip()
     user_id = os.environ.get("TUTOR_USER_ID", "").strip()
     if not (expected and user_id):
         return None
-    if from_number.strip() != expected:
-        print(f"[SMS] inbound from unknown number {from_number}, ignoring", flush=True)
+    incoming = _strip_channel(from_number.strip())
+    if incoming != _strip_channel(expected):
+        print(f"[SMS] inbound from unknown number {from_number} (normalized {incoming}), ignoring", flush=True)
         return None
     return user_id
 
