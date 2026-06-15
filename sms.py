@@ -149,11 +149,13 @@ def send_sms(to_number, body):
         except Exception as e:
             print(f"[SMS] ❌ send failed: {e}", flush=True)
             break
-        # Tiny gap between messages so they arrive in order on the
-        # user's device. Twilio doesn't guarantee order across
-        # back-to-back API calls.
+        # Gap between messages so they arrive in order on the user's
+        # device. Twilio doesn't guarantee order across back-to-back
+        # API calls. WhatsApp Sandbox additionally rate-limits to one
+        # message every 3 seconds — slower gap there avoids throttling
+        # on the second bubble.
         if i < len(parts) - 1:
-            time.sleep(1.0)
+            time.sleep(3.5 if _channel_prefix() else 1.0)
     return last_sid
 
 
