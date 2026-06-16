@@ -64,114 +64,31 @@ services:
         sync: false
 
   # ─── SMS scheduled-slot triggers ───────────────────────────────────
-  #
-  # Render Cron Jobs are tiny containers that run a shell command on a
-  # cron schedule. Each one curls /sms/cron-tick on the web service
-  # above. The web service does the actual LLM call + Twilio send so
-  # we keep all the heavy deps (anthropic, twilio, db pool) in one
-  # place.
-  #
-  # Schedule is in UTC. User is on PT. Cron rows below are pinned to
-  # PDT (summer, Mar-Nov):
-  #    7am PT (morning)   = 14:00 UTC PDT  (15:00 UTC during PST)
-  #    1pm PT (lunch)     = 20:00 UTC PDT  (21:00 UTC during PST)
-  #    4pm PT (afternoon) = 23:00 UTC PDT  (00:00 UTC during PST)
-  #    9pm PT (evening)   = 04:00 UTC PDT  (05:00 UTC during PST)
-  # When PST kicks in (first Sunday of November), bump every UTC hour
-  # by +1. Vice versa second Sunday of March. Auto-DST is v2; for now
-  # the calendar reminder is the MVP plan.
-  # Each cron job is just `curl -fsS -X POST ...` against the web
-  # service. No app code in the cron container — keeps the deployable
-  # surface tiny. Uses Render's prebuilt `curlimages/curl` Docker
-  # image, which has nothing else in it.
-  - type: cron
-    name: sms-morning
-    runtime: image
-    image:
-      url: docker.io/curlimages/curl:latest
-    plan: starter
-    region: virginia
-    schedule: "0 14 * * *"
-    startCommand: |
-      curl -fsS -X POST \
-        -H "X-Cron-Secret: $CRON_SECRET" \
-        "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=morning"
-    envVars:
-      # CRON_SECRET set manually in Render dashboard on each cron
-      # service. We used to wire this via fromService.name=upskill-coach
-      # but that reference broke after the legacy 'upskill-coach' web
-      # service was deleted (the working web service is named
-      # 'upskill-coach' in render.yaml but has hostname suffix '-dmmu'
-      # in Render, and fromService lookups got confused). Manual
-      # entry is annoying but reliable and only happens once per cron.
-      - key: CRON_SECRET
-        sync: false
-
-  - type: cron
-    name: sms-lunch
-    runtime: image
-    image:
-      url: docker.io/curlimages/curl:latest
-    plan: starter
-    region: virginia
-    schedule: "0 20 * * *"
-    startCommand: |
-      curl -fsS -X POST \
-        -H "X-Cron-Secret: $CRON_SECRET" \
-        "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=lunch"
-    envVars:
-      # CRON_SECRET set manually in Render dashboard on each cron
-      # service. We used to wire this via fromService.name=upskill-coach
-      # but that reference broke after the legacy 'upskill-coach' web
-      # service was deleted (the working web service is named
-      # 'upskill-coach' in render.yaml but has hostname suffix '-dmmu'
-      # in Render, and fromService lookups got confused). Manual
-      # entry is annoying but reliable and only happens once per cron.
-      - key: CRON_SECRET
-        sync: false
-
-  - type: cron
-    name: sms-afternoon
-    runtime: image
-    image:
-      url: docker.io/curlimages/curl:latest
-    plan: starter
-    region: virginia
-    schedule: "0 23 * * *"
-    startCommand: |
-      curl -fsS -X POST \
-        -H "X-Cron-Secret: $CRON_SECRET" \
-        "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=afternoon"
-    envVars:
-      # CRON_SECRET set manually in Render dashboard on each cron
-      # service. We used to wire this via fromService.name=upskill-coach
-      # but that reference broke after the legacy 'upskill-coach' web
-      # service was deleted (the working web service is named
-      # 'upskill-coach' in render.yaml but has hostname suffix '-dmmu'
-      # in Render, and fromService lookups got confused). Manual
-      # entry is annoying but reliable and only happens once per cron.
-      - key: CRON_SECRET
-        sync: false
-
-  - type: cron
-    name: sms-evening
-    runtime: image
-    image:
-      url: docker.io/curlimages/curl:latest
-    plan: starter
-    region: virginia
-    schedule: "0 4 * * *"
-    startCommand: |
-      curl -fsS -X POST \
-        -H "X-Cron-Secret: $CRON_SECRET" \
-        "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=evening"
-    envVars:
-      # CRON_SECRET set manually in Render dashboard on each cron
-      # service. We used to wire this via fromService.name=upskill-coach
-      # but that reference broke after the legacy 'upskill-coach' web
-      # service was deleted (the working web service is named
-      # 'upskill-coach' in render.yaml but has hostname suffix '-dmmu'
-      # in Render, and fromService lookups got confused). Manual
-      # entry is annoying but reliable and only happens once per cron.
-      - key: CRON_SECRET
-        sync: false
+#
+# NOTE: cron jobs are intentionally NOT defined in this Blueprint.
+#
+# We tried `type: cron` with `runtime: image` (curlimages/curl), but
+# Render Blueprint sync repeatedly failed to create these — likely a
+# gap in image-runtime cron support via render.yaml. The web service
+# above is the only Blueprint-managed thing.
+#
+# The 4 scheduled SMS slots run as cron services created manually in
+# the Render dashboard (New → Cron Job → Deploy an existing image
+# → `docker.io/curlimages/curl:latest`). Each one curls
+# /sms/cron-tick on the dmmu web service.
+#
+# Reference values for the 4 manual cron jobs:
+#
+#   Name              UTC schedule    PT time   Start command
+#   ───────────────   ─────────────   ───────   ────────────────────
+#   sms-morning       0 14 * * *      7 AM PDT  curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET" "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=morning"
+#   sms-lunch         0 20 * * *      1 PM PDT  curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET" "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=lunch"
+#   sms-afternoon     0 23 * * *      4 PM PDT  curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET" "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=afternoon"
+#   sms-evening       0  4 * * *      9 PM PDT  curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET" "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=evening"
+#
+# Each cron also needs env var CRON_SECRET set manually (same value
+# as on the dmmu web service).
+#
+# DST: schedules above are PDT. When PST kicks in (first Sunday of
+# November), bump every UTC hour by +1 in the Render dashboard UI.
+# Vice versa second Sunday of March.
