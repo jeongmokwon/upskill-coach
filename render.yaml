@@ -71,14 +71,15 @@ services:
   # we keep all the heavy deps (anthropic, twilio, db pool) in one
   # place.
   #
-  # Schedule is in UTC. The user is on PT, so:
-  #   10am PT (morning)   = 17:00 UTC (PST) / 18:00 UTC (PDT)
-  #    1pm PT (lunch)     = 20:00 UTC      / 21:00 UTC
-  #    4pm PT (afternoon) = 23:00 UTC      / 00:00 UTC (next day)
-  #    9pm PT (evening)   = 04:00 UTC next / 05:00 UTC
-  # Cron times below are pinned to PST (winter). When PDT kicks in
-  # (March), bump every hour by -1. Or vice-versa in November. Setting
-  # a calendar reminder for the user is the MVP plan; auto-DST is v2.
+  # Schedule is in UTC. User is on PT. Cron rows below are pinned to
+  # PDT (summer, Mar-Nov):
+  #    7am PT (morning)   = 14:00 UTC PDT  (15:00 UTC during PST)
+  #    1pm PT (lunch)     = 20:00 UTC PDT  (21:00 UTC during PST)
+  #    4pm PT (afternoon) = 23:00 UTC PDT  (00:00 UTC during PST)
+  #    9pm PT (evening)   = 04:00 UTC PDT  (05:00 UTC during PST)
+  # When PST kicks in (first Sunday of November), bump every UTC hour
+  # by +1. Vice versa second Sunday of March. Auto-DST is v2; for now
+  # the calendar reminder is the MVP plan.
   # Each cron job is just `curl -fsS -X POST ...` against the web
   # service. No app code in the cron container — keeps the deployable
   # surface tiny. Uses Render's prebuilt `curlimages/curl` Docker
@@ -90,7 +91,7 @@ services:
       url: docker.io/curlimages/curl:latest
     plan: starter
     region: virginia
-    schedule: "0 17 * * *"
+    schedule: "0 14 * * *"
     startCommand: |
       curl -fsS -X POST \
         -H "X-Cron-Secret: $CRON_SECRET" \
