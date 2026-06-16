@@ -827,11 +827,28 @@ async def _sms_inbound_handler(request):
 
 
 async def _sms_cron_tick_handler(request):
-    """Render Cron Job → sms.handle_cron_tick(slot)."""
+    """Render Cron Job → sms.handle_cron_tick(slot).
+
+    Accepts the shared secret via either:
+      - HTTP header `X-Cron-Secret: <value>`  (preferred)
+      - URL query param `?secret=<value>`     (fallback)
+
+    Why both: Render's image-runtime Docker Command field tokenizes
+    by whitespace WITHOUT respecting quote grouping. That makes the
+    `-H "X-Cron-Secret: hex"` form impossible to pass — the space in
+    the header value breaks into multiple argv tokens. Putting the
+    secret in the URL has no spaces, so the cron command stays a
+    single clean curl invocation with no quoting at all. Trade-off:
+    the secret appears in Render's cron logs (which is the same
+    place it's already set as an env var, so net new exposure is ~0).
+    """
     import sms
 
     expected = os.environ.get("CRON_SECRET", "").strip()
-    provided = request.headers.get("X-Cron-Secret", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
     if not expected or provided != expected:
         print(f"[SMS] ❌ cron-tick auth failed (provided={provided[:8]}...)", flush=True)
         return web.Response(status=403, text="bad secret")
