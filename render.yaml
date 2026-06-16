@@ -97,11 +97,15 @@ services:
         -H "X-Cron-Secret: $CRON_SECRET" \
         "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=morning"
     envVars:
+      # CRON_SECRET set manually in Render dashboard on each cron
+      # service. We used to wire this via fromService.name=upskill-coach
+      # but that reference broke after the legacy 'upskill-coach' web
+      # service was deleted (the working web service is named
+      # 'upskill-coach' in render.yaml but has hostname suffix '-dmmu'
+      # in Render, and fromService lookups got confused). Manual
+      # entry is annoying but reliable and only happens once per cron.
       - key: CRON_SECRET
-        fromService:
-          name: upskill-coach
-          type: web
-          envVarKey: CRON_SECRET
+        sync: false
 
   - type: cron
     name: sms-lunch
@@ -116,11 +120,15 @@ services:
         -H "X-Cron-Secret: $CRON_SECRET" \
         "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=lunch"
     envVars:
+      # CRON_SECRET set manually in Render dashboard on each cron
+      # service. We used to wire this via fromService.name=upskill-coach
+      # but that reference broke after the legacy 'upskill-coach' web
+      # service was deleted (the working web service is named
+      # 'upskill-coach' in render.yaml but has hostname suffix '-dmmu'
+      # in Render, and fromService lookups got confused). Manual
+      # entry is annoying but reliable and only happens once per cron.
       - key: CRON_SECRET
-        fromService:
-          name: upskill-coach
-          type: web
-          envVarKey: CRON_SECRET
+        sync: false
 
   - type: cron
     name: sms-afternoon
@@ -135,11 +143,15 @@ services:
         -H "X-Cron-Secret: $CRON_SECRET" \
         "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=afternoon"
     envVars:
+      # CRON_SECRET set manually in Render dashboard on each cron
+      # service. We used to wire this via fromService.name=upskill-coach
+      # but that reference broke after the legacy 'upskill-coach' web
+      # service was deleted (the working web service is named
+      # 'upskill-coach' in render.yaml but has hostname suffix '-dmmu'
+      # in Render, and fromService lookups got confused). Manual
+      # entry is annoying but reliable and only happens once per cron.
       - key: CRON_SECRET
-        fromService:
-          name: upskill-coach
-          type: web
-          envVarKey: CRON_SECRET
+        sync: false
 
   - type: cron
     name: sms-evening
@@ -154,8 +166,12 @@ services:
         -H "X-Cron-Secret: $CRON_SECRET" \
         "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=evening"
     envVars:
+      # CRON_SECRET set manually in Render dashboard on each cron
+      # service. We used to wire this via fromService.name=upskill-coach
+      # but that reference broke after the legacy 'upskill-coach' web
+      # service was deleted (the working web service is named
+      # 'upskill-coach' in render.yaml but has hostname suffix '-dmmu'
+      # in Render, and fromService lookups got confused). Manual
+      # entry is annoying but reliable and only happens once per cron.
       - key: CRON_SECRET
-        fromService:
-          name: upskill-coach
-          type: web
-          envVarKey: CRON_SECRET
+        sync: false
