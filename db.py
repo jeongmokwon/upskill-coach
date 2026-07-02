@@ -175,6 +175,24 @@ def init_db():
         except Exception:
             conn.rollback()  # clear aborted-transaction state
 
+        # Migrate: user_profiles phase-tracking columns (Phase 0/1 flow).
+        # Phase 0 = 'discovery' — LLM co-discovers goal + first bite with
+        # user over ~3 days. Phase 1 = 'first_bite' — LLM nudges toward
+        # doing that specific bite in the evening window. phase_started_at
+        # is NULL until the first discovery interaction fires; the timer
+        # starts then, not on migration.
+        for col, ddl in [
+            ("phase", "TEXT DEFAULT 'discovery'"),
+            ("phase_started_at", "TEXT"),
+            ("agreed_first_bite", "TEXT DEFAULT ''"),
+            ("agreed_at", "TEXT"),
+        ]:
+            try:
+                conn.cursor().execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {ddl}")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
         # Migrate: messages.channel + messages.direction (added with SMS
         # tutor). channel='web' is the historical row type; 'sms' rows are
         # written by the SMS slot handlers. direction is only meaningful
@@ -266,6 +284,11 @@ def init_db():
             ("studying", "TEXT DEFAULT ''"),
             ("hint_preference", "TEXT DEFAULT 'hints'"),
             ("email", "TEXT DEFAULT ''"),
+            # Phase 0/1 flow — see Postgres branch for rationale.
+            ("phase", "TEXT DEFAULT 'discovery'"),
+            ("phase_started_at", "TEXT"),
+            ("agreed_first_bite", "TEXT DEFAULT ''"),
+            ("agreed_at", "TEXT"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {default}")
@@ -864,6 +887,82 @@ def get_today_sessions_for_user(user_id, tz_offset_hours=-8):
     rows = _fetchall(cur)
     conn.close()
     return rows
+
+
+# ─── Phase 0/1 flow helpers ──────────────────────────────────────
+#
+# The SMS companion runs a two-phase micro-experiment:
+#   Phase 0 (discovery) — LLM co-discovers with the user, over up to
+#     3 days, a rough goal + starting position + one concrete 15-min
+#     "first bite" they'll attempt in the evening window.
+#   Phase 1 (first_bite) — LLM shifts to nudging the user to actually
+#     do that specific bite when their evening window opens.
+#
+# Phase transition is triggered by the LLM emitting a [COMMIT: "..."]
+# marker in its response when it detects user agreement. The server
+# parses the marker, saves the bite text, transitions phase, and
+# strips the marker before sending to the user.
+
+def get_user_phase(user_id):
+    """Return {'phase', 'phase_started_at', 'agreed_first_bite',
+    'agreed_at'} for user_id. Missing user → default discovery state."""
+    prof = get_user_profile_by_id(user_id) or {}
+    return {
+        "phase": prof.get("phase") or "discovery",
+        "phase_started_at": prof.get("phase_started_at"),
+        "agreed_first_bite": prof.get("agreed_first_bite") or "",
+        "agreed_at": prof.get("agreed_at"),
+    }
+
+
+def ensure_phase_timer_started(user_id):
+    """Idempotent: if user is in discovery and timer NULL, stamp it now.
+    Returns the phase_started_at (existing or freshly set)."""
+    state = get_user_phase(user_id)
+    if state["phase"] != "discovery":
+        return state["phase_started_at"]
+    if state["phase_started_at"]:
+        return state["phase_started_at"]
+    now = datetime.now().isoformat()
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET phase_started_at = {_P} WHERE user_id = {_P}",
+        (now, user_id)
+    )
+    conn.commit()
+    conn.close()
+    print(f"  [DB] Phase 0 timer started for {user_id} at {now}", flush=True)
+    return now
+
+
+def days_in_discovery(user_id):
+    """Whole days elapsed since phase_started_at. 0 on the same day.
+    Returns 0 if timer not yet started."""
+    state = get_user_phase(user_id)
+    if not state["phase_started_at"]:
+        return 0
+    try:
+        started = datetime.fromisoformat(state["phase_started_at"])
+    except Exception:
+        return 0
+    return (datetime.now() - started).days
+
+
+def commit_first_bite(user_id, bite_text):
+    """Save the agreed-upon first bite and transition to Phase 1."""
+    now = datetime.now().isoformat()
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET "
+        f"phase = 'first_bite', "
+        f"agreed_first_bite = {_P}, "
+        f"agreed_at = {_P} "
+        f"WHERE user_id = {_P}",
+        (bite_text, now, user_id)
+    )
+    conn.commit()
+    conn.close()
+    print(f"  [DB] Phase transition first_bite for {user_id}: {bite_text!r}", flush=True)
 
 
 # Initialize on import
