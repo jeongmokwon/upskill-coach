@@ -263,30 +263,102 @@ def _format_today_sessions(user_id):
     return "\n".join(lines)
 
 
-def _build_system_prompt(slot, user_id):
-    """Assemble shared + slot prompt with user context interpolated."""
-    shared = _read_prompt("sms_shared")
-    slot_prompt = _read_prompt(f"sms_{slot}")
+def _prompt_name_for_slot(slot, phase):
+    """Which prompt file to load for a given (slot, phase) combo.
 
+    Only two slots produce messages under the redesign:
+      morning → always sms_morning (thread-keeping only)
+      evening → sms_discovery in Phase 0, sms_first_bite in Phase 1
+    lunch/afternoon are skipped upstream (see handle_cron_tick).
+    """
+    if slot == "morning":
+        return "sms_morning"
+    if slot == "evening":
+        return "sms_first_bite" if phase == "first_bite" else "sms_discovery"
+    # Unreachable in normal flow — handle_cron_tick skips lunch/afternoon.
+    return None
+
+
+def _build_placeholders(user_id):
+    """Assemble the placeholder dict used by shared + slot prompts.
+
+    Includes both the legacy fields (user_name/goal/studying/
+    insights/today_sessions) and the phase-flow fields
+    (phase/agreed_first_bite/discovery_day) that the redesigned
+    prompts reference.
+    """
     profile = db.get_user_profile_by_id(user_id) or {}
-    fields = {
+    phase_state = db.get_user_phase(user_id)
+    return {
         "user_name": profile.get("user_name") or "you",
         "goal": profile.get("goal") or "(not set)",
         "studying": profile.get("studying") or "(not set)",
         "recent_insights": _format_recent_insights(user_id),
         "today_sessions": _format_today_sessions(user_id),
+        "phase": phase_state["phase"],
+        "agreed_first_bite": phase_state["agreed_first_bite"] or "(not yet agreed)",
+        # 1-indexed day count for the LLM's "Day X of 3" awareness.
+        "discovery_day": db.days_in_discovery(user_id) + 1,
     }
 
-    # Render placeholders. We use str.format with a defaultdict so a
-    # stray {brace} in the prompt body doesn't crash — it just leaves
-    # the literal text alone. (LLM prompts often have JSON examples
-    # with braces.)
-    class _SafeDict(dict):
-        def __missing__(self, k):
-            return "{" + k + "}"
+
+class _SafeDict(dict):
+    """format_map helper: unknown {brace} keys pass through unchanged
+    so LLM prompt bodies with JSON examples don't blow up rendering."""
+    def __missing__(self, k):
+        return "{" + k + "}"
+
+
+def _build_system_prompt(slot, user_id):
+    """Assemble shared + slot prompt with user context interpolated.
+
+    Returns None if the slot has no message to send under current
+    state (used to no-op lunch/afternoon under the redesign).
+    """
+    prompt_name = _prompt_name_for_slot(slot, db.get_user_phase(user_id)["phase"])
+    if prompt_name is None:
+        return None
+    shared = _read_prompt("sms_shared")
+    slot_prompt = _read_prompt(prompt_name)
+    fields = _build_placeholders(user_id)
     rendered_shared = shared.format_map(_SafeDict(**fields))
     rendered_slot = slot_prompt.format_map(_SafeDict(**fields))
     return rendered_shared + "\n\n---\n\n" + rendered_slot
+
+
+# ─── Commit-marker protocol (Phase 0 → Phase 1) ──────────────────────
+#
+# The LLM signals a phase transition by embedding [COMMIT: "..."]
+# anywhere in its response. We parse it, save the bite, transition
+# state, and strip the marker before sending to the user.
+
+_COMMIT_MARKER_RE = re.compile(
+    r'\[COMMIT:\s*"([^"]{3,400})"\s*\]',
+    re.DOTALL,
+)
+
+
+def _process_commit_marker(user_id, text):
+    """If the LLM emitted [COMMIT: "..."] and the user is still in
+    discovery, save the bite and transition phase. Return the text
+    with the marker stripped either way.
+    """
+    match = _COMMIT_MARKER_RE.search(text)
+    if not match:
+        return text
+    bite = match.group(1).strip()
+    stripped = _COMMIT_MARKER_RE.sub("", text).strip()
+    # Collapse the double-blank that stripping mid-paragraph can leave.
+    stripped = re.sub(r"\n{3,}", "\n\n", stripped)
+
+    phase = db.get_user_phase(user_id)["phase"]
+    if phase == "discovery":
+        db.commit_first_bite(user_id, bite)
+        print(f"[SMS] Phase 0→1 for {user_id} on user agreement: {bite!r}", flush=True)
+    else:
+        # LLM emitted a commit while already in Phase 1 — ignore, log.
+        print(f"[SMS] stray COMMIT marker while phase={phase!r}, ignoring", flush=True)
+    return stripped
 
 
 # ─── Inbound message handling ───────────────────────────────────────
@@ -401,6 +473,8 @@ def handle_inbound(from_number, body):
         print(f"[SMS] ❌ Claude call failed on inbound: {e}", flush=True)
         return None
 
+    # Parse & handle [COMMIT: "..."] marker, strip it from user-visible text.
+    reply_text = _process_commit_marker(user_id, reply_text)
     send_sms(from_number, reply_text)
     db.save_sms_message(user_id, "assistant", reply_text, "out")
     return reply_text
@@ -408,29 +482,31 @@ def handle_inbound(from_number, body):
 
 def _build_system_prompt_for_reply(user_id):
     """Shared persona only, with placeholders filled — used for
-    inbound conversational replies (not scheduled slots)."""
+    inbound conversational replies (not scheduled slots).
+
+    Includes the phase-flow placeholders so the LLM knows if it's
+    in discovery vs first_bite mode during a back-and-forth exchange.
+    """
     shared = _read_prompt("sms_shared")
-    profile = db.get_user_profile_by_id(user_id) or {}
-    fields = {
-        "user_name": profile.get("user_name") or "you",
-        "goal": profile.get("goal") or "(not set)",
-        "studying": profile.get("studying") or "(not set)",
-        "recent_insights": _format_recent_insights(user_id),
-        "today_sessions": _format_today_sessions(user_id),
-    }
-    class _SafeDict(dict):
-        def __missing__(self, k):
-            return "{" + k + "}"
+    fields = _build_placeholders(user_id)
     return shared.format_map(_SafeDict(**fields))
 
 
 # ─── Scheduled slot handling ────────────────────────────────────────
 
 def handle_cron_tick(slot):
-    """Run a scheduled slot: load prompt, call Claude, send SMS.
+    """Run a scheduled slot: decide whether to send, and if so,
+    load prompt, call Claude, send WhatsApp.
 
-    Returns the sent text, or None if we declined to send (env not
-    configured, user skipped today, etc.)
+    Returns the sent text, or None if we declined to send.
+
+    Under the Phase 0/1 redesign, the four scheduled slots have very
+    different jobs:
+      morning  — thread-keeping (only if there's prior conversation)
+      lunch    — always skip (user is in startup+kid time)
+      afternoon — always skip (same reason)
+      evening  — the anchor slot; discovery or first_bite prompt
+                 depending on user's current phase.
     """
     if slot not in SLOTS:
         print(f"[SMS] unknown slot {slot!r}", flush=True)
@@ -446,7 +522,27 @@ def handle_cron_tick(slot):
         print(f"[SMS] {slot}: user skipped today — not sending", flush=True)
         return None
 
+    # Slot-specific gating.
+    if slot in ("lunch", "afternoon"):
+        print(f"[SMS] {slot}: daytime slot disabled under redesign — skipping", flush=True)
+        return None
+
+    if slot == "morning":
+        # Skip if there's no prior conversation — a cold "morning!"
+        # with nothing to reference is noise, not signal.
+        if not db.get_recent_sms_messages(user_id, limit=1):
+            print(f"[SMS] morning: no prior thread — skipping (waiting for evening)", flush=True)
+            return None
+
+    if slot == "evening":
+        # Start the Phase 0 timer on the first evening tick (idempotent).
+        db.ensure_phase_timer_started(user_id)
+
     system_prompt = _build_system_prompt(slot, user_id)
+    if system_prompt is None:
+        print(f"[SMS] {slot}: no prompt for current state — skipping", flush=True)
+        return None
+
     history = db.get_recent_sms_messages(user_id, limit=HISTORY_LIMIT)
 
     # If there's no recent SMS history, prime with a single user-turn
@@ -473,6 +569,8 @@ def handle_cron_tick(slot):
         print(f"[SMS] ❌ Claude call failed on {slot}: {e}", flush=True)
         return None
 
+    # Parse & handle [COMMIT: "..."] marker (Phase 0→1), strip it out.
+    text = _process_commit_marker(user_id, text)
     send_sms(to_number, text)
     db.save_sms_message(user_id, "assistant", text, "out")
     return text
