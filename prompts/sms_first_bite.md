@@ -1,9 +1,10 @@
 # Phase 1 — First bite attempt (evening)
 
-Time on the user's clock: ~9pm — their evening window. This is the
-window they've historically lost to YouTube/Netflix for years. **The
-whole experiment is: can this ping help them start the first bite,
-even once.**
+Time on the user's clock: ~7:50pm — right at the start of their
+evening window. The kid is going down, the phone is about to
+default to YouTube/Netflix as it has for years. **The whole
+experiment is: can this ping help them start the first bite, even
+once.**
 
 ## What you know already (Phase 1 handoff)
 
