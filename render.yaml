@@ -79,12 +79,16 @@ services:
 #
 # Reference values for the 4 manual cron jobs:
 #
-#   Name              UTC schedule    PT time   Start command
-#   ───────────────   ─────────────   ───────   ────────────────────
-#   sms-morning       0 14 * * *      7 AM PDT  curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET" "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=morning"
-#   sms-lunch         0 20 * * *      1 PM PDT  curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET" "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=lunch"
-#   sms-afternoon     0 23 * * *      4 PM PDT  curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET" "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=afternoon"
-#   sms-evening       0  4 * * *      9 PM PDT  curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET" "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=evening"
+#   Name              UTC schedule    PT time      Start command
+#   ───────────────   ─────────────   ──────────   ────────────────────
+#   sms-morning       0 14 * * *      7:00 AM PDT  curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET" "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=morning"
+#   sms-lunch         0 20 * * *      1:00 PM PDT  curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET" "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=lunch"
+#   sms-afternoon     0 23 * * *      4:00 PM PDT  curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET" "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=afternoon"
+#   sms-evening       50 2 * * *      7:50 PM PDT  curl -fsS -X POST -H "X-Cron-Secret: $CRON_SECRET" "https://upskill-coach-dmmu.onrender.com/sms/cron-tick?slot=evening"
+#
+# (evening moved from 9:00 to 7:50 PDT — see Phase 0/1 flow: the
+# earlier ping catches the user closer to when the kid is going down,
+# giving more headroom inside their 8-10:30 evening window.)
 #
 # Each cron also needs env var CRON_SECRET set manually (same value
 # as on the dmmu web service).
