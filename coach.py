@@ -867,6 +867,41 @@ async def _sms_cron_tick_handler(request):
     return web.json_response({"ok": True, "slot": slot})
 
 
+async def _sms_reset_and_fire_handler(request):
+    """One-shot rescue endpoint: reset the tutor user's phase state
+    (fresh Phase 0 with timer starting NOW, cutting off old SMS
+    history from LLM context), then immediately trigger the evening
+    slot to send a clean discovery message.
+
+    Same secret auth as cron-tick. Only intended for use when the
+    conversation has been polluted and needs a hard reset — for
+    example when redesign migration left stale SMS history that
+    was bleeding into the new phase's LLM context.
+    """
+    import sms
+    import db
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = os.environ.get("TUTOR_USER_ID", "").strip()
+    if not user_id:
+        return web.Response(status=500, text="TUTOR_USER_ID not set")
+
+    reset_at = db.reset_phase_state(user_id)
+    print(f"[SMS] rescue: phase reset for {user_id} at {reset_at}", flush=True)
+
+    asyncio.get_event_loop().run_in_executor(
+        None, sms.handle_cron_tick, "evening"
+    )
+    return web.json_response({"ok": True, "reset_at": reset_at, "fired": "evening"})
+
+
 # ─── Privacy + Terms (A2P 10DLC compliance) ─────────────────────────
 #
 # Twilio's A2P 10DLC Campaign vetting requires public URLs for the
@@ -1044,6 +1079,7 @@ def start_ws_server():
         # SMS — POST endpoints, registered before the static catch-all.
         app.router.add_post("/sms/inbound", _sms_inbound_handler)
         app.router.add_post("/sms/cron-tick", _sms_cron_tick_handler)
+        app.router.add_post("/sms/reset-and-fire", _sms_reset_and_fire_handler)
         # Public legal pages — required by Twilio A2P 10DLC Campaign
         # vetting. Reviewers fetch these URLs and grep for the
         # compliance phrases.
