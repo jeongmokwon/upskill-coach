@@ -450,14 +450,18 @@ def handle_inbound(from_number, body):
         db.save_sms_message(user_id, "assistant", reply, "out")
         return reply
 
-    # Regular conversation: feed full history + shared persona to
-    # Claude, get a reply, send it.
-    history = db.get_recent_sms_messages(user_id, limit=HISTORY_LIMIT)
+    # Scope history to the current phase so old conversations from
+    # before a phase transition don't bleed in.
+    phase_state = db.get_user_phase(user_id)
+    history = db.get_recent_sms_messages(
+        user_id, limit=HISTORY_LIMIT, since=phase_state["phase_started_at"]
+    )
     # `history` ends with the user message we just inserted, which is
     # what the Anthropic API expects (last message = user turn).
 
-    # For inbound replies (not a scheduled slot), only the shared
-    # persona applies — no slot-specific instruction.
+    # Use the phase-specific evening prompt for inbound replies too —
+    # the LLM should be in the same mode whether the user is replying
+    # to a scheduled ping or texting spontaneously.
     system_prompt = _build_system_prompt_for_reply(user_id)
 
     try:
@@ -481,15 +485,24 @@ def handle_inbound(from_number, body):
 
 
 def _build_system_prompt_for_reply(user_id):
-    """Shared persona only, with placeholders filled — used for
-    inbound conversational replies (not scheduled slots).
+    """Shared persona + phase-specific mode prompt, with placeholders
+    filled — used for inbound conversational replies.
 
-    Includes the phase-flow placeholders so the LLM knows if it's
-    in discovery vs first_bite mode during a back-and-forth exchange.
+    The mode prompt matters here: without it, the LLM only has the
+    generic flow-companion persona, and it may drift into tutoring
+    behavior when replying to the user's messages. Including the
+    discovery / first_bite prompt keeps the LLM anchored to the
+    same job it has during the scheduled evening ping.
     """
     shared = _read_prompt("sms_shared")
+    phase = db.get_user_phase(user_id)["phase"]
+    mode_prompt = _read_prompt(
+        "sms_first_bite" if phase == "first_bite" else "sms_discovery"
+    )
     fields = _build_placeholders(user_id)
-    return shared.format_map(_SafeDict(**fields))
+    rendered_shared = shared.format_map(_SafeDict(**fields))
+    rendered_mode = mode_prompt.format_map(_SafeDict(**fields))
+    return rendered_shared + "\n\n---\n\n" + rendered_mode
 
 
 # ─── Scheduled slot handling ────────────────────────────────────────
@@ -528,10 +541,15 @@ def handle_cron_tick(slot):
         return None
 
     if slot == "morning":
-        # Skip if there's no prior conversation — a cold "morning!"
-        # with nothing to reference is noise, not signal.
-        if not db.get_recent_sms_messages(user_id, limit=1):
-            print(f"[SMS] morning: no prior thread — skipping (waiting for evening)", flush=True)
+        # Skip if there's no prior conversation IN THE CURRENT PHASE.
+        # We scope to phase-timer to prevent a "morning!" ping that
+        # references stale pre-phase context.
+        phase_state = db.get_user_phase(user_id)
+        recent = db.get_recent_sms_messages(
+            user_id, limit=1, since=phase_state["phase_started_at"]
+        )
+        if not recent:
+            print(f"[SMS] morning: no prior thread this phase — skipping", flush=True)
             return None
 
     if slot == "evening":
@@ -543,7 +561,11 @@ def handle_cron_tick(slot):
         print(f"[SMS] {slot}: no prompt for current state — skipping", flush=True)
         return None
 
-    history = db.get_recent_sms_messages(user_id, limit=HISTORY_LIMIT)
+    # Scope history to current phase — see get_recent_sms_messages docstring.
+    phase_state = db.get_user_phase(user_id)
+    history = db.get_recent_sms_messages(
+        user_id, limit=HISTORY_LIMIT, since=phase_state["phase_started_at"]
+    )
 
     # If there's no recent SMS history, prime with a single user-turn
     # placeholder. Anthropic requires the messages array to start with

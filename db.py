@@ -837,20 +837,35 @@ def save_sms_message(user_id, role, content, direction):
     conn.close()
 
 
-def get_recent_sms_messages(user_id, limit=20):
+def get_recent_sms_messages(user_id, limit=20, since=None):
     """Return last N SMS messages for `user_id`, oldest-first.
 
     Format matches Anthropic's messages array — [{role, content}, ...] —
     so it can be passed straight into a Claude call as conversation
     history.
+
+    If `since` (ISO-8601 string) is provided, only messages with
+    `timestamp > since` are returned. This lets the caller scope
+    the LLM's visible history to the current phase, so old
+    conversations from before a phase transition don't bleed into
+    the current mode and cause the LLM to reconcile-then-hallucinate.
     """
     conn = get_conn()
-    cur = _execute(conn,
-        f"SELECT role, content FROM messages "
-        f"WHERE session_id = {_P} AND channel = 'sms' "
-        f"ORDER BY id DESC LIMIT {_P}",
-        (_sms_sid(user_id), limit)
-    )
+    if since:
+        cur = _execute(conn,
+            f"SELECT role, content FROM messages "
+            f"WHERE session_id = {_P} AND channel = 'sms' "
+            f"AND timestamp > {_P} "
+            f"ORDER BY id DESC LIMIT {_P}",
+            (_sms_sid(user_id), since, limit)
+        )
+    else:
+        cur = _execute(conn,
+            f"SELECT role, content FROM messages "
+            f"WHERE session_id = {_P} AND channel = 'sms' "
+            f"ORDER BY id DESC LIMIT {_P}",
+            (_sms_sid(user_id), limit)
+        )
     rows = _fetchall(cur)
     conn.close()
     rows.reverse()  # oldest-first for the LLM
@@ -963,6 +978,28 @@ def commit_first_bite(user_id, bite_text):
     conn.commit()
     conn.close()
     print(f"  [DB] Phase transition first_bite for {user_id}: {bite_text!r}", flush=True)
+
+
+def reset_phase_state(user_id):
+    """Rescue: reset the user to a fresh Phase 0 with the timer
+    starting NOW. Old SMS history remains in the DB but is filtered
+    out of LLM context by the `since=phase_started_at` scope in
+    get_recent_sms_messages(). Idempotent."""
+    now = datetime.now().isoformat()
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET "
+        f"phase = 'discovery', "
+        f"phase_started_at = {_P}, "
+        f"agreed_first_bite = '', "
+        f"agreed_at = NULL "
+        f"WHERE user_id = {_P}",
+        (now, user_id)
+    )
+    conn.commit()
+    conn.close()
+    print(f"  [DB] Phase state reset for {user_id} at {now}", flush=True)
+    return now
 
 
 # Initialize on import
