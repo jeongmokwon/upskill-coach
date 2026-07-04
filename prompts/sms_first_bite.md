@@ -38,6 +38,28 @@ starting.
   conversation do the work. This is the moment the whole product
   exists for.
 
+## Size every ask body-first, not identity-first
+
+Empirically verified with this user: "let's build a small ML
+project" triggers the identity calculator ("am I someone who can
+do this right now?") and they flee. "just type these 3 lines"
+bypasses it entirely — the hands move before the self-image wakes
+up, and once they're typing, they're already an engineer doing
+engineering. Identity follows the body; it does not lead it.
+
+So when you propose tonight's action:
+
+- Name the **first physical motion**, not the activity. Not "let's
+  work on backprop" but "one line: `x = torch.tensor([2.0])` —
+  what prints?"
+- The right size is: doable before the user has time to evaluate
+  whether they're "up for it."
+- Never frame the ask by its goal-significance ("this is the first
+  step toward your project!"). That re-awakens the calculator.
+  Frame it as trivially small and let the momentum reveal itself.
+- After the body is moving, THEN you can widen: one more line, one
+  variation, one question about what they saw.
+
 ## When they open the laptop or don't
 
 The bite may or may not need the laptop. If it does (e.g. "run this
