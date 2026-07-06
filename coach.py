@@ -902,6 +902,36 @@ async def _sms_reset_and_fire_handler(request):
     return web.json_response({"ok": True, "reset_at": reset_at, "fired": "evening"})
 
 
+async def _sms_set_goal_handler(request):
+    """Admin rescue: directly set the agreed goal without LLM
+    cooperation. Used when the goal was agreed in conversation but
+    never persisted (pre-agreed_goal-column history), so the LLM
+    keeps falling back to the stale onboarding goal.
+
+    POST /sms/set-goal?secret=...&goal=<url-encoded text>
+    """
+    import db
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = os.environ.get("TUTOR_USER_ID", "").strip()
+    if not user_id:
+        return web.Response(status=500, text="TUTOR_USER_ID not set")
+
+    goal = request.query.get("goal", "").strip()
+    if not goal:
+        return web.Response(status=400, text="goal param required")
+
+    db.set_agreed_goal(user_id, goal)
+    return web.json_response({"ok": True, "user_id": user_id, "agreed_goal": goal})
+
+
 # ─── Privacy + Terms (A2P 10DLC compliance) ─────────────────────────
 #
 # Twilio's A2P 10DLC Campaign vetting requires public URLs for the
@@ -1080,6 +1110,7 @@ def start_ws_server():
         app.router.add_post("/sms/inbound", _sms_inbound_handler)
         app.router.add_post("/sms/cron-tick", _sms_cron_tick_handler)
         app.router.add_post("/sms/reset-and-fire", _sms_reset_and_fire_handler)
+        app.router.add_post("/sms/set-goal", _sms_set_goal_handler)
         # Public legal pages — required by Twilio A2P 10DLC Campaign
         # vetting. Reviewers fetch these URLs and grep for the
         # compliance phrases.

@@ -186,6 +186,13 @@ def init_db():
             ("phase_started_at", "TEXT"),
             ("agreed_first_bite", "TEXT DEFAULT ''"),
             ("agreed_at", "TEXT"),
+            # The goal chain agreed during discovery ("career change to
+            # ML → build one small ML project myself"). Without this
+            # persisted, the goal lives only in SMS history, gets
+            # truncated past HISTORY_LIMIT, and the LLM falls back to
+            # the stale web-onboarding `goal` field — observed to
+            # produce goal hallucination mid-conversation.
+            ("agreed_goal", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.cursor().execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {ddl}")
@@ -289,6 +296,7 @@ def init_db():
             ("phase_started_at", "TEXT"),
             ("agreed_first_bite", "TEXT DEFAULT ''"),
             ("agreed_at", "TEXT"),
+            ("agreed_goal", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {default}")
@@ -920,14 +928,29 @@ def get_today_sessions_for_user(user_id, tz_offset_hours=-8):
 
 def get_user_phase(user_id):
     """Return {'phase', 'phase_started_at', 'agreed_first_bite',
-    'agreed_at'} for user_id. Missing user → default discovery state."""
+    'agreed_at', 'agreed_goal'} for user_id. Missing user → default
+    discovery state."""
     prof = get_user_profile_by_id(user_id) or {}
     return {
         "phase": prof.get("phase") or "discovery",
         "phase_started_at": prof.get("phase_started_at"),
         "agreed_first_bite": prof.get("agreed_first_bite") or "",
         "agreed_at": prof.get("agreed_at"),
+        "agreed_goal": prof.get("agreed_goal") or "",
     }
+
+
+def set_agreed_goal(user_id, goal_text):
+    """Persist the goal chain agreed during discovery conversation.
+    Callable any number of times — later agreements refine earlier."""
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET agreed_goal = {_P} WHERE user_id = {_P}",
+        (goal_text, user_id)
+    )
+    conn.commit()
+    conn.close()
+    print(f"  [DB] Agreed goal saved for {user_id}: {goal_text!r}", flush=True)
 
 
 def ensure_phase_timer_started(user_id):
@@ -992,7 +1015,8 @@ def reset_phase_state(user_id):
         f"phase = 'discovery', "
         f"phase_started_at = {_P}, "
         f"agreed_first_bite = '', "
-        f"agreed_at = NULL "
+        f"agreed_at = NULL, "
+        f"agreed_goal = '' "
         f"WHERE user_id = {_P}",
         (now, user_id)
     )

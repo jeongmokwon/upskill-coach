@@ -297,6 +297,7 @@ def _build_placeholders(user_id):
         "today_sessions": _format_today_sessions(user_id),
         "phase": phase_state["phase"],
         "agreed_first_bite": phase_state["agreed_first_bite"] or "(not yet agreed)",
+        "agreed_goal": phase_state["agreed_goal"] or "(not yet agreed)",
         # 1-indexed day count for the LLM's "Day X of 3" awareness.
         "discovery_day": db.days_in_discovery(user_id) + 1,
     }
@@ -337,28 +338,42 @@ _COMMIT_MARKER_RE = re.compile(
     re.DOTALL,
 )
 
+# [GOAL: "..."] — persists the agreed goal chain. Unlike COMMIT it
+# does not transition phase and may fire in any phase, any number of
+# times (later agreements refine earlier ones).
+_GOAL_MARKER_RE = re.compile(
+    r'\[GOAL:\s*"([^"]{3,600})"\s*\]',
+    re.DOTALL,
+)
+
 
 def _process_commit_marker(user_id, text):
-    """If the LLM emitted [COMMIT: "..."] and the user is still in
-    discovery, save the bite and transition phase. Return the text
-    with the marker stripped either way.
-    """
-    match = _COMMIT_MARKER_RE.search(text)
-    if not match:
-        return text
-    bite = match.group(1).strip()
-    stripped = _COMMIT_MARKER_RE.sub("", text).strip()
-    # Collapse the double-blank that stripping mid-paragraph can leave.
-    stripped = re.sub(r"\n{3,}", "\n\n", stripped)
+    """Parse and act on control markers the LLM may embed in its
+    response, and return the text with all markers stripped.
 
-    phase = db.get_user_phase(user_id)["phase"]
-    if phase == "discovery":
-        db.commit_first_bite(user_id, bite)
-        print(f"[SMS] Phase 0→1 for {user_id} on user agreement: {bite!r}", flush=True)
-    else:
-        # LLM emitted a commit while already in Phase 1 — ignore, log.
-        print(f"[SMS] stray COMMIT marker while phase={phase!r}, ignoring", flush=True)
-    return stripped
+    [GOAL: "..."]   — save/refine the agreed goal (any phase).
+    [COMMIT: "..."] — save first bite + transition discovery→first_bite.
+    """
+    goal_match = _GOAL_MARKER_RE.search(text)
+    if goal_match:
+        db.set_agreed_goal(user_id, goal_match.group(1).strip())
+        text = _GOAL_MARKER_RE.sub("", text)
+
+    match = _COMMIT_MARKER_RE.search(text)
+    if match:
+        bite = match.group(1).strip()
+        phase = db.get_user_phase(user_id)["phase"]
+        if phase == "discovery":
+            db.commit_first_bite(user_id, bite)
+            print(f"[SMS] Phase 0→1 for {user_id} on user agreement: {bite!r}", flush=True)
+        else:
+            # LLM emitted a commit while already in Phase 1 — ignore, log.
+            print(f"[SMS] stray COMMIT marker while phase={phase!r}, ignoring", flush=True)
+        text = _COMMIT_MARKER_RE.sub("", text)
+
+    # Collapse the double-blank that stripping mid-paragraph can leave.
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
 
 
 # ─── Inbound message handling ───────────────────────────────────────
