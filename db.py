@@ -940,9 +940,43 @@ def get_user_phase(user_id):
     }
 
 
+def ensure_user_profile_row(user_id):
+    """Create a minimal user_profiles row if none exists. Idempotent.
+
+    Root-cause guard: every phase-state writer below uses UPDATE,
+    and UPDATE against a missing row is a silent 0-row no-op — the
+    endpoint reports success while nothing persists. Observed in
+    prod: the SMS tutor user never completed web onboarding on this
+    database, so no row existed and goal/phase/timer writes all
+    evaporated for days. Callers can't be trusted to know whether
+    onboarding ever ran, so every writer calls this first.
+    """
+    if not user_id:
+        return
+    if get_user_profile_by_id(user_id):
+        return
+    now = datetime.now().isoformat()
+    conn = get_conn()
+    if DB_TYPE == "postgres":
+        _execute(conn, """
+            INSERT INTO user_profiles (user_id, user_name, created_at, updated_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (user_id) DO NOTHING
+        """, (user_id, user_id, now, now))
+    else:
+        _execute(conn, """
+            INSERT OR IGNORE INTO user_profiles (user_id, user_name, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+        """, (user_id, user_id, now, now))
+    conn.commit()
+    conn.close()
+    print(f"  [DB] Created minimal profile row for {user_id}", flush=True)
+
+
 def set_agreed_goal(user_id, goal_text):
     """Persist the goal chain agreed during discovery conversation.
     Callable any number of times — later agreements refine earlier."""
+    ensure_user_profile_row(user_id)
     conn = get_conn()
     _execute(conn,
         f"UPDATE user_profiles SET agreed_goal = {_P} WHERE user_id = {_P}",
@@ -956,6 +990,7 @@ def set_agreed_goal(user_id, goal_text):
 def ensure_phase_timer_started(user_id):
     """Idempotent: if user is in discovery and timer NULL, stamp it now.
     Returns the phase_started_at (existing or freshly set)."""
+    ensure_user_profile_row(user_id)
     state = get_user_phase(user_id)
     if state["phase"] != "discovery":
         return state["phase_started_at"]
@@ -988,6 +1023,7 @@ def days_in_discovery(user_id):
 
 def commit_first_bite(user_id, bite_text):
     """Save the agreed-upon first bite and transition to Phase 1."""
+    ensure_user_profile_row(user_id)
     now = datetime.now().isoformat()
     conn = get_conn()
     _execute(conn,
@@ -1008,6 +1044,7 @@ def reset_phase_state(user_id):
     starting NOW. Old SMS history remains in the DB but is filtered
     out of LLM context by the `since=phase_started_at` scope in
     get_recent_sms_messages(). Idempotent."""
+    ensure_user_profile_row(user_id)
     now = datetime.now().isoformat()
     conn = get_conn()
     _execute(conn,
