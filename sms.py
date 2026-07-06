@@ -50,9 +50,15 @@ SLOTS = ("morning", "lunch", "afternoon", "evening")
 # pennies of savings.
 MODEL = "claude-sonnet-4-5"
 
-# How much SMS history to feed back into Claude as conversation. 20
-# messages ≈ 10 round-trips, plenty for one-user context.
-HISTORY_LIMIT = 20
+# How much SMS history to feed back into Claude as conversation.
+# Was 20, sized for the original "4 nudges a day" design — but real
+# evening study sessions run dozens of messages in one sitting, and
+# the early part of the night (agreements, good explanations) was
+# scrolling out of the window mid-conversation. 50 covers a long
+# evening plus carryover. Messages are short; token cost is minor.
+# If sessions outgrow this too, the real fix is summary-compression
+# (compact synthesis of older turns + raw recent N), not a bigger N.
+HISTORY_LIMIT = 50
 
 # A reply of exactly one of these (case-insensitive, strip
 # punctuation) is treated as a meta-command, not conversation.
