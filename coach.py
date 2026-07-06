@@ -932,6 +932,63 @@ async def _sms_set_goal_handler(request):
     return web.json_response({"ok": True, "user_id": user_id, "agreed_goal": goal})
 
 
+async def _sms_status_handler(request):
+    """Diagnosis: report the tutor user's current phase state so we
+    can see server-side truth without shelling into the DB.
+
+    GET /sms/status?secret=...
+    """
+    import db
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = os.environ.get("TUTOR_USER_ID", "").strip()
+    if not user_id:
+        return web.Response(status=500, text="TUTOR_USER_ID not set")
+
+    state = db.get_user_phase(user_id)
+    state["user_id"] = user_id
+    state["days_in_discovery"] = db.days_in_discovery(user_id)
+    return web.json_response(state)
+
+
+async def _sms_set_bite_handler(request):
+    """Admin rescue: manually commit the first bite, transitioning
+    discovery → first_bite. Used when the [COMMIT:] marker never
+    fired during a conversation where agreement clearly happened.
+
+    POST /sms/set-bite?secret=...&bite=<url-encoded text>
+    """
+    import db
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = os.environ.get("TUTOR_USER_ID", "").strip()
+    if not user_id:
+        return web.Response(status=500, text="TUTOR_USER_ID not set")
+
+    bite = request.query.get("bite", "").strip()
+    if not bite:
+        return web.Response(status=400, text="bite param required")
+
+    db.commit_first_bite(user_id, bite)
+    return web.json_response(
+        {"ok": True, "user_id": user_id, "phase": "first_bite", "agreed_first_bite": bite}
+    )
+
+
 # ─── Privacy + Terms (A2P 10DLC compliance) ─────────────────────────
 #
 # Twilio's A2P 10DLC Campaign vetting requires public URLs for the
@@ -1111,6 +1168,8 @@ def start_ws_server():
         app.router.add_post("/sms/cron-tick", _sms_cron_tick_handler)
         app.router.add_post("/sms/reset-and-fire", _sms_reset_and_fire_handler)
         app.router.add_post("/sms/set-goal", _sms_set_goal_handler)
+        app.router.add_get("/sms/status", _sms_status_handler)
+        app.router.add_post("/sms/set-bite", _sms_set_bite_handler)
         # Public legal pages — required by Twilio A2P 10DLC Campaign
         # vetting. Reviewers fetch these URLs and grep for the
         # compliance phrases.
