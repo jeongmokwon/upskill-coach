@@ -243,6 +243,25 @@ def _format_recent_insights(user_id):
     return "\n".join(lines) if lines else "(insights present but unreadable)"
 
 
+def _format_recent_screen(user_id):
+    """Recent screen observations (last 30 min) from the local
+    observer agent, formatted for the prompt. Empty-state string
+    when no agent is running — the prompt tells the LLM to simply
+    not reference the screen in that case."""
+    try:
+        rows = db.get_recent_observations(user_id, minutes=30, limit=5)
+    except Exception as e:
+        print(f"[SMS] failed to load observations: {e}", flush=True)
+        rows = []
+    if not rows:
+        return "(no live screen session right now)"
+    lines = []
+    for r in rows:
+        hhmm = (r.get("ts") or "")[11:16]
+        lines.append(f"- [{hhmm}] {r['summary']}")
+    return "\n".join(lines)
+
+
 def _format_today_sessions(user_id):
     try:
         rows = db.get_today_sessions_for_user(user_id)
@@ -306,6 +325,7 @@ def _build_placeholders(user_id):
         "agreed_goal": phase_state["agreed_goal"] or "(not yet agreed)",
         # 1-indexed day count for the LLM's "Day X of 3" awareness.
         "discovery_day": db.days_in_discovery(user_id) + 1,
+        "recent_screen": _format_recent_screen(user_id),
     }
 
 
