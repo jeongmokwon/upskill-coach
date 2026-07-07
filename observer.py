@@ -59,14 +59,70 @@ def _get(url, timeout=30):
         return json.loads(resp.read().decode("utf-8"))
 
 
-def capture_screenshot(path, png=False):
-    """Capture main display silently → downscale in place.
+# Apps whose frontmost window is NOT what we want to capture on-demand:
+# if the user is texting the tutor from a desktop chat app, the chat
+# window is frontmost but their actual work is behind it — fall back
+# to full screen in that case.
+_CHAT_APPS = {"whatsapp", "messages", "kakaotalk", "telegram", "slack", "discord"}
 
-    Ambient captures convert to JPEG (small upload, gist is enough).
-    On-demand captures stay PNG: JPEG artifacts smear small text and
-    the deep vision tier is trying to transcribe code verbatim.
+_accessibility_warned = False
+
+
+def _frontmost_window_region():
+    """Return 'x,y,w,h' of the frontmost app's front window (for
+    screencapture -R), or None to fall back to full screen.
+
+    Uses AppleScript via System Events — needs the one-time macOS
+    Accessibility permission for the terminal. On any failure (no
+    permission, chat app frontmost, weird bounds) we just return
+    None: full-screen capture is always a safe fallback.
     """
-    subprocess.run(["screencapture", "-x", "-t", "png", path], check=True)
+    global _accessibility_warned
+    script = ('tell application "System Events" to tell '
+              '(first process whose frontmost is true) to '
+              'get {name, position of front window, size of front window}')
+    try:
+        out = subprocess.run(["osascript", "-e", script],
+                             capture_output=True, text=True, timeout=5)
+        if out.returncode != 0:
+            if "assistive" in out.stderr.lower() and not _accessibility_warned:
+                _accessibility_warned = True
+                print("ℹ️  Accessibility 권한이 없어 전체 화면으로 캡처합니다. "
+                      "창 단위 고해상도 캡처를 원하면 System Settings → "
+                      "Privacy & Security → Accessibility에서 터미널을 허용하세요.")
+            return None
+        parts = [p.strip() for p in out.stdout.strip().split(",")]
+        # "AppName, x, y, w, h"
+        if len(parts) != 5:
+            return None
+        app = parts[0].lower()
+        if any(chat in app for chat in _CHAT_APPS):
+            return None  # user is texting from desktop chat — capture full screen
+        x, y, w, h = (int(float(v)) for v in parts[1:])
+        if w < 300 or h < 300:
+            return None  # tiny window — full screen is more informative
+        return f"{x},{y},{w},{h}"
+    except Exception:
+        return None
+
+
+def capture_screenshot(path, png=False, window_only=False):
+    """Capture silently → downscale in place.
+
+    Ambient captures: full screen, JPEG (small upload, gist is enough).
+    On-demand captures (`window_only=True`): frontmost window region
+    when available + PNG — same 1568px budget spent on just the work
+    window gives the vision model 2-3x more pixels per character,
+    which is the difference between transcribing code and guessing
+    at it. Falls back to full screen when the region isn't available
+    or a chat app is frontmost.
+    """
+    cmd = ["screencapture", "-x", "-t", "png"]
+    if window_only:
+        region = _frontmost_window_region()
+        if region:
+            cmd += ["-R", region]
+    subprocess.run(cmd + [path], check=True)
     args = ["sips", "-Z", str(MAX_LONG_SIDE)]
     if not png:
         args += ["-s", "format", "jpeg"]
@@ -127,7 +183,7 @@ def main():
         PNG (JPEG artifacts smear small code text), and tells the
         server to use the deep transcription tier."""
         nonlocal last_hash, last_capture_at
-        capture_screenshot(tmp.name, png=forced)
+        capture_screenshot(tmp.name, png=forced, window_only=forced)
         with open(tmp.name, "rb") as f:
             img = f.read()
         h = hashlib.sha256(img).hexdigest()
