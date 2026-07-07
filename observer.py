@@ -59,15 +59,18 @@ def _get(url, timeout=30):
         return json.loads(resp.read().decode("utf-8"))
 
 
-def capture_screenshot(path):
-    """Capture main display silently → downscale + JPEG in place."""
+def capture_screenshot(path, png=False):
+    """Capture main display silently → downscale in place.
+
+    Ambient captures convert to JPEG (small upload, gist is enough).
+    On-demand captures stay PNG: JPEG artifacts smear small text and
+    the deep vision tier is trying to transcribe code verbatim.
+    """
     subprocess.run(["screencapture", "-x", "-t", "png", path], check=True)
-    # Resize longest side + convert to JPEG. sips ships with macOS.
-    subprocess.run(
-        ["sips", "-Z", str(MAX_LONG_SIDE), "-s", "format", "jpeg",
-         path, "--out", path],
-        check=True, capture_output=True,
-    )
+    args = ["sips", "-Z", str(MAX_LONG_SIDE)]
+    if not png:
+        args += ["-s", "format", "jpeg"]
+    subprocess.run(args + [path, "--out", path], check=True, capture_output=True)
 
 
 def main():
@@ -120,9 +123,11 @@ def main():
     def do_capture(forced=False):
         """Capture + upload once. `forced` (on-demand from the tutor
         conversation) bypasses the unchanged-screen skip so a fresh
-        observation row always lands for the waiting reply."""
+        observation row always lands for the waiting reply, uploads
+        PNG (JPEG artifacts smear small code text), and tells the
+        server to use the deep transcription tier."""
         nonlocal last_hash, last_capture_at
-        capture_screenshot(tmp.name)
+        capture_screenshot(tmp.name, png=forced)
         with open(tmp.name, "rb") as f:
             img = f.read()
         h = hashlib.sha256(img).hexdigest()
@@ -131,9 +136,12 @@ def main():
             last_capture_at = time.time()
             return
         last_hash = h
+        url = f"{base}/observe/capture?secret={secret}&session_id={session_id}"
+        if forced:
+            url += "&forced=1"
         r = _post(
-            f"{base}/observe/capture?secret={secret}&session_id={session_id}",
-            data=img, content_type="image/jpeg",
+            url, data=img,
+            content_type="image/png" if forced else "image/jpeg",
         )
         last_capture_at = time.time()
         tag = "⚡" if forced else "📸"

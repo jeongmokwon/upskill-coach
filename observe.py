@@ -19,7 +19,19 @@ import time
 
 import anthropic
 
-VISION_MODEL = "claude-haiku-4-5-20251001"
+# Two vision tiers:
+#   ambient (timer captures)   — Haiku, short gist. Fires every ~60s;
+#                                per-call cost dominates.
+#   deep (on-demand captures)  — Sonnet, verbatim transcription. Fires
+#                                only when the user texts mid-session,
+#                                i.e. when they're explicitly asking
+#                                the tutor to look. Getting the actual
+#                                code/error right matters more than
+#                                pennies here: a shallow summary makes
+#                                the tutor fill gaps from chat history
+#                                and fabricate "what it sees".
+VISION_MODEL_AMBIENT = "claude-haiku-4-5-20251001"
+VISION_MODEL_DEEP = "claude-sonnet-4-5"
 
 # ─── On-demand capture requests ──────────────────────────────────────
 #
@@ -46,7 +58,7 @@ def consume_capture_request(user_id, max_age=30):
         ts = _capture_requests.pop(user_id, None)
     return bool(ts and time.time() - ts <= max_age)
 
-_PROMPT = """\
+_PROMPT_AMBIENT = """\
 You are the eyes of a learning companion. This is one screenshot of
 the learner's laptop taken during a study session. In 1-3 short
 sentences, note:
@@ -61,14 +73,35 @@ Be factual and neutral — no judgment, no advice. If the screen is
 ambiguous, say what you can see without guessing. Output plain text
 only."""
 
+_PROMPT_DEEP = """\
+You are the eyes of a learning companion. The learner just texted
+their tutor mid-study and this screenshot was captured on demand —
+the tutor is about to answer a question about what is on this
+screen, so PRECISION matters more than brevity.
 
-def summarize_screenshot(image_bytes, media_type="image/jpeg"):
-    """One vision call → compact text observation. Raises on API
-    failure — caller decides how to handle."""
+1. Name the active app/window and what the learner appears to be
+   doing.
+2. If code is visible (editor, notebook cell, terminal), TRANSCRIBE
+   it verbatim, preserving line structure — up to ~40 lines. If some
+   text is too small/blurry to read reliably, write [unreadable]
+   rather than guessing at it.
+3. Transcribe any visible error message or output verbatim.
+4. Note other visible windows/tabs briefly.
+
+NEVER invent or complete code you cannot actually read. A wrong
+transcription is far worse than an [unreadable] marker — the tutor
+will act on what you write. Output plain text only."""
+
+
+def summarize_screenshot(image_bytes, media_type="image/jpeg", deep=False):
+    """One vision call → text observation. `deep` (on-demand
+    captures) uses the stronger model + verbatim transcription; the
+    default ambient tier stays cheap. Raises on API failure — caller
+    decides how to handle."""
     client = anthropic.Anthropic()
     resp = client.messages.create(
-        model=VISION_MODEL,
-        max_tokens=250,
+        model=VISION_MODEL_DEEP if deep else VISION_MODEL_AMBIENT,
+        max_tokens=900 if deep else 250,
         messages=[{
             "role": "user",
             "content": [
@@ -80,7 +113,7 @@ def summarize_screenshot(image_bytes, media_type="image/jpeg"):
                         "data": base64.standard_b64encode(image_bytes).decode("utf-8"),
                     },
                 },
-                {"type": "text", "text": _PROMPT},
+                {"type": "text", "text": _PROMPT_DEEP if deep else _PROMPT_AMBIENT},
             ],
         }],
     )
