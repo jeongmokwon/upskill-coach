@@ -14,10 +14,37 @@ reasoning happens later, in the tutor conversation, on Sonnet.
 """
 
 import base64
+import threading
+import time
 
 import anthropic
 
 VISION_MODEL = "claude-haiku-4-5-20251001"
+
+# ─── On-demand capture requests ──────────────────────────────────────
+#
+# When the user texts the tutor mid-study, the reply should see the
+# CURRENT screen, not one up to 60s stale. The server can't reach the
+# laptop directly, so the local agent long-polls /observe/poll and the
+# inbound handler drops a request flag here. In-memory is fine: single
+# process on Render, and a lost flag on restart just means one capture
+# happens on the next timer tick instead.
+
+_capture_requests = {}
+_cr_lock = threading.Lock()
+
+
+def request_capture(user_id):
+    with _cr_lock:
+        _capture_requests[user_id] = time.time()
+
+
+def consume_capture_request(user_id, max_age=30):
+    """Agent-side poll: pop the request if one is pending and fresh.
+    Stale requests (>max_age s) are dropped — the moment has passed."""
+    with _cr_lock:
+        ts = _capture_requests.pop(user_id, None)
+    return bool(ts and time.time() - ts <= max_age)
 
 _PROMPT = """\
 You are the eyes of a learning companion. This is one screenshot of

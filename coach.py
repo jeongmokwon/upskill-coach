@@ -1075,6 +1075,30 @@ async def _observe_end_handler(request):
     return web.json_response({"ok": True, "session_id": session_id})
 
 
+async def _observe_poll_handler(request):
+    """GET /observe/poll — long-poll from the local agent.
+
+    Holds the connection up to ~20s. Returns {"capture": true} the
+    moment an on-demand capture request is pending (dropped by the
+    inbound WhatsApp handler when the user texts mid-session), else
+    {"capture": false} at timeout and the agent immediately re-polls.
+    This doubles as the agent's sleep between timer captures, so
+    on-demand latency is sub-second on the signaling side.
+    """
+    import observe as observe_mod
+
+    user_id = _observer_auth(request)
+    if not user_id:
+        return web.Response(status=403, text="bad secret")
+
+    deadline = asyncio.get_event_loop().time() + 20
+    while asyncio.get_event_loop().time() < deadline:
+        if observe_mod.consume_capture_request(user_id):
+            return web.json_response({"capture": True})
+        await asyncio.sleep(0.5)
+    return web.json_response({"capture": False})
+
+
 # ─── Privacy + Terms (A2P 10DLC compliance) ─────────────────────────
 #
 # Twilio's A2P 10DLC Campaign vetting requires public URLs for the
@@ -1260,6 +1284,7 @@ def start_ws_server():
         app.router.add_post("/observe/start", _observe_start_handler)
         app.router.add_post("/observe/capture", _observe_capture_handler)
         app.router.add_post("/observe/end", _observe_end_handler)
+        app.router.add_get("/observe/poll", _observe_poll_handler)
         # Public legal pages — required by Twilio A2P 10DLC Campaign
         # vetting. Reviewers fetch these URLs and grep for the
         # compliance phrases.

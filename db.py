@@ -1158,6 +1158,21 @@ def save_observation(session_id, user_id, summary):
     conn.close()
 
 
+def get_open_observe_session(user_id):
+    """Most recent open observe session for user, or None. Used to
+    decide whether an on-demand capture request is worth making."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT session_id, started_at FROM observe_sessions "
+        f"WHERE user_id = {_P} AND ended_at IS NULL "
+        f"ORDER BY started_at DESC LIMIT 1",
+        (user_id,)
+    )
+    row = _fetchone(cur)
+    conn.close()
+    return row
+
+
 def get_recent_observations(user_id, minutes=30, limit=5):
     """Last N observations within the past `minutes`, oldest-first.
     Empty list when no agent is running — callers render that as
