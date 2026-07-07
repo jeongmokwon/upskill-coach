@@ -53,6 +53,12 @@ def _post(url, data=None, content_type=None, timeout=60):
         return json.loads(resp.read().decode("utf-8"))
 
 
+def _get(url, timeout=30):
+    req = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
 def capture_screenshot(path):
     """Capture main display silently → downscale + JPEG in place."""
     subprocess.run(["screencapture", "-x", "-t", "png", path], check=True)
@@ -107,37 +113,55 @@ def main():
     signal.signal(signal.SIGTERM, _shutdown)
 
     last_hash = None
+    last_capture_at = 0.0
     tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
     tmp.close()
 
+    def do_capture(forced=False):
+        """Capture + upload once. `forced` (on-demand from the tutor
+        conversation) bypasses the unchanged-screen skip so a fresh
+        observation row always lands for the waiting reply."""
+        nonlocal last_hash, last_capture_at
+        capture_screenshot(tmp.name)
+        with open(tmp.name, "rb") as f:
+            img = f.read()
+        h = hashlib.sha256(img).hexdigest()
+        if not forced and h == last_hash:
+            print("…  (screen unchanged, skipping)")
+            last_capture_at = time.time()
+            return
+        last_hash = h
+        r = _post(
+            f"{base}/observe/capture?secret={secret}&session_id={session_id}",
+            data=img, content_type="image/jpeg",
+        )
+        last_capture_at = time.time()
+        tag = "⚡" if forced else "📸"
+        print(f"{tag} {time.strftime('%H:%M:%S')}  {r.get('summary', '')[:120]}")
+
     while True:
         try:
-            capture_screenshot(tmp.name)
-            with open(tmp.name, "rb") as f:
-                img = f.read()
+            due = time.time() - last_capture_at >= args.interval
+            if due:
+                do_capture()
+                continue
 
-            # Skip upload if the screen hasn't visibly changed —
-            # identical hash means identical pixels after downscale.
-            # Saves vision-call cost during long static periods
-            # (reading a page, thinking, away from keyboard).
-            h = hashlib.sha256(img).hexdigest()
-            if h == last_hash:
-                print("…  (screen unchanged, skipping)")
-            else:
-                last_hash = h
-                r = _post(
-                    f"{base}/observe/capture?secret={secret}&session_id={session_id}",
-                    data=img, content_type="image/jpeg",
-                )
-                print(f"📸 {time.strftime('%H:%M:%S')}  {r.get('summary', '')[:120]}")
+            # Between timer captures we long-poll the server instead
+            # of sleeping: if the user texts the tutor mid-session,
+            # the server flips this poll to {"capture": true} and we
+            # capture within a second instead of up to interval-s late.
+            r = _get(f"{base}/observe/poll?secret={secret}")
+            if r.get("capture"):
+                do_capture(forced=True)
         except subprocess.CalledProcessError:
             print("⚠️  screencapture failed — Screen Recording permission granted?")
+            time.sleep(5)
         except urllib.error.HTTPError as e:
-            print(f"⚠️  Upload failed: HTTP {e.code} — {e.read().decode()[:120]}")
+            print(f"⚠️  Request failed: HTTP {e.code} — {e.read().decode()[:120]}")
+            time.sleep(5)
         except Exception as e:
             print(f"⚠️  {type(e).__name__}: {e}")
-
-        time.sleep(args.interval)
+            time.sleep(5)
 
 
 if __name__ == "__main__":

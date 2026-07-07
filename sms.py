@@ -243,6 +243,44 @@ def _format_recent_insights(user_id):
     return "\n".join(lines) if lines else "(insights present but unreadable)"
 
 
+def _request_fresh_screen(user_id, wait_s=8.0):
+    """If a screen-observe session is live, ask the local agent for
+    an immediate capture and wait briefly so the reply is built
+    against the user's CURRENT screen instead of one up to 60s stale.
+
+    No-ops instantly when no agent session is open (zero latency
+    added to normal conversations), and skips the wait when the
+    latest observation is already fresh (<15s).
+    Runs in the inbound executor thread, so blocking sleep is fine.
+    """
+    try:
+        if not db.get_open_observe_session(user_id):
+            return
+        rows = db.get_recent_observations(user_id, minutes=2, limit=1)
+        last_ts = rows[-1]["ts"] if rows else ""
+        if last_ts:
+            from datetime import datetime as _dt
+            try:
+                age = (_dt.now() - _dt.fromisoformat(last_ts)).total_seconds()
+                if age < 15:
+                    return  # already fresh enough
+            except Exception:
+                pass
+
+        import observe as observe_mod
+        observe_mod.request_capture(user_id)
+        t0 = time.time()
+        while time.time() - t0 < wait_s:
+            time.sleep(0.5)
+            new = db.get_recent_observations(user_id, minutes=2, limit=1)
+            if new and new[-1]["ts"] > last_ts:
+                print(f"[SMS] fresh screen capture landed in {time.time()-t0:.1f}s", flush=True)
+                return
+        print(f"[SMS] fresh capture didn't land within {wait_s}s — replying with what we have", flush=True)
+    except Exception as e:
+        print(f"[SMS] fresh-screen request failed (non-fatal): {e}", flush=True)
+
+
 def _format_recent_screen(user_id):
     """Recent screen observations (last 30 min) from the local
     observer agent, formatted for the prompt. Empty-state string
@@ -490,6 +528,10 @@ def handle_inbound(from_number, body):
         send_sms(from_number, reply)
         db.save_sms_message(user_id, "assistant", reply, "out")
         return reply
+
+    # If the user is mid-study with the observer running, grab a
+    # fresh screen capture before building the reply context.
+    _request_fresh_screen(user_id)
 
     # Scope history to the current phase so old conversations from
     # before a phase transition don't bleed in.
