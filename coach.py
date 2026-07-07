@@ -1048,10 +1048,15 @@ async def _observe_capture_handler(request):
     if media_type not in ("image/jpeg", "image/png"):
         media_type = "image/jpeg"
 
+    # forced=1 → on-demand capture (user just texted asking the tutor
+    # to look) → deep vision tier with verbatim code transcription.
+    deep = request.query.get("forced", "") == "1"
+
     loop = asyncio.get_event_loop()
     try:
         summary = await loop.run_in_executor(
-            None, observe_mod.summarize_screenshot, image_bytes, media_type
+            None,
+            lambda: observe_mod.summarize_screenshot(image_bytes, media_type, deep=deep),
         )
     except Exception as e:
         print(f"[OBS] ❌ vision call failed: {e}", flush=True)
