@@ -989,6 +989,92 @@ async def _sms_set_bite_handler(request):
     )
 
 
+# ─── Screen observer endpoints ────────────────────────────────────────
+#
+# The local agent (observer.py, runs on the user's laptop) talks to
+# these three routes. Auth = same shared-secret pattern as the other
+# SMS admin endpoints; identity = TUTOR_USER_ID (single-user MVP).
+# The web app's session/login flow is untouched — observer sessions
+# live in their own tables (see db.py isolation note).
+
+def _observer_auth(request):
+    """Shared-secret check. Returns user_id or None."""
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return None
+    return os.environ.get("TUTOR_USER_ID", "").strip() or None
+
+
+async def _observe_start_handler(request):
+    """POST /observe/start — open an observe session, return its id."""
+    import db
+    user_id = _observer_auth(request)
+    if not user_id:
+        return web.Response(status=403, text="bad secret")
+    sid = db.start_observe_session(user_id)
+    return web.json_response({"ok": True, "session_id": sid})
+
+
+async def _observe_capture_handler(request):
+    """POST /observe/capture?session_id= — body is JPEG/PNG bytes.
+
+    Summarizes via vision model and stores text. Synchronous within
+    an executor thread: the agent uploads every ~60s, so a couple of
+    seconds of processing latency is fine, and returning the summary
+    lets the agent print it for local debugging.
+    """
+    import db
+    import observe as observe_mod
+
+    user_id = _observer_auth(request)
+    if not user_id:
+        return web.Response(status=403, text="bad secret")
+
+    session_id = request.query.get("session_id", "").strip()
+    if not session_id:
+        return web.Response(status=400, text="session_id required")
+
+    image_bytes = await request.read()
+    if not image_bytes or len(image_bytes) < 100:
+        return web.Response(status=400, text="empty body")
+    if len(image_bytes) > 4_000_000:
+        return web.Response(status=413, text="image too large — agent should downscale")
+
+    media_type = request.headers.get("Content-Type", "image/jpeg")
+    if media_type not in ("image/jpeg", "image/png"):
+        media_type = "image/jpeg"
+
+    loop = asyncio.get_event_loop()
+    try:
+        summary = await loop.run_in_executor(
+            None, observe_mod.summarize_screenshot, image_bytes, media_type
+        )
+    except Exception as e:
+        print(f"[OBS] ❌ vision call failed: {e}", flush=True)
+        return web.Response(status=502, text=f"vision failed: {e}")
+
+    db.save_observation(session_id, user_id, summary)
+    print(f"[OBS] {session_id}: {summary[:100]}", flush=True)
+    return web.json_response({"ok": True, "summary": summary})
+
+
+async def _observe_end_handler(request):
+    """POST /observe/end?session_id= — close the session."""
+    import db
+    user_id = _observer_auth(request)
+    if not user_id:
+        return web.Response(status=403, text="bad secret")
+    session_id = request.query.get("session_id", "").strip()
+    if not session_id:
+        return web.Response(status=400, text="session_id required")
+    db.end_observe_session(session_id)
+    return web.json_response({"ok": True, "session_id": session_id})
+
+
 # ─── Privacy + Terms (A2P 10DLC compliance) ─────────────────────────
 #
 # Twilio's A2P 10DLC Campaign vetting requires public URLs for the
@@ -1170,6 +1256,10 @@ def start_ws_server():
         app.router.add_post("/sms/set-goal", _sms_set_goal_handler)
         app.router.add_get("/sms/status", _sms_status_handler)
         app.router.add_post("/sms/set-bite", _sms_set_bite_handler)
+        # Screen observer — local agent (observer.py) endpoints.
+        app.router.add_post("/observe/start", _observe_start_handler)
+        app.router.add_post("/observe/capture", _observe_capture_handler)
+        app.router.add_post("/observe/end", _observe_end_handler)
         # Public legal pages — required by Twilio A2P 10DLC Campaign
         # vetting. Reviewers fetch these URLs and grep for the
         # compliance phrases.

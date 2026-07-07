@@ -215,6 +215,30 @@ def init_db():
                 conn.commit()
             except Exception:
                 conn.rollback()
+
+        # Screen-observer tables. Deliberately SEPARATE from the web
+        # `sessions` table: the web analyzer + orphan-cleanup pass walk
+        # open rows in `sessions` and would try to analyze observer
+        # sessions (which have no chat messages). Isolation keeps both
+        # lifecycles from interfering.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS observe_sessions (
+                session_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                ended_at TEXT
+            )
+        """)
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS observations (
+                id SERIAL PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                summary TEXT NOT NULL
+            )
+        """)
+        conn.commit()
     else:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS sessions (
@@ -311,6 +335,24 @@ def init_db():
                 conn.execute(f"ALTER TABLE messages ADD COLUMN {col} {default}")
             except Exception:
                 pass
+        # Screen-observer tables — see Postgres branch for isolation
+        # rationale (kept separate from web `sessions`).
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS observe_sessions (
+                session_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                ended_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS observations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                summary TEXT NOT NULL
+            );
+        """)
 
     conn.commit()
     conn.close()
@@ -1061,6 +1103,78 @@ def reset_phase_state(user_id):
     conn.close()
     print(f"  [DB] Phase state reset for {user_id} at {now}", flush=True)
     return now
+
+
+# ─── Screen observer ─────────────────────────────────────────────
+#
+# Local agent (observer.py) runs on the user's laptop: declares a
+# session, uploads periodic screenshots. Server summarizes each
+# screenshot to TEXT via a small vision model and stores only the
+# text here — images are never persisted (Render disk is ephemeral
+# anyway, and text is what the companion brain consumes).
+
+def start_observe_session(user_id):
+    """Open a new observe session. Closes any dangling open sessions
+    for this user first (crashed agent, closed laptop lid, etc.)."""
+    now = datetime.now().isoformat()
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE observe_sessions SET ended_at = {_P} "
+        f"WHERE user_id = {_P} AND ended_at IS NULL",
+        (now, user_id)
+    )
+    sid = str(uuid.uuid4())[:8]
+    _execute(conn,
+        f"INSERT INTO observe_sessions (session_id, user_id, started_at) "
+        f"VALUES ({_P}, {_P}, {_P})",
+        (sid, user_id, now)
+    )
+    conn.commit()
+    conn.close()
+    print(f"  [DB] Observe session started: {sid}", flush=True)
+    return sid
+
+
+def end_observe_session(session_id):
+    now = datetime.now().isoformat()
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE observe_sessions SET ended_at = {_P} WHERE session_id = {_P}",
+        (now, session_id)
+    )
+    conn.commit()
+    conn.close()
+    print(f"  [DB] Observe session ended: {session_id}", flush=True)
+
+
+def save_observation(session_id, user_id, summary):
+    conn = get_conn()
+    _execute(conn,
+        f"INSERT INTO observations (session_id, user_id, ts, summary) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P})",
+        (session_id, user_id, datetime.now().isoformat(), summary)
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_recent_observations(user_id, minutes=30, limit=5):
+    """Last N observations within the past `minutes`, oldest-first.
+    Empty list when no agent is running — callers render that as
+    'no live screen context'."""
+    from datetime import timedelta
+    threshold = (datetime.now() - timedelta(minutes=minutes)).isoformat()
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT ts, summary FROM observations "
+        f"WHERE user_id = {_P} AND ts > {_P} "
+        f"ORDER BY id DESC LIMIT {_P}",
+        (user_id, threshold, limit)
+    )
+    rows = _fetchall(cur)
+    conn.close()
+    rows.reverse()
+    return rows
 
 
 # Initialize on import
