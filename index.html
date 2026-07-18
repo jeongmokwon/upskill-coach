@@ -53,6 +53,12 @@
   #topbar {
     padding: 8px 24px; display: flex; align-items: center; gap: 10px;
     border-bottom: 1px solid #21262d; flex-shrink: 0;
+    /* Screen overlays (#onboarding-screen z110, #home/#chat z100) are
+       absolute+fullscreen and were covering the bar — which hides the
+       business attribution + Privacy/Terms links from first-time
+       visitors (incl. toll-free verification reviewers). Keep the bar
+       on top of every screen. */
+    position: relative; z-index: 200; background: #0d1117;
   }
   #topbar .dot {
     width: 8px; height: 8px; border-radius: 50%; background: #f85149;
