@@ -1145,6 +1145,7 @@ def _legal_page(title, body_html):
 {body_html}
 <div class="footer">
   <p>Upskill Coach · <a href="/">Home</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
+  <p>Upskill Coach is a product of Green Gables Studio LLC · © 2026 Green Gables Studio LLC</p>
 </div>
 </body></html>"""
 
@@ -1152,11 +1153,11 @@ def _legal_page(title, body_html):
 async def _privacy_handler(request):
     body = """
 <h1>Privacy Policy</h1>
-<div class="meta">Last updated: June 2026</div>
+<div class="meta">Last updated: July 2026</div>
 
-<p>Upskill Coach is a single-user personal learning experiment built and
-operated by its owner. This policy describes how phone numbers and message
-content are handled.</p>
+<p>Upskill Coach is an early-stage AI learning-coach service built and
+operated by Green Gables Studio LLC. This policy describes how phone
+numbers and message content are handled.</p>
 
 <h2>What we collect</h2>
 <ul>
@@ -1209,10 +1210,11 @@ with the account.</p>
 async def _terms_handler(request):
     body = """
 <h1>Terms and Conditions</h1>
-<div class="meta">Last updated: June 2026</div>
+<div class="meta">Last updated: July 2026</div>
 
-<p>Upskill Coach is a personal learning experiment. By using the SMS
-service, you agree to the following.</p>
+<p>Upskill Coach is an early-stage AI learning-coach service operated
+by Green Gables Studio LLC. By using the SMS service, you agree to the
+following.</p>
 
 <h2>What you'll receive</h2>
 <p>You will receive SMS messages from Upskill Coach intended to deliver
