@@ -238,6 +238,18 @@ def init_db():
                 summary TEXT NOT NULL
             )
         """)
+        # SMS pilot signups (web opt-in form /sms-signup). Rows are
+        # consent records: phone + timestamp of the checked-box
+        # submission. status='pending' until the founder activates the
+        # user manually — signup alone never triggers messages.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS sms_signups (
+                id SERIAL PRIMARY KEY,
+                phone TEXT NOT NULL,
+                consented_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending'
+            )
+        """)
         conn.commit()
     else:
         conn.executescript("""
@@ -351,6 +363,13 @@ def init_db():
                 user_id TEXT NOT NULL,
                 ts TEXT NOT NULL,
                 summary TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS sms_signups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                phone TEXT NOT NULL,
+                consented_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending'
             );
         """)
 
@@ -1156,6 +1175,20 @@ def save_observation(session_id, user_id, summary):
     )
     conn.commit()
     conn.close()
+
+
+def save_sms_signup(phone):
+    """Record a web opt-in consent (phone already normalized E.164).
+    Returns the row id. Duplicate phones allowed — each submission is
+    its own consent record with its own timestamp."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"INSERT INTO sms_signups (phone, consented_at) VALUES ({_P}, {_P})",
+        (phone, datetime.now().isoformat())
+    )
+    conn.commit()
+    conn.close()
+    print(f"  [DB] SMS signup consent recorded for {phone}", flush=True)
 
 
 def get_open_observe_session(user_id):

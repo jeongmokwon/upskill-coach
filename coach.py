@@ -1256,6 +1256,117 @@ number and messages are handled.</p>
                         content_type="text/html")
 
 
+# ─── SMS opt-in signup form ──────────────────────────────────────────
+#
+# The compliant web opt-in form for the SMS coaching pilot. Serves two
+# purposes: (1) the real consent-capture entry point for pilot users,
+# (2) the public "opt-in policy proof" URL for Twilio's Toll-Free
+# Verification review. Built to the carrier checklist: phone field,
+# NOT-pre-checked consent checkbox, message-type description,
+# frequency, data-rates disclaimer, HELP/STOP, ToS/Privacy links,
+# explicit submit button. Submissions are consent records only —
+# status stays 'pending' until the founder activates the user; the
+# form never triggers messages by itself.
+
+async def _sms_signup_page_handler(request):
+    body = """
+<h1>Upskill Coach — SMS Coaching Signup</h1>
+<div class="meta">Invite-only pilot · Green Gables Studio LLC</div>
+
+<p>Sign up to receive AI coaching check-ins and two-way learning
+support by text message.</p>
+
+<form method="POST" action="/sms-signup" style="margin-top:20px">
+  <label for="phone" style="font-weight:600">Mobile Phone Number *</label><br>
+  <input type="tel" id="phone" name="phone" required
+         placeholder="(555) 123-4567" autocomplete="tel"
+         style="margin-top:6px; padding:10px 12px; width:100%; max-width:340px;
+                font-size:16px; border:1px solid #ccc; border-radius:8px;">
+
+  <div style="margin-top:16px; display:flex; gap:10px; align-items:flex-start;">
+    <input type="checkbox" id="consent" name="consent" value="yes"
+           style="margin-top:4px; width:16px; height:16px;">
+    <label for="consent">Yes, I would like to receive automated text
+    messages from Upskill Coach with coaching check-ins and two-way
+    learning support for my study goals. I understand I will receive
+    up to 4 messages per day.</label>
+  </div>
+
+  <p style="margin-top:16px"><strong>Message Frequency:</strong> Up to 4
+  messages per day; actual frequency varies with your replies.</p>
+  <p><strong>Standard Rates:</strong> Message and data rates may apply
+  depending on your mobile phone service plan.</p>
+  <p><strong>Help &amp; Stop:</strong> Reply HELP for help or STOP to
+  cancel at any time. By providing your phone number and checking the
+  box above, you agree to receive text messages from Upskill Coach
+  (Green Gables Studio LLC). Consent is not a condition of any
+  purchase.</p>
+
+  <p><a href="/terms">Terms of Service</a> · <a href="/privacy">Privacy Policy</a></p>
+
+  <button id="submit-btn" type="submit" disabled
+          style="margin-top:12px; padding:12px 28px; font-size:16px;
+                 border:none; border-radius:8px; background:#2563eb;
+                 color:#fff; cursor:pointer; opacity:0.5;">
+    Yes, sign me up!</button>
+</form>
+
+<script>
+  // Consent checkbox must be actively selected — submit stays
+  // disabled until it is.
+  const cb = document.getElementById('consent');
+  const btn = document.getElementById('submit-btn');
+  cb.addEventListener('change', () => {
+    btn.disabled = !cb.checked;
+    btn.style.opacity = cb.checked ? '1' : '0.5';
+  });
+</script>
+"""
+    return web.Response(text=_legal_page("SMS Signup", body),
+                        content_type="text/html")
+
+
+def _normalize_us_phone(raw):
+    """'(555) 123-4567' / '5551234567' / '15551234567' → '+15551234567'.
+    Returns None if it doesn't parse as a US number."""
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if len(digits) == 10:
+        return f"+1{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    return None
+
+
+async def _sms_signup_submit_handler(request):
+    import db
+
+    form = await request.post()
+    if form.get("consent") != "yes":
+        return web.Response(status=400, text="Consent checkbox is required.")
+    phone = _normalize_us_phone(form.get("phone", ""))
+    if not phone:
+        body = """
+<h1>Hmm — that number didn't look right</h1>
+<p>Please enter a valid US mobile number, e.g. (555) 123-4567.</p>
+<p><a href="/sms-signup">← Back to signup</a></p>
+"""
+        return web.Response(status=400, text=_legal_page("SMS Signup", body),
+                            content_type="text/html")
+
+    db.save_sms_signup(phone)
+    body = """
+<h1>You're on the list 🎉</h1>
+<p>Thanks — your signup is recorded. Because this is a small
+invite-only pilot, we activate participants one at a time; you'll
+receive a welcome text from Upskill Coach when your spot opens.</p>
+<p>You can reply STOP at any time to cancel, or HELP for assistance.
+Message and data rates may apply.</p>
+<p><a href="/">← Home</a></p>
+"""
+    return web.Response(text=_legal_page("SMS Signup", body),
+                        content_type="text/html")
+
+
 @web.middleware
 async def _log_middleware(request, handler):
     """Log every incoming request for debugging."""
@@ -1297,6 +1408,9 @@ def start_ws_server():
         # compliance phrases.
         app.router.add_get("/privacy", _privacy_handler)
         app.router.add_get("/terms", _terms_handler)
+        # SMS pilot opt-in form (also the TFV opt-in policy proof URL).
+        app.router.add_get("/sms-signup", _sms_signup_page_handler)
+        app.router.add_post("/sms-signup", _sms_signup_submit_handler)
         app.router.add_get("/{path:.*}", _static_handler)
 
         runner = web.AppRunner(app)
