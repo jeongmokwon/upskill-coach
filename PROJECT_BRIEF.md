@@ -83,6 +83,22 @@ keeps the `MESSAGING_CHANNEL` env toggle; the pilot ships on SMS.
 Consequence for recruiting: **pilot users need US phone numbers**
 (toll-free SMS is US/Canada domestic).
 
+SMS compliance & trust (non-negotiable, carrier-facing AND
+user-facing):
+- **Opt-in consent is collected at onboarding** before any message
+  is sent — the web consent form (`/sms-signup`: checkbox not
+  pre-selected, frequency + data-rates disclosure, ToS/Privacy
+  links) is both the carrier-verification proof and the real
+  consent record (timestamped rows in `sms_signups`).
+- **STOP opt-out is honored immediately** (Twilio-level block +
+  our skip handling); HELP returns identification + support info.
+  Every disclosure the user saw promises this — it must stay true.
+- **Onboarding includes a "save the coach's number as a contact"
+  step.** Dual purpose: deliverability/trust (an unsaved toll-free
+  number reads as spam; saved "Coach" reads as a relationship — the
+  psychological framing matters as much as the filtering), and it
+  gives the evening ping a name instead of a number.
+
 ### 3.2 Desktop conversation surface (load-bearing requirement)
 
 Users must be able to converse with the coach FROM THE LAPTOP during
@@ -94,10 +110,23 @@ using surfaces that already exist:
 |---|---|
 | Mac + iPhone | Messages app via Text Message Forwarding (one-time setup; documented step in onboarding) |
 | Any laptop + Android | Google Messages for Web (QR pairing; requires Google Messages as default SMS app — recruiting screener question) |
-| Chromebook + iPhone | **Gap.** Phone-only conversation accepted for pilot; screen capture still covers the laptop side |
+| Chromebook + iPhone | **Gap.** Phone-only conversation; handled per the policy below |
 
-Contingency: do NOT build a web chat surface until pilot evidence
-shows the gap matters (chat UI stays a §2 non-goal).
+**Chromebook+iPhone policy (count it, don't hand-wave it):**
+- The recruiting screener/1:1 explicitly records each applicant's
+  laptop OS + phone OS, so this combo is COUNTED, not discovered
+  after onboarding.
+- First cohort: deprioritize this combo when equivalent candidates
+  exist. If accepted anyway, the user is labeled
+  **`degraded-condition`** in their profile/events — their churn and
+  engagement data are analyzed separately, never pooled with
+  full-condition users (otherwise the combo's friction reads as a
+  coaching-policy failure).
+- **Web-chat contingency trigger:** if this combo reaches a
+  meaningful share of applicants (2-3+ people), that is the
+  pre-agreed activation condition for building the web chat
+  surface — not before. Until triggered, chat UI stays a §2
+  non-goal.
 
 ## 4. Non-negotiable engineering principles
 
