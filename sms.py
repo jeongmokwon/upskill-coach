@@ -114,8 +114,9 @@ def _addr(phone):
     return f"{_channel_prefix()}{phone}"
 
 
-def send_sms(to_number, body):
+def send_sms(to_number, body, user_id=None):
     """Send `body` to `to_number` (E.164). Returns Twilio SID or None.
+    `user_id` is used only for event attribution on failures.
 
     Splits on lines containing only '---' so the LLM can emit two
     "SMS bubbles" by separating them, and we send each as a real
@@ -154,6 +155,12 @@ def send_sms(to_number, body):
             print(f"[SMS] sent ({len(part)} chars) sid={msg.sid}", flush=True)
         except Exception as e:
             print(f"[SMS] ❌ send failed: {e}", flush=True)
+            # Infra failures are data (brief §4.1) — the Twilio outage
+            # was a pivotal natural experiment that survived only by
+            # memory. Never let a send failure go unrecorded.
+            db.log_event(user_id, "sms_send_failed",
+                         {"error": str(e)[:300], "part_index": i,
+                          "to": to_addr}, source="sms")
             break
         # Gap between messages so they arrive in order on the user's
         # device. Twilio doesn't guarantee order across back-to-back
@@ -269,14 +276,19 @@ def _request_fresh_screen(user_id, wait_s=8.0):
 
         import observe as observe_mod
         observe_mod.request_capture(user_id)
+        db.log_event(user_id, "fresh_capture_requested", {}, source="sms")
         t0 = time.time()
         while time.time() - t0 < wait_s:
             time.sleep(0.5)
             new = db.get_recent_observations(user_id, minutes=2, limit=1)
             if new and new[-1]["ts"] > last_ts:
                 print(f"[SMS] fresh screen capture landed in {time.time()-t0:.1f}s", flush=True)
+                db.log_event(user_id, "fresh_capture_landed",
+                             {"elapsed_s": round(time.time() - t0, 1)}, source="sms")
                 return
         print(f"[SMS] fresh capture didn't land within {wait_s}s — replying with what we have", flush=True)
+        db.log_event(user_id, "fresh_capture_timeout",
+                     {"waited_s": wait_s}, source="sms")
     except Exception as e:
         print(f"[SMS] fresh-screen request failed (non-fatal): {e}", flush=True)
 
@@ -433,6 +445,8 @@ def _process_commit_marker(user_id, text):
         else:
             # LLM emitted a commit while already in Phase 1 — ignore, log.
             print(f"[SMS] stray COMMIT marker while phase={phase!r}, ignoring", flush=True)
+            db.log_event(user_id, "commit_marker_ignored",
+                         {"phase": phase, "bite": bite}, source="sms")
         text = _COMMIT_MARKER_RE.sub("", text)
 
     # Collapse the double-blank that stripping mid-paragraph can leave.
@@ -510,23 +524,32 @@ def handle_inbound(from_number, body):
     None if we chose not to reply)."""
     user_id = _resolve_user_from_phone(from_number)
     if not user_id:
+        # Unknown sender is still an event (brief: nothing unrecorded).
+        db.log_event(None, "sms_in_unknown_sender",
+                     {"from": _strip_channel(from_number), "text": body[:200]},
+                     source="sms")
         return None
 
     # Log the user's message FIRST so it's part of history before we
     # build context for our reply.
     db.save_sms_message(user_id, "user", body, "in")
+    db.log_event(user_id, "sms_in", {"text": body}, source="sms")
 
     # Meta-commands short-circuit the LLM.
     if _is_command(body, SKIP_TOKENS):
         _mark_skip_today(user_id)
+        db.log_event(user_id, "skip_today", {}, source="sms")
         reply = "ok, no more pings today. talk tomorrow."
-        send_sms(from_number, reply)
+        send_sms(from_number, reply, user_id=user_id)
         db.save_sms_message(user_id, "assistant", reply, "out")
+        db.log_event(user_id, "sms_out", {"text": reply, "trigger": "skip_ack"}, source="sms")
         return reply
     if _is_command(body, LATER_TOKENS):
+        db.log_event(user_id, "defer_to_evening", {}, source="sms")
         reply = "got it — picking this back up at 9."
-        send_sms(from_number, reply)
+        send_sms(from_number, reply, user_id=user_id)
         db.save_sms_message(user_id, "assistant", reply, "out")
+        db.log_event(user_id, "sms_out", {"text": reply, "trigger": "later_ack"}, source="sms")
         return reply
 
     # If the user is mid-study with the observer running, grab a
@@ -558,12 +581,19 @@ def handle_inbound(from_number, body):
         reply_text = resp.content[0].text.strip()
     except Exception as e:
         print(f"[SMS] ❌ Claude call failed on inbound: {e}", flush=True)
+        db.log_event(user_id, "llm_error",
+                     {"where": "inbound_reply", "error": str(e)[:300]},
+                     source="sms")
         return None
 
     # Parse & handle [COMMIT: "..."] marker, strip it from user-visible text.
     reply_text = _process_commit_marker(user_id, reply_text)
-    send_sms(from_number, reply_text)
+    send_sms(from_number, reply_text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", reply_text, "out")
+    db.log_event(user_id, "sms_out",
+                 {"text": reply_text, "trigger": "inbound_reply",
+                  "phase": db.get_user_phase(user_id)["phase"]},
+                 source="sms")
     return reply_text
 
 
@@ -612,16 +642,24 @@ def handle_cron_tick(slot):
     to_number = os.environ.get("TUTOR_USER_PHONE", "").strip()
     if not (user_id and to_number):
         print(f"[SMS] {slot}: TUTOR_USER_ID/PHONE not set — skipping", flush=True)
+        db.log_event(None, "cron_tick",
+                     {"slot": slot, "action": "skipped", "reason": "env_unset"},
+                     source="cron")
+        return None
+
+    def _skip(reason):
+        print(f"[SMS] {slot}: skipping — {reason}", flush=True)
+        db.log_event(user_id, "cron_tick",
+                     {"slot": slot, "action": "skipped", "reason": reason},
+                     source="cron")
         return None
 
     if _is_skipped_today(user_id):
-        print(f"[SMS] {slot}: user skipped today — not sending", flush=True)
-        return None
+        return _skip("user_skip_today")
 
     # Slot-specific gating.
     if slot in ("lunch", "afternoon"):
-        print(f"[SMS] {slot}: daytime slot disabled under redesign — skipping", flush=True)
-        return None
+        return _skip("daytime_slot_disabled")
 
     if slot == "morning":
         # Skip if there's no prior conversation IN THE CURRENT PHASE.
@@ -632,8 +670,7 @@ def handle_cron_tick(slot):
             user_id, limit=1, since=phase_state["phase_started_at"]
         )
         if not recent:
-            print(f"[SMS] morning: no prior thread this phase — skipping", flush=True)
-            return None
+            return _skip("no_thread_this_phase")
 
     if slot == "evening":
         # Start the Phase 0 timer on the first evening tick (idempotent).
@@ -641,8 +678,7 @@ def handle_cron_tick(slot):
 
     system_prompt = _build_system_prompt(slot, user_id)
     if system_prompt is None:
-        print(f"[SMS] {slot}: no prompt for current state — skipping", flush=True)
-        return None
+        return _skip("no_prompt_for_state")
 
     # Scope history to current phase — see get_recent_sms_messages docstring.
     phase_state = db.get_user_phase(user_id)
@@ -672,10 +708,19 @@ def handle_cron_tick(slot):
         text = resp.content[0].text.strip()
     except Exception as e:
         print(f"[SMS] ❌ Claude call failed on {slot}: {e}", flush=True)
+        db.log_event(user_id, "llm_error",
+                     {"where": f"cron_{slot}", "error": str(e)[:300]},
+                     source="cron")
         return None
 
     # Parse & handle [COMMIT: "..."] marker (Phase 0→1), strip it out.
     text = _process_commit_marker(user_id, text)
-    send_sms(to_number, text)
+    send_sms(to_number, text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", text, "out")
+    db.log_event(user_id, "cron_tick",
+                 {"slot": slot, "action": "fired"}, source="cron")
+    db.log_event(user_id, "sms_out",
+                 {"text": text, "trigger": f"cron_{slot}",
+                  "phase": db.get_user_phase(user_id)["phase"]},
+                 source="cron")
     return text

@@ -250,6 +250,24 @@ def init_db():
                 status TEXT NOT NULL DEFAULT 'pending'
             )
         """)
+        # Unified append-only event log (WEEK1_ORDER T1, brief §4.1).
+        # Dialect discipline per D1.3: this table is touched only by
+        # INSERT and SELECT; payload is JSON serialized to TEXT in
+        # Python (no engine JSON functions anywhere).
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS events (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                payload TEXT NOT NULL DEFAULT '{}',
+                schema_version INTEGER NOT NULL DEFAULT 1,
+                source TEXT NOT NULL DEFAULT 'server'
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_user_ts ON events (user_id, ts)"
+        )
         conn.commit()
     else:
         conn.executescript("""
@@ -371,6 +389,18 @@ def init_db():
                 consented_at TEXT NOT NULL,
                 status TEXT NOT NULL DEFAULT 'pending'
             );
+
+            CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                payload TEXT NOT NULL DEFAULT '{}',
+                schema_version INTEGER NOT NULL DEFAULT 1,
+                source TEXT NOT NULL DEFAULT 'server'
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_events_user_ts ON events (user_id, ts);
         """)
 
     conn.commit()
@@ -973,6 +1003,57 @@ def get_today_sessions_for_user(user_id, tz_offset_hours=-8):
     return rows
 
 
+# ─── Unified append-only event log (WEEK1_ORDER T1) ──────────────
+#
+# Brief §4.1: "Nothing that happens in the system may be unrecorded."
+# One timeline per user. Append-only by convention — this module
+# exports INSERT and SELECT helpers only; there is no update/delete
+# path. Dialect-neutral SQL only (D1.3).
+
+EVENTS_SCHEMA_VERSION = 1
+
+
+def log_event(user_id, kind, payload=None, source="server"):
+    """Append one event to the unified log. NEVER raises — event
+    logging must not be able to break the main flow. Failures are
+    printed (and thus visible in Render logs) but swallowed.
+
+    user_id may be None/'' for events not yet attributable to a user
+    (recorded under '_unknown' rather than dropped)."""
+    try:
+        conn = get_conn()
+        _execute(conn,
+            f"INSERT INTO events (user_id, ts, kind, payload, schema_version, source) "
+            f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+            (user_id or "_unknown", datetime.now().isoformat(), kind,
+             json.dumps(payload or {}, ensure_ascii=False),
+             EVENTS_SCHEMA_VERSION, source)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[EVENTS] ⚠️ log_event({kind}) failed: {e}", flush=True)
+
+
+def get_events(user_id, limit=200, since=None):
+    """Read a user's timeline, oldest-first. `since` = ISO ts filter."""
+    conn = get_conn()
+    if since:
+        cur = _execute(conn,
+            f"SELECT ts, kind, payload, source FROM events "
+            f"WHERE user_id = {_P} AND ts > {_P} ORDER BY id DESC LIMIT {_P}",
+            (user_id, since, limit))
+    else:
+        cur = _execute(conn,
+            f"SELECT ts, kind, payload, source FROM events "
+            f"WHERE user_id = {_P} ORDER BY id DESC LIMIT {_P}",
+            (user_id, limit))
+    rows = _fetchall(cur)
+    conn.close()
+    rows.reverse()
+    return rows
+
+
 # ─── Phase 0/1 flow helpers ──────────────────────────────────────
 #
 # The SMS companion runs a two-phase micro-experiment:
@@ -1034,9 +1115,11 @@ def ensure_user_profile_row(user_id):
     print(f"  [DB] Created minimal profile row for {user_id}", flush=True)
 
 
-def set_agreed_goal(user_id, goal_text):
+def set_agreed_goal(user_id, goal_text, source="llm_marker"):
     """Persist the goal chain agreed during discovery conversation.
-    Callable any number of times — later agreements refine earlier."""
+    Callable any number of times — later agreements refine earlier.
+    Emits the goal_set event here (single source of truth) so every
+    caller path — marker parse, admin rescue — is covered once."""
     ensure_user_profile_row(user_id)
     conn = get_conn()
     _execute(conn,
@@ -1046,6 +1129,7 @@ def set_agreed_goal(user_id, goal_text):
     conn.commit()
     conn.close()
     print(f"  [DB] Agreed goal saved for {user_id}: {goal_text!r}", flush=True)
+    log_event(user_id, "goal_set", {"goal": goal_text}, source=source)
 
 
 def ensure_phase_timer_started(user_id):
@@ -1066,6 +1150,7 @@ def ensure_phase_timer_started(user_id):
     conn.commit()
     conn.close()
     print(f"  [DB] Phase 0 timer started for {user_id} at {now}", flush=True)
+    log_event(user_id, "phase_timer_started", {"phase_started_at": now}, source="cron")
     return now
 
 
@@ -1082,7 +1167,7 @@ def days_in_discovery(user_id):
     return (datetime.now() - started).days
 
 
-def commit_first_bite(user_id, bite_text):
+def commit_first_bite(user_id, bite_text, source="llm_marker"):
     """Save the agreed-upon first bite and transition to Phase 1."""
     ensure_user_profile_row(user_id)
     now = datetime.now().isoformat()
@@ -1098,9 +1183,11 @@ def commit_first_bite(user_id, bite_text):
     conn.commit()
     conn.close()
     print(f"  [DB] Phase transition first_bite for {user_id}: {bite_text!r}", flush=True)
+    log_event(user_id, "phase_transition",
+              {"to": "first_bite", "bite": bite_text}, source=source)
 
 
-def reset_phase_state(user_id):
+def reset_phase_state(user_id, source="admin"):
     """Rescue: reset the user to a fresh Phase 0 with the timer
     starting NOW. Old SMS history remains in the DB but is filtered
     out of LLM context by the `since=phase_started_at` scope in
@@ -1121,6 +1208,7 @@ def reset_phase_state(user_id):
     conn.commit()
     conn.close()
     print(f"  [DB] Phase state reset for {user_id} at {now}", flush=True)
+    log_event(user_id, "phase_reset", {"phase_started_at": now}, source=source)
     return now
 
 
