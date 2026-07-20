@@ -14,10 +14,13 @@ would be wiped on every deploy. Events live in the same dual-backend
 Conditions attached by the operator (via brief-author review):
 1. Blob storage must be object storage (→ D2), never local disk —
    otherwise timeline events reference files that no longer exist.
-2. Verify in the Render dashboard that the LIVE database instance is
-   the paid `basic-256mb` from render.yaml (not a stray from the
-   blueprint incident) and that automated backups are enabled.
-   Regardless: nightly `pg_dump` → R2 (see T6b) as owned backup.
+2. ✅ VERIFIED (2026-07-20, Render console): single live instance
+   `upskill-coach-db-dmmu`, paid Basic-256mb, Blueprint-managed.
+   Point-in-Time Recovery window is **3 days** (7 needs a Pro
+   workspace); manual logical Export available (retained ≥7 days).
+   The 3-day window is thin for pilot data → T6b owned backups
+   (nightly pg_dump → R2, 30-day rotation) are the real safety net,
+   not an extra.
 3. Dialect discipline: `db.py` is raw-SQL with manual branching, so
    event-store code uses only the dialect-neutral subset — plain
    INSERT/SELECT, JSON stored as TEXT via json.dumps (no engine JSON
@@ -25,12 +28,14 @@ Conditions attached by the operator (via brief-author review):
    trigger: if a dialect bug bites twice, unify local dev on
    dockerized Postgres.
 
-**D2 — RESOLVED (2026-07-20): Cloudflare R2.** S3-compatible,
-free at pilot scale, no egress fees. Content-hash keys; written by
-/observe/capture BEFORE summarization; local-dir fallback for dev.
-Setup: one R2 account + bucket, 2 env vars (credentials), boring
-boto3-compatible client. Supersedes the original local
-`blobs/<user_id>/<sha256>` instruction.
+**D2 — RESOLVED (2026-07-20, operator approved): Cloudflare R2.**
+S3-compatible, free at pilot scale, no egress fees. Content-hash
+keys; local-dir fallback for dev. Operator-confirmed pipeline order:
+**capture → raw image to R2 → LLM summarize → summary stored** (the
+raw write happens BEFORE and independent of summarization — a vision
+failure must never lose the raw). Setup: one R2 account + bucket,
+2 env vars (credentials), boring boto3-compatible client. Supersedes
+the original local `blobs/<user_id>/<sha256>` instruction.
 
 **D3 — Legacy quarantine list: confirm INVENTORY.md §9.**
 → **Needs operator: yes/no per line (or approve as proposed).**
