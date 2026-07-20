@@ -30,7 +30,7 @@ bites ignite reliably and teach nothing — the bite ladder must climb).
 We are building a **research instrument (pilot equipment)**, not a product. The founder has been running a manual n=1 experiment on herself (WhatsApp coach messages + screen capture). We are now hardening that setup so 5–10 external users can run it, while the founder operates the "coach brain" manually.
 
 **Explicit NON-GOALS for this phase — do not build these, do not scaffold for them:**
-- Chat UI / onboarding screens / mobile app (onboarding happens over WhatsApp)
+- Chat UI / onboarding screens / mobile app (onboarding happens over SMS — see §3.1 for why not WhatsApp)
 - **Automated policy *learning*** — no ML/RL loop that updates policy from outcomes. Not enough data at n=5–10, and the founder must understand hand-tuning before automating it.
 - Content infrastructure: no content library, no exercise banks, no new animation work. Two things this non-goal does NOT cover: the per-user **learning path** (§7 — route state, in scope) and the **runtime micro-content the coach already generates in conversation** (§7 Layer 3 — e.g., "type these 3 lines"; continues as-is, no new build needed).
 - App Store / Mac App Store distribution (direct download only)
@@ -46,14 +46,58 @@ If a task seems to require one of these, stop and flag it instead of building it
 
 ```
 [User desktop]                     [Server]                        [Operator = founder]
- menubar/tray capture app  ──►  ingest API ──► event store  ──►  operator dashboard
- (macOS + Windows)                    │        (append-only)         (timeline per user,
-                                      ▼             │                 per-user prompt editing)
-[User phone]                    featurization       │
- WhatsApp (via Twilio) ◄──►     job (LLM →          ▼
+ capture client            ──►  ingest API ──► event store  ──►  operator dashboard
+ (Chrome extension primary;           │        (append-only,         (timeline per user,
+  native clients post-pilot)          ▼         Postgres)             per-user prompt editing)
+[User phone + desktop]          featurization       │
+ SMS (toll-free via Twilio) ◄──► job (LLM →         ▼
  coach conversation             LearnerState)   raw blob store
-                                                (screenshots, full convos)
+ (desktop surface: §3.2)                        (Cloudflare R2:
+                                                 screenshots, dumps)
 ```
+
+### 3.1 Channel decision: SMS, not WhatsApp (decided 2026-07, do not revert casually)
+
+The conversation channel is **SMS via a Twilio toll-free number**.
+WhatsApp was tried first (sandbox) and rejected for production on
+structural — not preference — grounds:
+
+1. **WhatsApp's 24-hour customer-service window forbids
+   business-initiated free-form messages to anyone silent >24h.**
+   The coach's single highest-value intervention is exactly that
+   message: re-engaging a dormant user with a personalized,
+   free-form motivational conversation (Hard rule #2's
+   mini-onboarding). Outside 24h WhatsApp allows only pre-approved
+   templates — which is precisely the "task reminder" shape that
+   rule #2 bans. The channel forbids the product's core move.
+2. Meta business verification is a 1-2 week external dependency,
+   and the founder's Meta business account carries an unexplained
+   ads restriction (creating a fresh portfolio to bypass it risks
+   circumvention flags).
+3. Sandbox requires participants to re-join every 3 days — unusable
+   onboarding for external users.
+
+WhatsApp sandbox remains acceptable only as the founder's own
+interim n=1 channel until toll-free verification clears. The code
+keeps the `MESSAGING_CHANNEL` env toggle; the pilot ships on SMS.
+Consequence for recruiting: **pilot users need US phone numbers**
+(toll-free SMS is US/Canada domestic).
+
+### 3.2 Desktop conversation surface (load-bearing requirement)
+
+Users must be able to converse with the coach FROM THE LAPTOP during
+study sessions — typing code fragments on a phone is a validated
+churn-level friction (founder n=1). Strategy is per device-combo,
+using surfaces that already exist:
+
+| Combo | Desktop SMS surface |
+|---|---|
+| Mac + iPhone | Messages app via Text Message Forwarding (one-time setup; documented step in onboarding) |
+| Any laptop + Android | Google Messages for Web (QR pairing; requires Google Messages as default SMS app — recruiting screener question) |
+| Chromebook + iPhone | **Gap.** Phone-only conversation accepted for pilot; screen capture still covers the laptop side |
+
+Contingency: do NOT build a web chat surface until pilot evidence
+shows the gap matters (chat UI stays a §2 non-goal).
 
 ## 4. Non-negotiable engineering principles
 
@@ -63,18 +107,18 @@ If a task seems to require one of these, stop and flag it instead of building it
 4. **Randomization hooks from day one.** Every intervention decision point must pass through a policy function that can apply probabilistic variation and logs what was sampled and why. Variation width may be 0 for now; the *structure and logging* must exist now, because causal readability cannot be retrofitted.
 5. **The coach brain stays manual.** Per-user system prompts are files/records the founder edits. The system routes and logs; it does not decide.
 6. **user_id everywhere.** Current n=1 (the founder) but every table, path, and function takes user_id from day one.
-7. **Boring tech.** Python. SQLite for the event store (single-writer server process; revisit only if it breaks). Local filesystem blob store with content-hash names (S3-compatible interface optional later). No microservices, no queues unless something measurably breaks.
-8. **Founder's stack context:** primary language Python (founder reads Python but is not deeply fluent — write clear, well-commented, boring Python; no clever metaprogramming). Founder has Swift/iOS background, which becomes relevant for the macOS menubar app in week 2.
+7. **Boring tech.** Python. **Postgres in production (Render, paid basic-256mb) / SQLite locally, behind the single existing `db.py` abstraction** — new code writes dialect-neutral SQL only (INSERT/SELECT, JSON-as-TEXT; see WEEK1_ORDER D1). Render's disk is EPHEMERAL: nothing durable ever goes on the server filesystem. **Raw blobs live in Cloudflare R2** (S3-compatible, content-hash names; local dir only as dev fallback). No microservices, no queues unless something measurably breaks. *(Amended 2026-07-20: the original "SQLite + local filesystem" spec predated knowledge of the deployed infra — see WEEK1_ORDER D1/D2 for the decision record.)*
+8. **Founder's stack context:** primary language Python (founder reads Python but is not deeply fluent — write clear, well-commented, boring Python; no clever metaprogramming). Founder has Swift/iOS background — relevant for eventual native capture clients (post-pilot), not for the pilot's Chrome extension.
 9. **Week-1 schema must not preclude the learning path (§7).** The path is a first-class, version-tracked per-user artifact (like the policy); path changes land in the event log with decision ids. Week 1 builds the schema + migrates the existing two-layer state (agreed_goal, agreed_first_bite) into path v1; path UX and prompt work follow in weeks 2-3.
 10. **Week-1 schema must not preclude initial policy generation (§7).** Concretely: onboarding conversations are stored as structured, retrievable raw (not just free text lost in the message log); a generated per-user policy is a first-class, version-tracked artifact in the prompt registry, tagged with the policy-prior version and the onboarding data it was generated from. We are not building the generator in week 1 — we are making sure week-3 can build it without retrofitting the event/prompt schema.
 
 ## 5. Existing assets (inventory before touching anything)
 
 Already built, in varying states:
-- Twilio → WhatsApp scheduled messaging (morning/noon/evening sends)
+- Twilio scheduled messaging (morning/evening sends; WhatsApp sandbox interim, SMS toll-free pending verification, `MESSAGING_CHANNEL` toggle in code)
 - A `*.py` script that screen-captures every 60s when run from terminal
-- Screenshot-on-message: captures screen whenever the founder sends a WhatsApp message
-- The coach LLM prompt(s) used for WhatsApp conversations
+- Screenshot-on-message: an on-demand screen capture fires whenever the founder messages the coach (channel-agnostic; inbound-triggered)
+- The coach LLM prompt(s) used for coach conversations (channel-agnostic; `prompts/sms_*.md`)
 - **Legacy experiment code from earlier iterations — this is known debt. QUARANTINE it (move to `/legacy`, exclude from imports), do not refactor it, do not delete it.**
 
 First task of week 1 is a written inventory of this repo before any changes.
@@ -83,9 +127,9 @@ First task of week 1 is a written inventory of this repo before any changes.
 
 **Week 1 — Data foundation (the non-retrofittable layer).** Unified append-only event store + per-user timeline; raw blob store; prompt version registry; LearnerState feature schema v1 + LLM annotation job; randomization/decision hook with logging; infra-event and capture-gap detection. Existing components rewired to emit events. *(Detailed in WEEK1_ORDER.md.)*
 
-**Week 2 — Capture apps + pipeline hardening.** Platform-agnostic capture core (capture cadence, main-workspace-window high-res handling, upload protocol, retry/offline buffering). Thin platform shells: macOS menubar app + Windows tray app. Install experience: signed + notarized (macOS), OV code-signed (Windows). Always-visible capture indicator + one-click pause. Server ingest hardening.
+**Week 2 — Capture client + pipeline hardening.** Primary client is a **Chrome extension** (one artifact covers macOS + Windows + ChromeOS; the recruiting pool skews Chromebook, and this population's learning is browser-centric — Colab, MOOCs, docs). Capture core: cadence, active-tab/workspace high-res handling, tab-switch events (`browser_tabs_captured`-class observations — avoidance signal), upload protocol, retry/offline buffering. Distribution: Chrome Web Store unlisted (no signing certs, no notarization). Always-visible capture indicator + one-click pause. Server ingest hardening. **Final build order is decided by the recruit device mix from 1:1 conversations** — native clients (macOS menubar via ScreenCaptureKit, Windows tray) are post-pilot or for IDE-centric users; the founder's own `observer.py` terminal agent continues for n=1.
 
-**Week 3 — Multi-user + operator tooling.** WhatsApp pipeline user routing (per-user prompts, per-user silence/3-day-rule state, per-user phase estimate). Operator dashboard: per-user timeline (capture summaries + conversation + sent messages + feature trends) and per-user prompt editing. Target: founder reviews all users in <10 min/morning. One-page data collection/retention policy document.
+**Week 3 — Multi-user + operator tooling.** SMS pipeline user routing (per-user prompts, per-user silence-rule state, per-user phase estimate; toll-free number per §3.1). Operator dashboard: per-user timeline (capture summaries + conversation + sent messages + feature trends) and per-user prompt editing. Target: founder reviews all users in <10 min/morning. One-page data collection/retention policy document.
 
 **Week 4 — Rehearsal + recruitment readiness.** Install-flow rehearsal with 1–2 friends; first-24h pipeline survival test; sequential onboarding support (users onboard one at a time, never in a batch).
 
