@@ -110,7 +110,26 @@ without human action.
 (none of it is imported by active code per INVENTORY §9); note in
 legacy/README.md that it is frozen.
 
-**T8. user_id plumbing audit.**
+**T8. Learning-path schema (brief §7 "Learning path", §4.9).**
+Table `learning_paths`: `(id, user_id, version, ts, direction,
+project, project_done_condition, bites_done JSON, current_bite,
+next_candidates JSON, changed_by, decision_id)`. Append-only
+versions (a path change = new row). Migrate current two-layer state
+(`agreed_goal` → direction, `agreed_first_bite` → current_bite) into
+each user's path v1; existing columns stay (read paths win when
+present). No prompt/UX changes this week.
+*Accept:* founder's own path exists as v1; a manual path edit
+produces v2 + an event; old code paths unaffected.
+
+**T9. Phase-1 bite progression** *(week 1-2 boundary, small).*
+`[COMMIT:]` in Phase 1 advances the ladder: current_bite → bites_done,
+new bite becomes current (new path version + event) instead of being
+ignored. Prompt nudge so the LLM proposes the next bite at natural
+completion moments.
+*Accept:* completing a bite in conversation yields a climbing ladder
+without founder intervention.
+
+**T10. user_id plumbing audit.**
 Grep-level pass: every new helper takes user_id explicitly (no
 thread-local reliance in pilot paths); TUTOR_USER_ID env remains the
 single-user shim, isolated to entry points so multi-user routing
@@ -121,7 +140,8 @@ single-user shim, isolated to entry points so multi-user routing
 T1 → T2 → T3 can land as three small PRs this week (no external
 dependencies). T4 lands whenever D2 is decided (independent). T5
 depends on T1 (+T4 for evidence links to blobs). T6 after T1.
-T7/T8 anytime.
+T7/T10 anytime. T8 after T1+T3 (path versions cite decision ids);
+T9 after T8, may slip into week 2.
 
 ## Explicitly NOT this week (brief §2 non-goals)
 
