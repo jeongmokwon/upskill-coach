@@ -6,24 +6,31 @@
 
 ## Open decisions (operator input needed)
 
-**D1 — Event store engine: keep the existing Postgres/SQLite duality.**
-Brief §4.7 says "SQLite for the event store", but production already
-runs Postgres on Render (Render disk is ephemeral, so server-side
-SQLite would be wiped on every deploy — a non-starter). Proposal:
-events live in the same dual-backend `db.py` layer as everything else
-(Postgres in prod, SQLite locally). This honors the brief's intent
-(boring, single-writer) with the engine that already exists.
-→ **Default unless objected: keep duality.**
+**D1 — RESOLVED (2026-07-20): keep the Postgres/SQLite duality, with
+conditions.** Brief §4.7's "SQLite" was written without knowledge of
+the deployed infra; Render disk is ephemeral, so server-side SQLite
+would be wiped on every deploy. Events live in the same dual-backend
+`db.py` layer as everything else (Postgres in prod, SQLite locally).
+Conditions attached by the operator (via brief-author review):
+1. Blob storage must be object storage (→ D2), never local disk —
+   otherwise timeline events reference files that no longer exist.
+2. Verify in the Render dashboard that the LIVE database instance is
+   the paid `basic-256mb` from render.yaml (not a stray from the
+   blueprint incident) and that automated backups are enabled.
+   Regardless: nightly `pg_dump` → R2 (see T6b) as owned backup.
+3. Dialect discipline: `db.py` is raw-SQL with manual branching, so
+   event-store code uses only the dialect-neutral subset — plain
+   INSERT/SELECT, JSON stored as TEXT via json.dumps (no engine JSON
+   functions), no upserts (append-only needs none). Escalation
+   trigger: if a dialect bug bites twice, unify local dev on
+   dockerized Postgres.
 
-**D2 — Raw blob store: Render disk cannot hold "raw is sacred".**
-Screenshots are currently discarded after summarization; the brief
-demands permanent raw retention + re-annotation capability. Local
-filesystem (brief §4.7) does not survive Render deploys. Proposal:
-S3-compatible object store — Cloudflare R2 (free tier: 10GB, no
-egress fees) — content-hash keys, written by /observe/capture before
-summarization. Local-dir fallback for dev. Requires one new account +
-2 env vars.
-→ **Needs operator: approve R2 (or pick Backblaze B2 / AWS S3).**
+**D2 — RESOLVED (2026-07-20): Cloudflare R2.** S3-compatible,
+free at pilot scale, no egress fees. Content-hash keys; written by
+/observe/capture BEFORE summarization; local-dir fallback for dev.
+Setup: one R2 account + bucket, 2 env vars (credentials), boring
+boto3-compatible client. Supersedes the original local
+`blobs/<user_id>/<sha256>` instruction.
 
 **D3 — Legacy quarantine list: confirm INVENTORY.md §9.**
 → **Needs operator: yes/no per line (or approve as proposed).**
@@ -45,13 +52,15 @@ revised against raw data later.
 INVENTORY.md + WEEK1_ORDER.md added.
 
 **T1. Unified append-only event log.**
-New table `events`: `id, user_id, ts, kind, payload(JSON),
+New table `events`: `id, user_id, ts, kind, payload(JSON-as-TEXT),
 schema_version, source`. Append-only by convention: no UPDATE/DELETE
-helpers exported. Emit from every existing pathway WITHOUT behavior
-change: sms in/out (with prompt_version once T2 lands), cron
-tick/skip + reason, phase transitions, GOAL/COMMIT marker parses,
-observe start/capture/end (+ tier, + blob hash once T4 lands),
-signup submissions, admin rescues, send failures.
+helpers exported. Dialect discipline per D1.3: INSERT/SELECT only,
+payload serialized with json.dumps (no engine JSON functions, no
+upserts). Emit from every existing pathway WITHOUT behavior change:
+sms in/out (with prompt_version once T2 lands), cron tick/skip +
+reason, phase transitions, GOAL/COMMIT marker parses, observe
+start/capture/end (+ tier, + blob hash once T4 lands), signup
+submissions, admin rescues, send failures.
 *Accept:* one evening of normal use produces a human-readable
 per-user timeline from `events` alone; existing behavior unchanged.
 
@@ -104,6 +113,17 @@ delivery unknown → flagged). The brief's "pivotal natural
 experiments" (outages) must self-record.
 *Accept:* killing the observer mid-session produces a gap event
 without human action.
+
+**T6b. Owned backups (D1 condition 2).**
+Nightly `pg_dump` of the Render Postgres → gzip → R2 (content-hash
+named, 30-day rotation). Runs as a Render cron (same curl-image
+pattern as the SMS slots, hitting an admin endpoint) or a small
+scheduled job on the founder's machine — whichever is more boring
+after checking Render's built-in backup status. Also: one-time
+dashboard verification that the live DB instance is the paid
+basic-256mb and note its backup policy in this file.
+*Accept:* a dated dump exists in R2; restore drill documented (one
+command) in a RUNBOOK section.
 
 **T7. Legacy quarantine** *(blocked on D3).*
 `git mv` the confirmed list into `/legacy/`; no import breakage
