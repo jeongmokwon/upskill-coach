@@ -893,7 +893,7 @@ async def _sms_reset_and_fire_handler(request):
     if not user_id:
         return web.Response(status=500, text="TUTOR_USER_ID not set")
 
-    reset_at = db.reset_phase_state(user_id)
+    reset_at = db.reset_phase_state(user_id, source="admin")
     print(f"[SMS] rescue: phase reset for {user_id} at {reset_at}", flush=True)
 
     asyncio.get_event_loop().run_in_executor(
@@ -928,7 +928,7 @@ async def _sms_set_goal_handler(request):
     if not goal:
         return web.Response(status=400, text="goal param required")
 
-    db.set_agreed_goal(user_id, goal)
+    db.set_agreed_goal(user_id, goal, source="admin")
     return web.json_response({"ok": True, "user_id": user_id, "agreed_goal": goal})
 
 
@@ -958,6 +958,42 @@ async def _sms_status_handler(request):
     return web.json_response(state)
 
 
+async def _debug_timeline_handler(request):
+    """Human-readable per-user event timeline — WEEK1_ORDER T1's
+    acceptance surface. Plain text, newest last.
+
+    GET /debug/timeline?secret=...[&user_id=X][&limit=200]
+    """
+    import db
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = (request.query.get("user_id", "").strip()
+               or os.environ.get("TUTOR_USER_ID", "").strip())
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+    try:
+        limit = min(int(request.query.get("limit", "200")), 1000)
+    except ValueError:
+        limit = 200
+
+    rows = db.get_events(user_id, limit=limit)
+    lines = [f"# timeline for {user_id} — {len(rows)} events (oldest first)"]
+    for r in rows:
+        payload = r.get("payload") or "{}"
+        # keep each line scannable; full payloads live in the table
+        if len(payload) > 300:
+            payload = payload[:300] + "…"
+        lines.append(f"{r['ts']}  [{r['source']}] {r['kind']}  {payload}")
+    return web.Response(text="\n".join(lines) + "\n", content_type="text/plain")
+
+
 async def _sms_set_bite_handler(request):
     """Admin rescue: manually commit the first bite, transitioning
     discovery → first_bite. Used when the [COMMIT:] marker never
@@ -983,7 +1019,7 @@ async def _sms_set_bite_handler(request):
     if not bite:
         return web.Response(status=400, text="bite param required")
 
-    db.commit_first_bite(user_id, bite)
+    db.commit_first_bite(user_id, bite, source="admin")
     return web.json_response(
         {"ok": True, "user_id": user_id, "phase": "first_bite", "agreed_first_bite": bite}
     )
@@ -1016,6 +1052,7 @@ async def _observe_start_handler(request):
     if not user_id:
         return web.Response(status=403, text="bad secret")
     sid = db.start_observe_session(user_id)
+    db.log_event(user_id, "observe_start", {"session_id": sid}, source="observer")
     return web.json_response({"ok": True, "session_id": sid})
 
 
@@ -1063,6 +1100,9 @@ async def _observe_capture_handler(request):
         return web.Response(status=502, text=f"vision failed: {e}")
 
     db.save_observation(session_id, user_id, summary)
+    db.log_event(user_id, "observation",
+                 {"session_id": session_id, "deep": deep, "summary": summary},
+                 source="observer")
     print(f"[OBS] {session_id}: {summary[:100]}", flush=True)
     return web.json_response({"ok": True, "summary": summary})
 
@@ -1077,6 +1117,7 @@ async def _observe_end_handler(request):
     if not session_id:
         return web.Response(status=400, text="session_id required")
     db.end_observe_session(session_id)
+    db.log_event(user_id, "observe_end", {"session_id": session_id}, source="observer")
     return web.json_response({"ok": True, "session_id": session_id})
 
 
@@ -1354,6 +1395,7 @@ async def _sms_signup_submit_handler(request):
                             content_type="text/html")
 
     db.save_sms_signup(phone)
+    db.log_event(phone, "signup_consent", {"phone": phone}, source="web")
     body = """
 <h1>You're on the list 🎉</h1>
 <p>Thanks — your signup is recorded. Because this is a small
@@ -1397,6 +1439,7 @@ def start_ws_server():
         app.router.add_post("/sms/reset-and-fire", _sms_reset_and_fire_handler)
         app.router.add_post("/sms/set-goal", _sms_set_goal_handler)
         app.router.add_get("/sms/status", _sms_status_handler)
+        app.router.add_get("/debug/timeline", _debug_timeline_handler)
         app.router.add_post("/sms/set-bite", _sms_set_bite_handler)
         # Screen observer — local agent (observer.py) endpoints.
         app.router.add_post("/observe/start", _observe_start_handler)
