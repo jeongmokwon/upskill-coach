@@ -7,7 +7,7 @@
 
 ## 1. What this product is
 
-An AI coach that sits as a **layer on top of whatever the user is using to upskill** (a bootcamp, YouTube tutorials, DataCamp, their own toy project). It does not author content; **it owns the learner's route through existing content** (see §7 "Learning path"). Its job:
+An AI coach that sits as a **layer on top of whatever the user is using to upskill** (a bootcamp, YouTube tutorials, DataCamp, their own toy project). It carries no pre-authored content library — existing world content (MOOCs, YouTube, textbooks) is one-size-fits-all, and the coach's job is to make learning fit ONE person: **it owns the learner's route** (§7 "Learning path") **and generates ephemeral, personalized micro-content at runtime** when the route needs it — a 3-line exercise typed into Colab, an in-chat drill, a gap-filling task (§7 policy prior, Layer 3). The fixed line: nothing is authored in advance, stored as inventory, or reused across users. Its job:
 
 1. **Ignition** — get the user to actually start a session (the core validated wedge: users don't fail at learning, they fail at sitting down).
 2. **Observation** — watch the user's screen longitudinally (frequent captures, high-res tracking of their main workspace) to build a model of how *this specific user* learns, stalls, and bails.
@@ -32,7 +32,7 @@ We are building a **research instrument (pilot equipment)**, not a product. The 
 **Explicit NON-GOALS for this phase — do not build these, do not scaffold for them:**
 - Chat UI / onboarding screens / mobile app (onboarding happens over WhatsApp)
 - **Automated policy *learning*** — no ML/RL loop that updates policy from outcomes. Not enough data at n=5–10, and the founder must understand hand-tuning before automating it.
-- Content authoring / animations / a curriculum content library. (The per-user **learning path** — §7 — is route state, not content, and IS in scope; do not confuse the two.)
+- Content infrastructure: no content library, no exercise banks, no new animation work. Two things this non-goal does NOT cover: the per-user **learning path** (§7 — route state, in scope) and the **runtime micro-content the coach already generates in conversation** (§7 Layer 3 — e.g., "type these 3 lines"; continues as-is, no new build needed).
 - App Store / Mac App Store distribution (direct download only)
 - Payments, auth flows, marketing site
 
