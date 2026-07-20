@@ -268,6 +268,18 @@ def init_db():
         conn.cursor().execute(
             "CREATE INDEX IF NOT EXISTS idx_events_user_ts ON events (user_id, ts)"
         )
+        # Prompt version registry (WEEK1_ORDER T2, brief §4.3). A row
+        # per distinct prompt-template content ever observed in use;
+        # content-hash is the identity (same trick as git). Register-
+        # on-read: the running system records what actually ran.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS prompt_versions (
+                hash TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                first_seen TEXT NOT NULL
+            )
+        """)
         conn.commit()
     else:
         conn.executescript("""
@@ -401,6 +413,13 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_events_user_ts ON events (user_id, ts);
+
+            CREATE TABLE IF NOT EXISTS prompt_versions (
+                hash TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                first_seen TEXT NOT NULL
+            );
         """)
 
     conn.commit()
@@ -1033,6 +1052,54 @@ def log_event(user_id, kind, payload=None, source="server"):
         conn.close()
     except Exception as e:
         print(f"[EVENTS] ⚠️ log_event({kind}) failed: {e}", flush=True)
+
+
+def register_prompt_version(name, content):
+    """Content-hash a prompt template; record it if unseen. Returns
+    the hash either way. NEVER raises outward — a registry hiccup
+    must not block message sending.
+
+    Dialect discipline (D1.3): SELECT-then-INSERT, no upsert. A
+    concurrent duplicate INSERT hits the PK and is swallowed — the
+    row already exists, which is the outcome we wanted.
+    """
+    import hashlib
+    h = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+    try:
+        conn = get_conn()
+        cur = _execute(conn,
+            f"SELECT hash FROM prompt_versions WHERE hash = {_P}", (h,))
+        exists = _fetchone(cur)
+        if not exists:
+            try:
+                _execute(conn,
+                    f"INSERT INTO prompt_versions (hash, name, content, first_seen) "
+                    f"VALUES ({_P}, {_P}, {_P}, {_P})",
+                    (h, name, content, datetime.now().isoformat()))
+                conn.commit()
+                print(f"  [PROMPTS] New version registered: {name}@{h}", flush=True)
+            except Exception:
+                conn.rollback()  # concurrent insert — already there
+        conn.close()
+        if not exists:
+            # "Prompt version changed" is an event class the brief
+            # names explicitly (§4.1).
+            log_event("_system", "prompt_version_registered",
+                      {"name": name, "hash": h}, source="system")
+    except Exception as e:
+        print(f"[PROMPTS] ⚠️ register failed ({name}): {e}", flush=True)
+    return h
+
+
+def get_prompt_version(h):
+    """Retrieve the exact prompt template text by hash, or None."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT hash, name, content, first_seen FROM prompt_versions "
+        f"WHERE hash = {_P}", (h,))
+    row = _fetchone(cur)
+    conn.close()
+    return row
 
 
 def get_events(user_id, limit=200, since=None):

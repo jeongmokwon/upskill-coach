@@ -994,6 +994,36 @@ async def _debug_timeline_handler(request):
     return web.Response(text="\n".join(lines) + "\n", content_type="text/plain")
 
 
+async def _debug_prompt_handler(request):
+    """Retrieve the exact prompt template text behind a version hash
+    — T2's acceptance surface. Take any sms_out event's
+    prompt_versions hash and get back the template that produced it.
+
+    GET /debug/prompt?secret=...&hash=abc123def456
+    """
+    import db
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    h = request.query.get("hash", "").strip()
+    if not h:
+        return web.Response(status=400, text="hash required")
+
+    row = db.get_prompt_version(h)
+    if not row:
+        return web.Response(status=404, text=f"no prompt version {h}")
+    header = (f"# {row['name']} @ {row['hash']}\n"
+              f"# first seen: {row['first_seen']}\n"
+              f"# {'─' * 60}\n")
+    return web.Response(text=header + row["content"], content_type="text/plain")
+
+
 async def _sms_set_bite_handler(request):
     """Admin rescue: manually commit the first bite, transitioning
     discovery → first_bite. Used when the [COMMIT:] marker never
@@ -1440,6 +1470,7 @@ def start_ws_server():
         app.router.add_post("/sms/set-goal", _sms_set_goal_handler)
         app.router.add_get("/sms/status", _sms_status_handler)
         app.router.add_get("/debug/timeline", _debug_timeline_handler)
+        app.router.add_get("/debug/prompt", _debug_prompt_handler)
         app.router.add_post("/sms/set-bite", _sms_set_bite_handler)
         # Screen observer — local agent (observer.py) endpoints.
         app.router.add_post("/observe/start", _observe_start_handler)
