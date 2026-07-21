@@ -268,6 +268,40 @@ def init_db():
         conn.cursor().execute(
             "CREATE INDEX IF NOT EXISTS idx_events_user_ts ON events (user_id, ts)"
         )
+        # Prompt version registry (WEEK1_ORDER T2, brief §4.3). A row
+        # per distinct prompt-template content ever observed in use;
+        # content-hash is the identity (same trick as git). Register-
+        # on-read: the running system records what actually ran.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS prompt_versions (
+                hash TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                first_seen TEXT NOT NULL
+            )
+        """)
+        # Full rendered LLM inputs (T2b). One row PER CALL — the
+        # exact system prompt + messages array the API received,
+        # byte-for-byte, plus the response. "Raw is sacred" applied
+        # to the LLM's input side: templates dedupe (above), rendered
+        # calls never do — each is a unique flight-recorder snapshot.
+        # TEXT uuid PK avoids RETURNING/lastrowid dialect branching.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS llm_calls (
+                call_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                trigger TEXT NOT NULL,
+                model TEXT NOT NULL,
+                system_prompt TEXT NOT NULL,
+                messages_json TEXT NOT NULL,
+                prompt_versions_json TEXT NOT NULL DEFAULT '{}',
+                response_text TEXT NOT NULL DEFAULT ''
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_llm_calls_user_ts ON llm_calls (user_id, ts)"
+        )
         conn.commit()
     else:
         conn.executescript("""
@@ -401,6 +435,27 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_events_user_ts ON events (user_id, ts);
+
+            CREATE TABLE IF NOT EXISTS prompt_versions (
+                hash TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                content TEXT NOT NULL,
+                first_seen TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS llm_calls (
+                call_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                trigger TEXT NOT NULL,
+                model TEXT NOT NULL,
+                system_prompt TEXT NOT NULL,
+                messages_json TEXT NOT NULL,
+                prompt_versions_json TEXT NOT NULL DEFAULT '{}',
+                response_text TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_llm_calls_user_ts ON llm_calls (user_id, ts);
         """)
 
     conn.commit()
@@ -1033,6 +1088,108 @@ def log_event(user_id, kind, payload=None, source="server"):
         conn.close()
     except Exception as e:
         print(f"[EVENTS] ⚠️ log_event({kind}) failed: {e}", flush=True)
+
+
+def register_prompt_version(name, content):
+    """Content-hash a prompt template; record it if unseen. Returns
+    the hash either way. NEVER raises outward — a registry hiccup
+    must not block message sending.
+
+    Dialect discipline (D1.3): SELECT-then-INSERT, no upsert. A
+    concurrent duplicate INSERT hits the PK and is swallowed — the
+    row already exists, which is the outcome we wanted.
+    """
+    import hashlib
+    h = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+    try:
+        conn = get_conn()
+        cur = _execute(conn,
+            f"SELECT hash FROM prompt_versions WHERE hash = {_P}", (h,))
+        exists = _fetchone(cur)
+        if not exists:
+            try:
+                _execute(conn,
+                    f"INSERT INTO prompt_versions (hash, name, content, first_seen) "
+                    f"VALUES ({_P}, {_P}, {_P}, {_P})",
+                    (h, name, content, datetime.now().isoformat()))
+                conn.commit()
+                print(f"  [PROMPTS] New version registered: {name}@{h}", flush=True)
+            except Exception:
+                conn.rollback()  # concurrent insert — already there
+        conn.close()
+        if not exists:
+            # "Prompt version changed" is an event class the brief
+            # names explicitly (§4.1).
+            log_event("_system", "prompt_version_registered",
+                      {"name": name, "hash": h}, source="system")
+    except Exception as e:
+        print(f"[PROMPTS] ⚠️ register failed ({name}): {e}", flush=True)
+    return h
+
+
+def get_prompt_version(h):
+    """Retrieve the exact prompt template text by hash, or None."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT hash, name, content, first_seen FROM prompt_versions "
+        f"WHERE hash = {_P}", (h,))
+    row = _fetchone(cur)
+    conn.close()
+    return row
+
+
+def save_llm_call(user_id, trigger, model, system_prompt, messages,
+                  prompt_versions=None, response_text=""):
+    """Record one LLM call verbatim: the exact rendered system prompt
+    and messages array the API received, plus the response. Returns
+    call_id, or None on failure. NEVER raises — recording must not
+    break the send path."""
+    call_id = uuid.uuid4().hex[:12]
+    try:
+        conn = get_conn()
+        _execute(conn,
+            f"INSERT INTO llm_calls "
+            f"(call_id, user_id, ts, trigger, model, system_prompt, "
+            f" messages_json, prompt_versions_json, response_text) "
+            f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+            (call_id, user_id, datetime.now().isoformat(), trigger, model,
+             system_prompt,
+             json.dumps(messages, ensure_ascii=False),
+             json.dumps(prompt_versions or {}, ensure_ascii=False),
+             response_text)
+        )
+        conn.commit()
+        conn.close()
+        return call_id
+    except Exception as e:
+        print(f"[LLM_CALLS] ⚠️ save failed ({trigger}): {e}", flush=True)
+        return None
+
+
+def get_llm_call(call_id):
+    """Retrieve one recorded call by id, messages parsed back to a
+    list. None if not found."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM llm_calls WHERE call_id = {_P}", (call_id,))
+    row = _fetchone(cur)
+    conn.close()
+    if row:
+        row["messages"] = json.loads(row["messages_json"])
+        row["prompt_versions"] = json.loads(row["prompt_versions_json"])
+    return row
+
+
+def get_llm_calls(user_id, limit=20):
+    """Recent calls for a user, newest first (summaries incl. sizes)."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT call_id, ts, trigger, model FROM llm_calls "
+        f"WHERE user_id = {_P} ORDER BY ts DESC LIMIT {_P}",
+        (user_id, limit))
+    rows = _fetchall(cur)
+    conn.close()
+    return rows
 
 
 def get_events(user_id, limit=200, since=None):

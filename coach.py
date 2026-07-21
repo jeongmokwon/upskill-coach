@@ -994,6 +994,75 @@ async def _debug_timeline_handler(request):
     return web.Response(text="\n".join(lines) + "\n", content_type="text/plain")
 
 
+async def _debug_prompt_handler(request):
+    """Retrieve the exact prompt template text behind a version hash
+    — T2's acceptance surface. Take any sms_out event's
+    prompt_versions hash and get back the template that produced it.
+
+    GET /debug/prompt?secret=...&hash=abc123def456
+    """
+    import db
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    h = request.query.get("hash", "").strip()
+    if not h:
+        return web.Response(status=400, text="hash required")
+
+    row = db.get_prompt_version(h)
+    if not row:
+        return web.Response(status=404, text=f"no prompt version {h}")
+    header = (f"# {row['name']} @ {row['hash']}\n"
+              f"# first seen: {row['first_seen']}\n"
+              f"# {'─' * 60}\n")
+    return web.Response(text=header + row["content"], content_type="text/plain")
+
+
+async def _debug_llm_call_handler(request):
+    """Retrieve a full recorded LLM call — the exact rendered input
+    the API received + the raw response (T2b's acceptance surface).
+    Take an llm_call_id from any sms_out event in /debug/timeline.
+
+    GET /debug/llm-call?secret=...&id=<call_id>
+    """
+    import db
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    call_id = request.query.get("id", "").strip()
+    if not call_id:
+        return web.Response(status=400, text="id required")
+
+    row = db.get_llm_call(call_id)
+    if not row:
+        return web.Response(status=404, text=f"no llm call {call_id}")
+
+    parts = [
+        f"# llm_call {row['call_id']} — user={row['user_id']} ts={row['ts']}",
+        f"# trigger={row['trigger']} model={row['model']}",
+        f"# prompt_versions={row['prompt_versions_json']}",
+        "", "═" * 30 + " SYSTEM PROMPT (as sent) " + "═" * 30, "",
+        row["system_prompt"],
+        "", "═" * 30 + " MESSAGES (as sent) " + "═" * 30, "",
+        json.dumps(row["messages"], ensure_ascii=False, indent=2),
+        "", "═" * 30 + " RESPONSE (raw, pre-marker-strip) " + "═" * 20, "",
+        row["response_text"], "",
+    ]
+    return web.Response(text="\n".join(parts), content_type="text/plain")
+
+
 async def _sms_set_bite_handler(request):
     """Admin rescue: manually commit the first bite, transitioning
     discovery → first_bite. Used when the [COMMIT:] marker never
@@ -1440,6 +1509,8 @@ def start_ws_server():
         app.router.add_post("/sms/set-goal", _sms_set_goal_handler)
         app.router.add_get("/sms/status", _sms_status_handler)
         app.router.add_get("/debug/timeline", _debug_timeline_handler)
+        app.router.add_get("/debug/prompt", _debug_prompt_handler)
+        app.router.add_get("/debug/llm-call", _debug_llm_call_handler)
         app.router.add_post("/sms/set-bite", _sms_set_bite_handler)
         # Screen observer — local agent (observer.py) endpoints.
         app.router.add_post("/observe/start", _observe_start_handler)

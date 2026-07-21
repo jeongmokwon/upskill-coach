@@ -205,6 +205,15 @@ def _read_prompt(name):
         return f.read()
 
 
+def _read_prompt_versioned(name):
+    """Read a prompt template AND register its version (T2).
+    Returns (content, hash). The hash identifies the TEMPLATE text
+    (pre-placeholder-rendering) — that's the stable identity; the
+    rendered prompt differs on every call because context differs."""
+    content = _read_prompt(name)
+    return content, db.register_prompt_version(name, content)
+
+
 # ─── Context builder ────────────────────────────────────────────────
 
 def _format_recent_insights(user_id):
@@ -389,18 +398,21 @@ class _SafeDict(dict):
 def _build_system_prompt(slot, user_id):
     """Assemble shared + slot prompt with user context interpolated.
 
-    Returns None if the slot has no message to send under current
-    state (used to no-op lunch/afternoon under the redesign).
+    Returns (system_prompt, prompt_versions) — versions is a dict
+    {template_name: hash} identifying the exact template texts used
+    (T2). Returns (None, {}) if the slot has no message to send
+    under current state (used to no-op lunch/afternoon).
     """
     prompt_name = _prompt_name_for_slot(slot, db.get_user_phase(user_id)["phase"])
     if prompt_name is None:
-        return None
-    shared = _read_prompt("sms_shared")
-    slot_prompt = _read_prompt(prompt_name)
+        return None, {}
+    shared, h_shared = _read_prompt_versioned("sms_shared")
+    slot_prompt, h_slot = _read_prompt_versioned(prompt_name)
     fields = _build_placeholders(user_id)
     rendered_shared = shared.format_map(_SafeDict(**fields))
     rendered_slot = slot_prompt.format_map(_SafeDict(**fields))
-    return rendered_shared + "\n\n---\n\n" + rendered_slot
+    versions = {"sms_shared": h_shared, prompt_name: h_slot}
+    return rendered_shared + "\n\n---\n\n" + rendered_slot, versions
 
 
 # ─── Commit-marker protocol (Phase 0 → Phase 1) ──────────────────────
@@ -568,7 +580,7 @@ def handle_inbound(from_number, body):
     # Use the phase-specific evening prompt for inbound replies too —
     # the LLM should be in the same mode whether the user is replying
     # to a scheduled ping or texting spontaneously.
-    system_prompt = _build_system_prompt_for_reply(user_id)
+    system_prompt, prompt_versions = _build_system_prompt_for_reply(user_id)
 
     try:
         client = anthropic.Anthropic()
@@ -586,12 +598,21 @@ def handle_inbound(from_number, body):
                      source="sms")
         return None
 
+    # Flight-recorder snapshot of the call (T2b): the exact input the
+    # API received + the raw response, BEFORE marker-stripping so the
+    # record shows what the model actually produced.
+    llm_call_id = db.save_llm_call(
+        user_id, "inbound_reply", MODEL, system_prompt, history,
+        prompt_versions, reply_text)
+
     # Parse & handle [COMMIT: "..."] marker, strip it from user-visible text.
     reply_text = _process_commit_marker(user_id, reply_text)
     send_sms(from_number, reply_text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", reply_text, "out")
     db.log_event(user_id, "sms_out",
                  {"text": reply_text, "trigger": "inbound_reply",
+                  "prompt_versions": prompt_versions,
+                  "llm_call_id": llm_call_id,
                   "phase": db.get_user_phase(user_id)["phase"]},
                  source="sms")
     return reply_text
@@ -607,15 +628,15 @@ def _build_system_prompt_for_reply(user_id):
     discovery / first_bite prompt keeps the LLM anchored to the
     same job it has during the scheduled evening ping.
     """
-    shared = _read_prompt("sms_shared")
+    shared, h_shared = _read_prompt_versioned("sms_shared")
     phase = db.get_user_phase(user_id)["phase"]
-    mode_prompt = _read_prompt(
-        "sms_first_bite" if phase == "first_bite" else "sms_discovery"
-    )
+    mode_name = "sms_first_bite" if phase == "first_bite" else "sms_discovery"
+    mode_prompt, h_mode = _read_prompt_versioned(mode_name)
     fields = _build_placeholders(user_id)
     rendered_shared = shared.format_map(_SafeDict(**fields))
     rendered_mode = mode_prompt.format_map(_SafeDict(**fields))
-    return rendered_shared + "\n\n---\n\n" + rendered_mode
+    versions = {"sms_shared": h_shared, mode_name: h_mode}
+    return rendered_shared + "\n\n---\n\n" + rendered_mode, versions
 
 
 # ─── Scheduled slot handling ────────────────────────────────────────
@@ -676,7 +697,7 @@ def handle_cron_tick(slot):
         # Start the Phase 0 timer on the first evening tick (idempotent).
         db.ensure_phase_timer_started(user_id)
 
-    system_prompt = _build_system_prompt(slot, user_id)
+    system_prompt, prompt_versions = _build_system_prompt(slot, user_id)
     if system_prompt is None:
         return _skip("no_prompt_for_state")
 
@@ -713,6 +734,12 @@ def handle_cron_tick(slot):
                      source="cron")
         return None
 
+    # Flight-recorder snapshot of the call (T2b) — raw response,
+    # pre-marker-stripping.
+    llm_call_id = db.save_llm_call(
+        user_id, f"cron_{slot}", MODEL, system_prompt, history,
+        prompt_versions, text)
+
     # Parse & handle [COMMIT: "..."] marker (Phase 0→1), strip it out.
     text = _process_commit_marker(user_id, text)
     send_sms(to_number, text, user_id=user_id)
@@ -721,6 +748,8 @@ def handle_cron_tick(slot):
                  {"slot": slot, "action": "fired"}, source="cron")
     db.log_event(user_id, "sms_out",
                  {"text": text, "trigger": f"cron_{slot}",
+                  "prompt_versions": prompt_versions,
+                  "llm_call_id": llm_call_id,
                   "phase": db.get_user_phase(user_id)["phase"]},
                  source="cron")
     return text
