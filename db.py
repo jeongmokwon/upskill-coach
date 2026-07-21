@@ -1090,6 +1090,57 @@ def log_event(user_id, kind, payload=None, source="server"):
         print(f"[EVENTS] ⚠️ log_event({kind}) failed: {e}", flush=True)
 
 
+def get_last_event(user_id, kind, payload_contains=None):
+    """Most recent event of `kind` for a user → dict {ts, payload}
+    or None.
+    `payload_contains` does a plain substring match on the JSON-as-TEXT
+    payload (e.g. '"slot": "morning"' or a session id) — dialect-neutral
+    LIKE, no engine JSON functions (D1.3). Used by the infra sweep
+    (T6) to answer "when did X last happen?" cheaply."""
+    conn = get_conn()
+    if payload_contains:
+        cur = _execute(conn,
+            f"SELECT ts, payload FROM events "
+            f"WHERE user_id = {_P} AND kind = {_P} AND payload LIKE {_P} "
+            f"ORDER BY id DESC LIMIT 1",
+            (user_id, kind, f"%{payload_contains}%"))
+    else:
+        cur = _execute(conn,
+            f"SELECT ts, payload FROM events "
+            f"WHERE user_id = {_P} AND kind = {_P} "
+            f"ORDER BY id DESC LIMIT 1",
+            (user_id, kind))
+    row = _fetchone(cur)
+    conn.close()
+    return row
+
+
+def get_open_observe_sessions():
+    """All currently-open observe sessions across users → list of
+    dicts {session_id, user_id, started_at}. Infra sweep (T6) input."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT session_id, user_id, started_at FROM observe_sessions "
+        f"WHERE ended_at IS NULL ORDER BY started_at",
+        ())
+    rows = _fetchall(cur)
+    conn.close()
+    return rows
+
+
+def get_last_observation_ts(session_id):
+    """Timestamp of the newest capture in an observe session, or None
+    if the session has no captures yet."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT ts FROM observations WHERE session_id = {_P} "
+        f"ORDER BY id DESC LIMIT 1",
+        (session_id,))
+    row = _fetchone(cur)
+    conn.close()
+    return row["ts"] if row else None
+
+
 def register_prompt_version(name, content):
     """Content-hash a prompt template; record it if unseen. Returns
     the hash either way. NEVER raises outward — a registry hiccup

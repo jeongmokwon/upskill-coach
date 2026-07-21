@@ -1206,6 +1206,7 @@ async def _observe_poll_handler(request):
     if not user_id:
         return web.Response(status=403, text="bad secret")
 
+    observe_mod.record_poll(user_id)  # liveness heartbeat (T6)
     deadline = asyncio.get_event_loop().time() + 20
     while asyncio.get_event_loop().time() < deadline:
         if observe_mod.consume_capture_request(user_id):
@@ -1486,6 +1487,19 @@ async def _log_middleware(request, handler):
     return await handler(request)
 
 
+async def _infra_sweep_loop():
+    """T6 watchdog: run infra.sweep() every 2 minutes for the life of
+    the server. sweep() swallows its own errors; this loop only guards
+    against import-time surprises so it can never die quietly."""
+    import infra
+    while True:
+        try:
+            infra.sweep()
+        except Exception as e:
+            print(f"[INFRA] ⚠️ sweep crashed: {e}", flush=True)
+        await asyncio.sleep(120)
+
+
 def start_ws_server():
     """Start combined WebSocket + HTTP server on a single port using aiohttp."""
     global ws_loop
@@ -1532,6 +1546,7 @@ def start_ws_server():
         site = web.TCPSite(runner, BIND_HOST, HTTP_PORT)
         await site.start()
         print(f"🌐 Browser UI: http://{BIND_HOST}:{HTTP_PORT}", flush=True)
+        asyncio.ensure_future(_infra_sweep_loop())
         await asyncio.Future()  # run forever
 
     def _thread():

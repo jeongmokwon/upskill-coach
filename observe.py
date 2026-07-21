@@ -45,6 +45,25 @@ VISION_MODEL_DEEP = "claude-sonnet-4-5"
 _capture_requests = {}
 _cr_lock = threading.Lock()
 
+# Observer liveness (T6): every /observe/poll stamps this. Poll
+# requests count as heartbeats, so the infra sweep can distinguish
+# "agent alive but captures failing" from "agent process dead" in
+# capture_gap events. In-memory like the flags above — a restart
+# just means unknown liveness until the next poll (~20s).
+_last_polls = {}
+
+
+def record_poll(user_id):
+    with _cr_lock:
+        _last_polls[user_id] = time.time()
+
+
+def observer_alive(user_id, max_age=120):
+    """Has the local agent long-polled within `max_age` seconds?"""
+    with _cr_lock:
+        ts = _last_polls.get(user_id)
+    return bool(ts and time.time() - ts <= max_age)
+
 
 def request_capture(user_id):
     with _cr_lock:
