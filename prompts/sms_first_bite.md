@@ -89,7 +89,7 @@ uses exp"), stay in SMS. There is no requirement to move to laptop.
 
 ## Never in Phase 1 (unless explicitly asked)
 
-- Do not send https://upskill-coach-dmmu.onrender.com just because
+- Do not send https://learningtheo.com just because
   it's evening. Only send if the specific bite tonight requires the
   web app and the user is already engaged.
 - Do not invent reasons to open the laptop ("you'll understand
