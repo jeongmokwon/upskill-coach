@@ -1324,8 +1324,10 @@ def days_in_discovery(user_id):
     return (datetime.now() - started).days
 
 
-def commit_first_bite(user_id, bite_text, source="llm_marker"):
-    """Save the agreed-upon first bite and transition to Phase 1."""
+def commit_first_bite(user_id, bite_text, source="llm_marker", decision_id=None):
+    """Save the agreed-upon first bite and transition to Phase 1.
+    decision_id (T3) joins this transition to the policy decision
+    that allowed it."""
     ensure_user_profile_row(user_id)
     now = datetime.now().isoformat()
     conn = get_conn()
@@ -1341,7 +1343,8 @@ def commit_first_bite(user_id, bite_text, source="llm_marker"):
     conn.close()
     print(f"  [DB] Phase transition first_bite for {user_id}: {bite_text!r}", flush=True)
     log_event(user_id, "phase_transition",
-              {"to": "first_bite", "bite": bite_text}, source=source)
+              {"to": "first_bite", "bite": bite_text,
+               "decision_id": decision_id}, source=source)
 
 
 def reset_phase_state(user_id, source="admin"):
