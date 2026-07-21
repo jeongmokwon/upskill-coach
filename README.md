@@ -1,4 +1,6 @@
-# 🎓 Upskill Coach
+# 🎓 Theo
+
+*Formerly "Upskill Coach" — the repo name predates the rebrand.*
 
 An AI learning coach that sees your screen and answers your questions by voice.
 
