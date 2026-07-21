@@ -1,9 +1,11 @@
-# PROJECT BRIEF — AI Upskill Coach: Pilot Instrument
+# PROJECT BRIEF — Theo (AI learning coach): Pilot Instrument
 
 > Read this file fully before writing any code. This is the persistent context for all build work.
 > This document defines WHAT we are building and WHY. Weekly order files (WEEK1_ORDER.md, etc.) define the current tasks.
 >
 > **Working with the operator:** Converse with the operator in Korean; keep code, comments, commit messages, and docs in English. When the spec is ambiguous or conflicts with what you find in the repo, ask the operator instead of assuming.
+>
+> **Naming (decided 2026-07-21):** the product AND the coach persona are both named **Theo** (formerly "Upskill Coach"). Domain: **learningtheo.com** (theo.com was unavailable — the domain carries the "learning" qualifier; the product name does not). Internal identifiers keep the old name on purpose (repo, Render service `upskill-coach-dmmu`, DB name, env vars like `UPSKILL_SECRET`): they are invisible to users and renaming them is pure migration risk. The onrender.com URL stays live alongside the custom domain.
 
 ## 1. What this product is
 
