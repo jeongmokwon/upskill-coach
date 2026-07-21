@@ -598,6 +598,13 @@ def handle_inbound(from_number, body):
                      source="sms")
         return None
 
+    # Flight-recorder snapshot of the call (T2b): the exact input the
+    # API received + the raw response, BEFORE marker-stripping so the
+    # record shows what the model actually produced.
+    llm_call_id = db.save_llm_call(
+        user_id, "inbound_reply", MODEL, system_prompt, history,
+        prompt_versions, reply_text)
+
     # Parse & handle [COMMIT: "..."] marker, strip it from user-visible text.
     reply_text = _process_commit_marker(user_id, reply_text)
     send_sms(from_number, reply_text, user_id=user_id)
@@ -605,6 +612,7 @@ def handle_inbound(from_number, body):
     db.log_event(user_id, "sms_out",
                  {"text": reply_text, "trigger": "inbound_reply",
                   "prompt_versions": prompt_versions,
+                  "llm_call_id": llm_call_id,
                   "phase": db.get_user_phase(user_id)["phase"]},
                  source="sms")
     return reply_text
@@ -726,6 +734,12 @@ def handle_cron_tick(slot):
                      source="cron")
         return None
 
+    # Flight-recorder snapshot of the call (T2b) — raw response,
+    # pre-marker-stripping.
+    llm_call_id = db.save_llm_call(
+        user_id, f"cron_{slot}", MODEL, system_prompt, history,
+        prompt_versions, text)
+
     # Parse & handle [COMMIT: "..."] marker (Phase 0→1), strip it out.
     text = _process_commit_marker(user_id, text)
     send_sms(to_number, text, user_id=user_id)
@@ -735,6 +749,7 @@ def handle_cron_tick(slot):
     db.log_event(user_id, "sms_out",
                  {"text": text, "trigger": f"cron_{slot}",
                   "prompt_versions": prompt_versions,
+                  "llm_call_id": llm_call_id,
                   "phase": db.get_user_phase(user_id)["phase"]},
                  source="cron")
     return text

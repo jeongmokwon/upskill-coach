@@ -280,6 +280,28 @@ def init_db():
                 first_seen TEXT NOT NULL
             )
         """)
+        # Full rendered LLM inputs (T2b). One row PER CALL — the
+        # exact system prompt + messages array the API received,
+        # byte-for-byte, plus the response. "Raw is sacred" applied
+        # to the LLM's input side: templates dedupe (above), rendered
+        # calls never do — each is a unique flight-recorder snapshot.
+        # TEXT uuid PK avoids RETURNING/lastrowid dialect branching.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS llm_calls (
+                call_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                trigger TEXT NOT NULL,
+                model TEXT NOT NULL,
+                system_prompt TEXT NOT NULL,
+                messages_json TEXT NOT NULL,
+                prompt_versions_json TEXT NOT NULL DEFAULT '{}',
+                response_text TEXT NOT NULL DEFAULT ''
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_llm_calls_user_ts ON llm_calls (user_id, ts)"
+        )
         conn.commit()
     else:
         conn.executescript("""
@@ -420,6 +442,20 @@ def init_db():
                 content TEXT NOT NULL,
                 first_seen TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS llm_calls (
+                call_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                trigger TEXT NOT NULL,
+                model TEXT NOT NULL,
+                system_prompt TEXT NOT NULL,
+                messages_json TEXT NOT NULL,
+                prompt_versions_json TEXT NOT NULL DEFAULT '{}',
+                response_text TEXT NOT NULL DEFAULT ''
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_llm_calls_user_ts ON llm_calls (user_id, ts);
         """)
 
     conn.commit()
@@ -1100,6 +1136,60 @@ def get_prompt_version(h):
     row = _fetchone(cur)
     conn.close()
     return row
+
+
+def save_llm_call(user_id, trigger, model, system_prompt, messages,
+                  prompt_versions=None, response_text=""):
+    """Record one LLM call verbatim: the exact rendered system prompt
+    and messages array the API received, plus the response. Returns
+    call_id, or None on failure. NEVER raises — recording must not
+    break the send path."""
+    call_id = uuid.uuid4().hex[:12]
+    try:
+        conn = get_conn()
+        _execute(conn,
+            f"INSERT INTO llm_calls "
+            f"(call_id, user_id, ts, trigger, model, system_prompt, "
+            f" messages_json, prompt_versions_json, response_text) "
+            f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+            (call_id, user_id, datetime.now().isoformat(), trigger, model,
+             system_prompt,
+             json.dumps(messages, ensure_ascii=False),
+             json.dumps(prompt_versions or {}, ensure_ascii=False),
+             response_text)
+        )
+        conn.commit()
+        conn.close()
+        return call_id
+    except Exception as e:
+        print(f"[LLM_CALLS] ⚠️ save failed ({trigger}): {e}", flush=True)
+        return None
+
+
+def get_llm_call(call_id):
+    """Retrieve one recorded call by id, messages parsed back to a
+    list. None if not found."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM llm_calls WHERE call_id = {_P}", (call_id,))
+    row = _fetchone(cur)
+    conn.close()
+    if row:
+        row["messages"] = json.loads(row["messages_json"])
+        row["prompt_versions"] = json.loads(row["prompt_versions_json"])
+    return row
+
+
+def get_llm_calls(user_id, limit=20):
+    """Recent calls for a user, newest first (summaries incl. sizes)."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT call_id, ts, trigger, model FROM llm_calls "
+        f"WHERE user_id = {_P} ORDER BY ts DESC LIMIT {_P}",
+        (user_id, limit))
+    rows = _fetchall(cur)
+    conn.close()
+    return rows
 
 
 def get_events(user_id, limit=200, since=None):
