@@ -38,6 +38,7 @@ from datetime import datetime, timedelta, timezone
 import anthropic
 
 import db
+import policy
 
 # ─── Config ──────────────────────────────────────────────────────────
 
@@ -284,8 +285,18 @@ def _request_fresh_screen(user_id, wait_s=8.0):
                 pass
 
         import observe as observe_mod
+        # Decision point (T3): whether to block the reply on a fresh
+        # capture. Deterministic today; later variants could sample
+        # wait length or skip probability.
+        choice, decision_id = policy.decide(
+            "fresh_screen_wait", user_id,
+            options=["wait_for_fresh", "proceed_stale"],
+            context={"last_capture_ts": last_ts})
+        if choice != "wait_for_fresh":
+            return
         observe_mod.request_capture(user_id)
-        db.log_event(user_id, "fresh_capture_requested", {}, source="sms")
+        db.log_event(user_id, "fresh_capture_requested",
+                     {"decision_id": decision_id}, source="sms")
         t0 = time.time()
         while time.time() - t0 < wait_s:
             time.sleep(0.5)
@@ -452,8 +463,17 @@ def _process_commit_marker(user_id, text):
         bite = match.group(1).strip()
         phase = db.get_user_phase(user_id)["phase"]
         if phase == "discovery":
-            db.commit_first_bite(user_id, bite)
-            print(f"[SMS] Phase 0→1 for {user_id} on user agreement: {bite!r}", flush=True)
+            # Decision point (T3): accept the LLM's commit marker as a
+            # real phase transition. Deterministic accept today; the
+            # hook exists so acceptance policy (e.g. require explicit
+            # user confirmation) can be varied and joined to outcomes.
+            choice, decision_id = policy.decide(
+                "commit_marker_accept", user_id,
+                options=["accept", "hold"],
+                context={"bite": bite[:200]})
+            if choice == "accept":
+                db.commit_first_bite(user_id, bite, decision_id=decision_id)
+                print(f"[SMS] Phase 0→1 for {user_id} on user agreement: {bite!r}", flush=True)
         else:
             # LLM emitted a commit while already in Phase 1 — ignore, log.
             print(f"[SMS] stray COMMIT marker while phase={phase!r}, ignoring", flush=True)
@@ -697,6 +717,16 @@ def handle_cron_tick(slot):
         # Start the Phase 0 timer on the first evening tick (idempotent).
         db.ensure_phase_timer_started(user_id)
 
+    # Decision point (T3): all hard gates passed — does policy fire
+    # this slot? Deterministic "fire" today; this is where send-vs-
+    # hold experiments (timing, frequency backoff) will sample later.
+    fire_choice, fire_decision_id = policy.decide(
+        f"{slot}_fire", user_id,
+        options=["fire", "hold"],
+        context={"phase": db.get_user_phase(user_id)["phase"]})
+    if fire_choice != "fire":
+        return _skip(f"policy_hold:{fire_decision_id}")
+
     system_prompt, prompt_versions = _build_system_prompt(slot, user_id)
     if system_prompt is None:
         return _skip("no_prompt_for_state")
@@ -745,7 +775,8 @@ def handle_cron_tick(slot):
     send_sms(to_number, text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", text, "out")
     db.log_event(user_id, "cron_tick",
-                 {"slot": slot, "action": "fired"}, source="cron")
+                 {"slot": slot, "action": "fired",
+                  "decision_id": fire_decision_id}, source="cron")
     db.log_event(user_id, "sms_out",
                  {"text": text, "trigger": f"cron_{slot}",
                   "prompt_versions": prompt_versions,
