@@ -1764,9 +1764,44 @@ def handle_identify(msg, websocket):
             ws_loop,
         )
     else:
-        # No profile for this session_id — show onboarding
+        # Onboarding bypass (2026-07-21): first-time visitors land
+        # directly on the home screen — big "Theo" + tagline — with a
+        # default profile created silently so chat works immediately.
+        # Rationale: the public URL is what Twilio/carrier reviewers
+        # open; a form-and-quiz gate reads as friction, not product.
+        # The onboarding flow (form, quiz, handle_onboarding_submit)
+        # is kept intact below — nothing triggers it anymore, but
+        # pilot onboarding may re-enable a variant of it.
+        uid = db.create_user_profile(
+            "anonymous", goal="Learn and grow", background="",
+            studying="", hint_preference="hints", difficulty=3,
+            user_condition=3, user_id=session_id,
+        )
+        db.set_user_id(uid)
+        ctx = ws_sessions.get(websocket)
+        if ctx:
+            ctx.user_id = uid
+            ctx.user_profile = {
+                "user_id": uid, "user_name": "anonymous",
+                "goal": "Learn and grow", "background": "",
+                "studying": "", "hint_preference": "hints",
+                "difficulty": 3, "user_condition": 3,
+            }
+            ctx.study_topic = ""
+            _set_ctx(ctx)
+        db.start_session(study_topic="")
+        if ctx:
+            ctx.db_session_id = db.get_session_id()
+        db.touch_activity()
+        print(f"  [Server] New visitor {session_id} — onboarding "
+              f"bypassed, default profile created", flush=True)
         asyncio.run_coroutine_threadsafe(
-            websocket.send_str(json.dumps({"type": "show_onboarding"})),
+            websocket.send_str(json.dumps({"type": "connected",
+                                           "study_context": ""})),
+            ws_loop,
+        )
+        asyncio.run_coroutine_threadsafe(
+            websocket.send_str(json.dumps({"type": "show_code_editor"})),
             ws_loop,
         )
 
