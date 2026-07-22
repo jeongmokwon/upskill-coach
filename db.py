@@ -302,6 +302,29 @@ def init_db():
         conn.cursor().execute(
             "CREATE INDEX IF NOT EXISTS idx_llm_calls_user_ts ON llm_calls (user_id, ts)"
         )
+        # LearnerState v1 snapshots (T5). Append-only annotations of a
+        # user's day, written by the nightly job. Re-annotation (brief
+        # §4.2) means the same (user, day) can have MANY rows — each
+        # tagged with the schema/prompt/model that produced it; newest
+        # row under the current versions wins at read time. Nothing is
+        # ever updated or deleted.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS learner_state_snapshots (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                schema_version INTEGER NOT NULL,
+                prompt_version TEXT NOT NULL,
+                model TEXT NOT NULL,
+                state_json TEXT NOT NULL,
+                evidence_json TEXT NOT NULL DEFAULT '[]',
+                llm_call_id TEXT
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_lss_user_day ON learner_state_snapshots (user_id, day)"
+        )
         conn.commit()
     else:
         conn.executescript("""
@@ -456,6 +479,21 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_llm_calls_user_ts ON llm_calls (user_id, ts);
+
+            CREATE TABLE IF NOT EXISTS learner_state_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                schema_version INTEGER NOT NULL,
+                prompt_version TEXT NOT NULL,
+                model TEXT NOT NULL,
+                state_json TEXT NOT NULL,
+                evidence_json TEXT NOT NULL DEFAULT '[]',
+                llm_call_id TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_lss_user_day ON learner_state_snapshots (user_id, day);
         """)
 
     conn.commit()
@@ -1139,6 +1177,79 @@ def get_last_observation_ts(session_id):
     row = _fetchone(cur)
     conn.close()
     return row["ts"] if row else None
+
+
+# ─── LearnerState snapshots (T5) ─────────────────────────────────
+
+def get_active_user_ids(start_iso, end_iso):
+    """Users with ≥1 event in [start, end) — the nightly annotation
+    job's definition of 'active that day'. Excludes '_unknown'
+    (events not attributable to a learner)."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT DISTINCT user_id FROM events "
+        f"WHERE ts >= {_P} AND ts < {_P}",
+        (start_iso, end_iso))
+    rows = _fetchall(cur)
+    conn.close()
+    return [r["user_id"] for r in rows if r["user_id"] != "_unknown"]
+
+
+def get_events_with_ids(user_id, start_iso, end_iso, limit=1000):
+    """A user's events in [start, end) INCLUDING row ids, oldest-first.
+    The annotation job cites these ids as evidence — get_events()
+    deliberately omits ids for display, so this is a separate reader."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT id, ts, kind, payload, source FROM events "
+        f"WHERE user_id = {_P} AND ts >= {_P} AND ts < {_P} "
+        f"ORDER BY id LIMIT {_P}",
+        (user_id, start_iso, end_iso, limit))
+    rows = _fetchall(cur)
+    conn.close()
+    return rows
+
+
+def save_learner_state_snapshot(user_id, day, schema_version,
+                                prompt_version, model, state,
+                                evidence_ids, llm_call_id=None):
+    """Append one LearnerState snapshot (T5). Plain INSERT, never an
+    update: re-annotating a day adds a row, it can't erase one."""
+    conn = get_conn()
+    _execute(conn,
+        f"INSERT INTO learner_state_snapshots "
+        f"(user_id, day, created_at, schema_version, prompt_version, "
+        f" model, state_json, evidence_json, llm_call_id) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+        (user_id, day, datetime.now().isoformat(), schema_version,
+         prompt_version, model,
+         json.dumps(state, ensure_ascii=False),
+         json.dumps(evidence_ids), llm_call_id))
+    conn.commit()
+    conn.close()
+    print(f"  [T5] LearnerState snapshot saved: {user_id} {day}", flush=True)
+
+
+def get_learner_state_snapshots(user_id=None, day=None, limit=50):
+    """Snapshots newest-first, optionally filtered by user and/or day."""
+    conds, params = [], []
+    if user_id:
+        conds.append(f"user_id = {_P}")
+        params.append(user_id)
+    if day:
+        conds.append(f"day = {_P}")
+        params.append(day)
+    where = f"WHERE {' AND '.join(conds)} " if conds else ""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT id, user_id, day, created_at, schema_version, "
+        f"prompt_version, model, state_json, evidence_json, llm_call_id "
+        f"FROM learner_state_snapshots {where}"
+        f"ORDER BY id DESC LIMIT {_P}",
+        (*params, limit))
+    rows = _fetchall(cur)
+    conn.close()
+    return rows
 
 
 def register_prompt_version(name, content):
