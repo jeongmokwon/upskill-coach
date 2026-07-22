@@ -1063,6 +1063,84 @@ async def _debug_llm_call_handler(request):
     return web.Response(text="\n".join(parts), content_type="text/plain")
 
 
+async def _annotate_run_handler(request):
+    """T5 nightly annotation trigger — Render cron hits this after
+    the day ends (same curl-image pattern as the SMS slots), and the
+    founder can re-run any historical day on demand (re-annotation:
+    appends new rows, never overwrites).
+
+    POST /annotate/run?secret=...[&day=YYYY-MM-DD][&user_id=X]
+    day defaults to yesterday (PT). user_id defaults to all users
+    active that day.
+    """
+    import annotate
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    day = request.query.get("day", "").strip() or None
+    user_id = request.query.get("user_id", "").strip() or None
+
+    def _run():
+        if user_id:
+            state = annotate.annotate_day(user_id, day)
+            return {user_id: "ok" if state else "skipped"}
+        return annotate.annotate_all(day)
+
+    # LLM calls take seconds-to-minutes; keep them off the event loop.
+    results = await asyncio.get_event_loop().run_in_executor(None, _run)
+    return web.json_response({"day": day or "(yesterday PT)",
+                              "results": results})
+
+
+async def _debug_learner_state_handler(request):
+    """Human-readable LearnerState snapshots — T5's acceptance
+    surface, next to /debug/timeline.
+
+    GET /debug/learner-state?secret=...[&user_id=X][&day=YYYY-MM-DD][&limit=10]
+    """
+    import db
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    rows = db.get_learner_state_snapshots(
+        user_id=request.query.get("user_id", "").strip() or None,
+        day=request.query.get("day", "").strip() or None,
+        limit=int(request.query.get("limit", "10")),
+    )
+    if not rows:
+        return web.Response(text="(no snapshots)", content_type="text/plain")
+
+    parts = []
+    for r in rows:
+        parts += [
+            f"# snapshot {r['id']} — user={r['user_id']} day={r['day']} "
+            f"created={r['created_at']}",
+            f"# schema=v{r['schema_version']} "
+            f"prompt={r['prompt_version']} model={r['model']} "
+            f"llm_call={r['llm_call_id']}",
+            f"# evidence event ids: {r['evidence_json']}",
+        ]
+        try:
+            parts.append(json.dumps(json.loads(r["state_json"]),
+                                    ensure_ascii=False, indent=2))
+        except Exception:
+            parts.append(str(r["state_json"]))
+        parts.append("")
+    return web.Response(text="\n".join(parts), content_type="text/plain")
+
+
 async def _sms_set_bite_handler(request):
     """Admin rescue: manually commit the first bite, transitioning
     discovery → first_bite. Used when the [COMMIT:] marker never
@@ -1525,6 +1603,8 @@ def start_ws_server():
         app.router.add_get("/debug/timeline", _debug_timeline_handler)
         app.router.add_get("/debug/prompt", _debug_prompt_handler)
         app.router.add_get("/debug/llm-call", _debug_llm_call_handler)
+        app.router.add_get("/debug/learner-state", _debug_learner_state_handler)
+        app.router.add_post("/annotate/run", _annotate_run_handler)
         app.router.add_post("/sms/set-bite", _sms_set_bite_handler)
         # Screen observer — local agent (observer.py) endpoints.
         app.router.add_post("/observe/start", _observe_start_handler)
