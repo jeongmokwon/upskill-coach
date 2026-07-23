@@ -14,6 +14,9 @@ empty array is a fine answer, an invented signal poisons the data.
 - Current phase in DB: {phase}
 - Agreed goal: {agreed_goal}
 - Committed first bite: {agreed_first_bite}
+- **Ignition marker (the user's OWN observable definition of "it
+  started" — judge ignition against THIS when set):
+  {ignition_marker}**
 
 ## Event log for the day
 
@@ -32,12 +35,17 @@ log doesn't support a field, use null / an empty array — never guess.
   (responded / conversed but no learning action), `"engaged"`
   (observable learning action), `"hot"` (sustained session, deep
   work visible). Plus a one-line rationale.
-- **last_ignition_at** — timestamp of the day's LAST ignition, per
-  outcome_v1 draft: an observable learning action (code run,
-  notebook edit, study-material interaction in observations, or an
-  in-conversation exercise attempt) within 120 min of an evening
-  anchor message or user-initiated evening conversation, followed by
-  ≥10 min of continued engagement. null if none today.
+- **last_ignition_at** — timestamp of the day's LAST ignition. When
+  the user's ignition marker (above) is set, ignition means THAT
+  marker being observably met (in observations or conversation),
+  within 120 min of an evening anchor message or user-initiated
+  evening conversation, followed by ≥10 min of continued engagement.
+  When no marker is set, fall back to the generic outcome_v1 draft:
+  any observable learning action (code run, notebook edit,
+  study-material interaction, in-conversation exercise attempt).
+  Real-time `ignition_judgment` events in the log are the coach's
+  cheap live scores — treat them as claims to verify against the
+  evidence, not as truth. null if none today.
 - **friction_signals[]** — moments where starting/continuing visibly
   stalled: long gaps after coach messages, avoidance content on
   screen, "later"/"skip" replies, conversation dying mid-thread.
