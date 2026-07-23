@@ -445,6 +445,73 @@ _GOAL_MARKER_RE = re.compile(
     re.DOTALL,
 )
 
+# [STEP: tag@2, tag@1] — the LLM self-tags which behavioral levers
+# this outbound message pulls, with a 1-3 intensity per tag. This is
+# instrumentation, not constraint: the coach improvises freely and
+# REPORTS what it did, so [state + (step, intensity) + outcome]
+# triples accumulate from day one. The vocabulary below is the
+# canonical step lexicon (ignition-only scope); the same lexicon later
+# becomes the planning language for per-user sequence plans, so the
+# stored shape ({tag, intensity}) is shared between "what happened"
+# and future "what was planned".
+_STEP_MARKER_RE = re.compile(r'\[STEP:\s*([a-z_0-9@,\s]+?)\s*\]', re.IGNORECASE)
+
+STEP_VOCABULARY = frozenset({
+    # 접촉 — demand-free contact
+    "connect", "validate",
+    # 동기 — the user's own reasons
+    "elicit_why", "identity_frame", "spark_curiosity",
+    # 구조 — ambiguity removal & commitment
+    "map", "secure_commit",
+    # 효능감 — Bandura's four sources
+    "evoke_mastery", "vicarious_model", "affirm_ability", "reframe_state",
+    # 점화 — activation
+    "micro_ask", "choice_offer", "implementation_cue", "handoff",
+    # 페이싱 — withdrawal is also an action
+    "release", "hold",
+    # drain: none of the levers (reached by exclusion only)
+    "none",
+})
+
+# Tags with no language realization carry no intensity.
+_NO_INTENSITY_TAGS = frozenset({"hold", "none"})
+
+
+def _process_step_marker(user_id, text):
+    """Extract the [STEP: ...] self-tag → (steps, stripped_text).
+
+    steps is a list of {"tag": str, "intensity": int|None} in
+    utterance order. Missing intensity defaults to 2; values clamp to
+    1-3. Unknown tags are STORED verbatim (raw is sacred — a tag the
+    LLM invented is itself signal about the vocabulary's coverage)
+    but flagged in logs. No marker → ([], text) — absence is visible
+    in the event payload as an empty list.
+    """
+    m = _STEP_MARKER_RE.search(text)
+    if not m:
+        return [], text
+    steps = []
+    for part in m.group(1).split(","):
+        part = part.strip().lower()
+        if not part:
+            continue
+        tag, _, level = part.partition("@")
+        tag = tag.strip()
+        if tag in _NO_INTENSITY_TAGS:
+            intensity = None
+        else:
+            try:
+                intensity = max(1, min(3, int(level.strip())))
+            except ValueError:
+                intensity = 2
+        if tag not in STEP_VOCABULARY:
+            print(f"[SMS] ⚠️ unknown step tag {tag!r} from LLM — "
+                  f"stored verbatim", flush=True)
+        steps.append({"tag": tag, "intensity": intensity})
+    text = _STEP_MARKER_RE.sub("", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return steps, text
+
 
 def _process_commit_marker(user_id, text):
     """Parse and act on control markers the LLM may embed in its
@@ -627,12 +694,14 @@ def handle_inbound(from_number, body):
 
     # Parse & handle [COMMIT: "..."] marker, strip it from user-visible text.
     reply_text = _process_commit_marker(user_id, reply_text)
+    steps, reply_text = _process_step_marker(user_id, reply_text)
     send_sms(from_number, reply_text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", reply_text, "out")
     db.log_event(user_id, "sms_out",
                  {"text": reply_text, "trigger": "inbound_reply",
                   "prompt_versions": prompt_versions,
                   "llm_call_id": llm_call_id,
+                  "steps": steps,
                   "phase": db.get_user_phase(user_id)["phase"]},
                  source="sms")
     return reply_text
@@ -690,8 +759,12 @@ def handle_cron_tick(slot):
 
     def _skip(reason):
         print(f"[SMS] {slot}: skipping — {reason}", flush=True)
+        # A deliberately-unsent slot is itself a coaching action:
+        # the server tags it `hold` (the LLM never ran, so it can't
+        # self-tag). Silence enters the same step-labeled dataset.
         db.log_event(user_id, "cron_tick",
-                     {"slot": slot, "action": "skipped", "reason": reason},
+                     {"slot": slot, "action": "skipped", "reason": reason,
+                      "steps": [{"tag": "hold", "intensity": None}]},
                      source="cron")
         return None
 
@@ -772,6 +845,7 @@ def handle_cron_tick(slot):
 
     # Parse & handle [COMMIT: "..."] marker (Phase 0→1), strip it out.
     text = _process_commit_marker(user_id, text)
+    steps, text = _process_step_marker(user_id, text)
     send_sms(to_number, text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", text, "out")
     db.log_event(user_id, "cron_tick",
@@ -781,6 +855,7 @@ def handle_cron_tick(slot):
                  {"text": text, "trigger": f"cron_{slot}",
                   "prompt_versions": prompt_versions,
                   "llm_call_id": llm_call_id,
+                  "steps": steps,
                   "phase": db.get_user_phase(user_id)["phase"]},
                  source="cron")
     return text
