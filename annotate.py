@@ -116,6 +116,8 @@ def annotate_day(user_id, day=None, client=None):
         phase=phase_state.get("phase") or "(unknown)",
         agreed_goal=phase_state.get("agreed_goal") or "(not yet agreed)",
         agreed_first_bite=phase_state.get("agreed_first_bite") or "(none)",
+        ignition_marker=phase_state.get("ignition_marker")
+                        or "(not yet defined — use the generic fallback)",
         events_digest=_digest(events),
     ))
 

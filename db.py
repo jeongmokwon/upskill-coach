@@ -193,6 +193,12 @@ def init_db():
             # the stale web-onboarding `goal` field — observed to
             # produce goal hallucination mid-conversation.
             ("agreed_goal", "TEXT DEFAULT ''"),
+            # The user's OWN observable definition of "it started"
+            # (e.g. "sat at the laptop and typed code into an
+            # IDE/Colab"). Elicited during discovery, persisted via
+            # the [IGNITION_DEF:] marker; ignition judgments are
+            # scored against THIS, per user, not a generic rule.
+            ("ignition_marker", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.cursor().execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {ddl}")
@@ -408,6 +414,7 @@ def init_db():
             ("agreed_first_bite", "TEXT DEFAULT ''"),
             ("agreed_at", "TEXT"),
             ("agreed_goal", "TEXT DEFAULT ''"),
+            ("ignition_marker", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {default}")
@@ -1398,6 +1405,7 @@ def get_user_phase(user_id):
         "agreed_first_bite": prof.get("agreed_first_bite") or "",
         "agreed_at": prof.get("agreed_at"),
         "agreed_goal": prof.get("agreed_goal") or "",
+        "ignition_marker": prof.get("ignition_marker") or "",
     }
 
 
@@ -1449,6 +1457,24 @@ def set_agreed_goal(user_id, goal_text, source="llm_marker"):
     conn.close()
     print(f"  [DB] Agreed goal saved for {user_id}: {goal_text!r}", flush=True)
     log_event(user_id, "goal_set", {"goal": goal_text}, source=source)
+
+
+def set_ignition_marker(user_id, marker_text, source="llm_marker"):
+    """Persist the user's own observable definition of ignition
+    ("what does 'it started' look like for YOU"). Elicited during
+    discovery; refinable any number of times. Event emitted here so
+    every caller path is covered once."""
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET ignition_marker = {_P} WHERE user_id = {_P}",
+        (marker_text, user_id)
+    )
+    conn.commit()
+    conn.close()
+    print(f"  [DB] Ignition marker saved for {user_id}: {marker_text!r}", flush=True)
+    log_event(user_id, "ignition_def_set", {"marker": marker_text},
+              source=source)
 
 
 def ensure_phase_timer_started(user_id):
