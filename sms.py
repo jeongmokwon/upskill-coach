@@ -393,6 +393,7 @@ def _build_placeholders(user_id):
         "phase": phase_state["phase"],
         "agreed_first_bite": phase_state["agreed_first_bite"] or "(not yet agreed)",
         "agreed_goal": phase_state["agreed_goal"] or "(not yet agreed)",
+        "ignition_marker": phase_state["ignition_marker"] or "(not yet defined)",
         # 1-indexed day count for the LLM's "Day X of 3" awareness.
         "discovery_day": db.days_in_discovery(user_id) + 1,
         "recent_screen": _format_recent_screen(user_id),
@@ -444,6 +445,44 @@ _GOAL_MARKER_RE = re.compile(
     r'\[GOAL:\s*"([^"]{3,600})"\s*\]',
     re.DOTALL,
 )
+
+# [IGNITION_DEF: "..."] — the user's OWN observable definition of
+# "it started", agreed during discovery ("랩탑 앞에 앉아 IDE/Colab에
+# 코드 타이핑"). Per-user ground truth for ignition judgments.
+# [IGNITION: n] — a 1-5 real-time judgment, emitted when replying to
+# a user message: does this reply (plus screen context) indicate the
+# user's ignition marker is being met right now? Cheap early signal;
+# the authoritative daily call stays with the nightly annotation
+# (T5), which also sees the silences — ignition usually happens
+# AFTER the last reply, when the user goes quiet because they are
+# working.
+_IGNITION_DEF_RE = re.compile(
+    r'\[IGNITION_DEF:\s*"([^"]{3,400})"\s*\]',
+    re.DOTALL,
+)
+_IGNITION_SCORE_RE = re.compile(r'\[IGNITION:\s*([1-5])\s*\]')
+
+
+def _process_ignition_markers(user_id, text, trigger):
+    """Parse & act on [IGNITION_DEF:] and [IGNITION: n]; return text
+    with both stripped."""
+    def_match = _IGNITION_DEF_RE.search(text)
+    if def_match:
+        db.set_ignition_marker(user_id, def_match.group(1).strip())
+        text = _IGNITION_DEF_RE.sub("", text)
+
+    score_match = _IGNITION_SCORE_RE.search(text)
+    if score_match:
+        score = int(score_match.group(1))
+        db.log_event(user_id, "ignition_judgment",
+                     {"score": score, "trigger": trigger,
+                      "marker": db.get_user_phase(user_id)["ignition_marker"]},
+                     source="sms")
+        text = _IGNITION_SCORE_RE.sub("", text)
+
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
+
 
 # [STEP: tag@2, tag@1] — the LLM self-tags which behavioral levers
 # this outbound message pulls, with a 1-3 intensity per tag. This is
@@ -694,6 +733,8 @@ def handle_inbound(from_number, body):
 
     # Parse & handle [COMMIT: "..."] marker, strip it from user-visible text.
     reply_text = _process_commit_marker(user_id, reply_text)
+    reply_text = _process_ignition_markers(user_id, reply_text,
+                                           trigger="inbound_reply")
     steps, reply_text = _process_step_marker(user_id, reply_text)
     send_sms(from_number, reply_text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", reply_text, "out")
@@ -845,6 +886,7 @@ def handle_cron_tick(slot):
 
     # Parse & handle [COMMIT: "..."] marker (Phase 0→1), strip it out.
     text = _process_commit_marker(user_id, text)
+    text = _process_ignition_markers(user_id, text, trigger=f"cron_{slot}")
     steps, text = _process_step_marker(user_id, text)
     send_sms(to_number, text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", text, "out")
