@@ -407,8 +407,46 @@ class _SafeDict(dict):
         return "{" + k + "}"
 
 
+def _build_context_blocks(user_id):
+    """The exploration prediction call's three blocks (brief §7):
+    A = policy prior, B = user notes, C = recent trajectory +
+    computed features. Returns (text, versions). Never raises —
+    a failed block renders as absent and the planner degrades
+    gracefully (empty notes ≈ global-prompt behavior)."""
+    import features as features_mod
+    import notes as notes_mod
+    import trace as trace_mod
+
+    versions = {}
+    parts = []
+    try:
+        prior, h_prior = _read_prompt_versioned("prior")
+        versions["prior"] = h_prior
+        parts.append(prior)
+    except Exception as e:
+        print(f"[SMS] ⚠️ prior block failed: {e}", flush=True)
+    try:
+        notes_block = notes_mod.render_notes_block(user_id)
+        if notes_block:
+            parts.append(notes_block)
+    except Exception as e:
+        print(f"[SMS] ⚠️ notes block failed: {e}", flush=True)
+    try:
+        feats = features_mod.render_features(
+            features_mod.compute_features(user_id))
+        trace_block = trace_mod.render_trace(user_id, days=3)
+        parts.append("## Recent trajectory (step-language; you are "
+                     "choosing the NEXT token)\n\n"
+                     f"Current state: {feats}\n\n{trace_block}")
+    except Exception as e:
+        print(f"[SMS] ⚠️ trace block failed: {e}", flush=True)
+    return "\n\n---\n\n".join(parts), versions
+
+
 def _build_system_prompt(slot, user_id):
-    """Assemble shared + slot prompt with user context interpolated.
+    """Assemble the full planner prompt for a scheduled slot:
+    prior (A) + shared persona/rules + notes (B) + trajectory (C) +
+    slot-specific mode prompt.
 
     Returns (system_prompt, prompt_versions) — versions is a dict
     {template_name: hash} identifying the exact template texts used
@@ -423,8 +461,11 @@ def _build_system_prompt(slot, user_id):
     fields = _build_placeholders(user_id)
     rendered_shared = shared.format_map(_SafeDict(**fields))
     rendered_slot = slot_prompt.format_map(_SafeDict(**fields))
-    versions = {"sms_shared": h_shared, prompt_name: h_slot}
-    return rendered_shared + "\n\n---\n\n" + rendered_slot, versions
+    context, ctx_versions = _build_context_blocks(user_id)
+    versions = {"sms_shared": h_shared, prompt_name: h_slot,
+                **ctx_versions}
+    return (context + "\n\n---\n\n" + rendered_shared
+            + "\n\n---\n\n" + rendered_slot), versions
 
 
 # ─── Commit-marker protocol (Phase 0 → Phase 1) ──────────────────────
@@ -504,6 +545,29 @@ def _process_ignition_markers(user_id, text, trigger):
 # stored shape ({tag, intensity}) is shared between "what happened"
 # and future "what was planned".
 _STEP_MARKER_RE = re.compile(r'\[STEP:\s*([a-z_0-9@,\s]+?)\s*\]', re.IGNORECASE)
+
+# [EXPECT: reply] — the planner's prediction of the user's next
+# reaction (exploration P5). One token from a closed vocabulary;
+# stored on the sms_out event and scored against reality by the
+# nightly job. Every send is a falsifiable bet.
+_EXPECT_VOCAB = frozenset({"no_reply", "reply", "advance", "withdraw",
+                           "ignition"})
+_EXPECT_MARKER_RE = re.compile(r'\[EXPECT:\s*([a-z_]+)\s*\]', re.IGNORECASE)
+
+
+def _process_expect_marker(text):
+    """Extract [EXPECT: token] → (expect_or_None, stripped_text).
+    Unknown tokens stored verbatim (vocabulary feedback), flagged."""
+    m = _EXPECT_MARKER_RE.search(text)
+    if not m:
+        return None, text
+    token = m.group(1).strip().lower()
+    if token not in _EXPECT_VOCAB:
+        print(f"[SMS] ⚠️ unknown EXPECT token {token!r} — stored verbatim",
+              flush=True)
+    text = _EXPECT_MARKER_RE.sub("", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return token, text
 
 STEP_VOCABULARY = frozenset({
     # 접촉 — demand-free contact
@@ -745,6 +809,7 @@ def handle_inbound(from_number, body):
     reply_text = _process_commit_marker(user_id, reply_text)
     reply_text = _process_ignition_markers(user_id, reply_text,
                                            trigger="inbound_reply")
+    expect, reply_text = _process_expect_marker(reply_text)
     steps, reply_text = _process_step_marker(user_id, reply_text)
     send_sms(from_number, reply_text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", reply_text, "out")
@@ -752,7 +817,7 @@ def handle_inbound(from_number, body):
                  {"text": reply_text, "trigger": "inbound_reply",
                   "prompt_versions": prompt_versions,
                   "llm_call_id": llm_call_id,
-                  "steps": steps,
+                  "steps": steps, "expect": expect,
                   "phase": db.get_user_phase(user_id)["phase"]},
                  source="sms")
     return reply_text
@@ -775,8 +840,11 @@ def _build_system_prompt_for_reply(user_id):
     fields = _build_placeholders(user_id)
     rendered_shared = shared.format_map(_SafeDict(**fields))
     rendered_mode = mode_prompt.format_map(_SafeDict(**fields))
-    versions = {"sms_shared": h_shared, mode_name: h_mode}
-    return rendered_shared + "\n\n---\n\n" + rendered_mode, versions
+    context, ctx_versions = _build_context_blocks(user_id)
+    versions = {"sms_shared": h_shared, mode_name: h_mode,
+                **ctx_versions}
+    return (context + "\n\n---\n\n" + rendered_shared
+            + "\n\n---\n\n" + rendered_mode), versions
 
 
 # ─── Scheduled slot handling ────────────────────────────────────────
@@ -897,7 +965,23 @@ def handle_cron_tick(slot):
     # Parse & handle [COMMIT: "..."] marker (Phase 0→1), strip it out.
     text = _process_commit_marker(user_id, text)
     text = _process_ignition_markers(user_id, text, trigger=f"cron_{slot}")
+    expect, text = _process_expect_marker(text)
     steps, text = _process_step_marker(user_id, text)
+
+    # The planner may CHOOSE silence on a scheduled send ([STEP: hold]
+    # with no message body) — deliberate non-action is an action.
+    # Record it like a skip so the trace shows a hold token; send
+    # nothing.
+    if not text.strip() and any(s.get("tag") == "hold" for s in steps):
+        print(f"[SMS] {slot}: planner chose hold — nothing sent", flush=True)
+        db.log_event(user_id, "cron_tick",
+                     {"slot": slot, "action": "held_by_planner",
+                      "decision_id": fire_decision_id,
+                      "llm_call_id": llm_call_id,
+                      "steps": steps, "expect": expect},
+                     source="cron")
+        return None
+
     send_sms(to_number, text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", text, "out")
     db.log_event(user_id, "cron_tick",
@@ -907,7 +991,7 @@ def handle_cron_tick(slot):
                  {"text": text, "trigger": f"cron_{slot}",
                   "prompt_versions": prompt_versions,
                   "llm_call_id": llm_call_id,
-                  "steps": steps,
+                  "steps": steps, "expect": expect,
                   "phase": db.get_user_phase(user_id)["phase"]},
                  source="cron")
     return text

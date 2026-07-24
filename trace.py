@@ -144,11 +144,13 @@ def render_trace(user_id, days=3, verbose=False, now=None):
             lines.append(line)
             last_in_ts = e["ts"]
 
-        elif kind == "cron_tick" and p.get("action") == "skipped":
+        elif kind == "cron_tick" and p.get("action") in ("skipped",
+                                                        "held_by_planner"):
             # hold tokens: deliberate silence is an action
             if any(s.get("tag") == "hold" for s in p.get("steps") or []):
+                why = p.get("reason") or p.get("action")
                 lines.append(f"  {hhmm}  coach: hold   "
-                             f"({p.get('slot')}: {p.get('reason')})")
+                             f"({p.get('slot')}: {why})")
 
         elif kind == "observation":
             if verbose:

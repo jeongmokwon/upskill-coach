@@ -331,6 +331,30 @@ def init_db():
         conn.cursor().execute(
             "CREATE INDEX IF NOT EXISTS idx_lss_user_day ON learner_state_snapshots (user_id, day)"
         )
+        # User notes (exploration P3, brief §7). Sparse falsifiable
+        # conditional statements about one user. Append-only: editing
+        # a note = new row with same note_id and version+1; the
+        # latest version per note_id wins at read time. Notes are a
+        # DERIVED layer — raw traces stay the ground truth.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS user_notes (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                note_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                claim TEXT NOT NULL,
+                given_json TEXT NOT NULL DEFAULT '{}',
+                when_json TEXT NOT NULL DEFAULT '[]',
+                expect TEXT NOT NULL DEFAULT '',
+                evidence_json TEXT NOT NULL DEFAULT '[]',
+                confidence TEXT NOT NULL DEFAULT 'hypothesis',
+                source TEXT NOT NULL DEFAULT 'operator'
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_notes_user ON user_notes (user_id, note_id)"
+        )
         conn.commit()
     else:
         conn.executescript("""
@@ -501,6 +525,23 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_lss_user_day ON learner_state_snapshots (user_id, day);
+
+            CREATE TABLE IF NOT EXISTS user_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                note_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                claim TEXT NOT NULL,
+                given_json TEXT NOT NULL DEFAULT '{}',
+                when_json TEXT NOT NULL DEFAULT '[]',
+                expect TEXT NOT NULL DEFAULT '',
+                evidence_json TEXT NOT NULL DEFAULT '[]',
+                confidence TEXT NOT NULL DEFAULT 'hypothesis',
+                source TEXT NOT NULL DEFAULT 'operator'
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_notes_user ON user_notes (user_id, note_id);
         """)
 
     conn.commit()
@@ -1184,6 +1225,63 @@ def get_last_observation_ts(session_id):
     row = _fetchone(cur)
     conn.close()
     return row["ts"] if row else None
+
+
+# ─── User notes (exploration P3) ─────────────────────────────────
+
+def save_user_note(user_id, claim, given=None, when=None, expect="",
+                   evidence=None, confidence="hypothesis",
+                   source="operator", note_id=None):
+    """Append a note (or a new version of an existing note_id).
+    Returns (note_id, version). Emits a note_saved event — note
+    changes are interventions in their own right and must be
+    joinable to what the coach did next."""
+    note_id = note_id or uuid.uuid4().hex[:8]
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT MAX(version) AS v FROM user_notes "
+        f"WHERE user_id = {_P} AND note_id = {_P}",
+        (user_id, note_id))
+    row = _fetchone(cur)
+    version = (row["v"] or 0) + 1 if row else 1
+    _execute(conn,
+        f"INSERT INTO user_notes (user_id, note_id, version, ts, claim, "
+        f" given_json, when_json, expect, evidence_json, confidence, source) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+        (user_id, note_id, version, datetime.now().isoformat(), claim,
+         json.dumps(given or {}, ensure_ascii=False),
+         json.dumps(when or [], ensure_ascii=False),
+         expect,
+         json.dumps(evidence or [], ensure_ascii=False),
+         confidence, source))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "note_saved",
+              {"note_id": note_id, "version": version,
+               "confidence": confidence, "claim": claim[:200]},
+              source=source)
+    return note_id, version
+
+
+def get_user_notes(user_id, include_retired=False):
+    """Latest version of each note for a user, oldest-first by first
+    appearance. confidence='retired' filtered unless asked for."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM user_notes WHERE user_id = {_P} ORDER BY id",
+        (user_id,))
+    rows = _fetchall(cur)
+    conn.close()
+    latest = {}
+    order = []
+    for r in rows:
+        if r["note_id"] not in latest:
+            order.append(r["note_id"])
+        latest[r["note_id"]] = r
+    notes = [latest[nid] for nid in order]
+    if not include_retired:
+        notes = [n for n in notes if n["confidence"] != "retired"]
+    return notes
 
 
 # ─── LearnerState snapshots (T5) ─────────────────────────────────
