@@ -1141,6 +1141,36 @@ async def _debug_learner_state_handler(request):
     return web.Response(text="\n".join(parts), content_type="text/plain")
 
 
+async def _debug_trace_handler(request):
+    """Step-language trace of a user's recent days — exploration P1.
+    The same rendering feeds the planner (block C), the founder's
+    morning review, and the nightly scorer.
+
+    GET /debug/trace?secret=...[&user_id=X][&days=3][&verbose=1]
+    """
+    import trace as trace_mod
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = (request.query.get("user_id", "").strip()
+               or os.environ.get("TUTOR_USER_ID", "").strip())
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+    days = int(request.query.get("days", "3"))
+    verbose = request.query.get("verbose", "").strip() in ("1", "true")
+
+    text = trace_mod.render_trace(user_id, days=days, verbose=verbose)
+    header = (f"# trace — user={user_id} days={days} "
+              f"verbose={verbose}\n\n")
+    return web.Response(text=header + text, content_type="text/plain")
+
+
 async def _sms_set_bite_handler(request):
     """Admin rescue: manually commit the first bite, transitioning
     discovery → first_bite. Used when the [COMMIT:] marker never
@@ -1709,6 +1739,7 @@ def start_ws_server():
         app.router.add_get("/debug/prompt", _debug_prompt_handler)
         app.router.add_get("/debug/llm-call", _debug_llm_call_handler)
         app.router.add_get("/debug/learner-state", _debug_learner_state_handler)
+        app.router.add_get("/debug/trace", _debug_trace_handler)
         app.router.add_post("/annotate/run", _annotate_run_handler)
         app.router.add_post("/sms/set-bite", _sms_set_bite_handler)
         # Screen observer — local agent (observer.py) endpoints.
