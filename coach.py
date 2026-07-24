@@ -307,13 +307,13 @@ async def _health_handler(request):
     return web.Response(text="ok")
 
 
-async def _root_handler(request):
-    """Handle root path — WebSocket upgrade or serve index.html."""
-    # Check if this is a WebSocket upgrade request
-    if request.headers.get("Upgrade", "").lower() == "websocket":
-        print(f"[WS] Upgrade on / from {request.remote}", flush=True)
-        return await ws_handler(request)
+async def _app_handler(request):
+    """Serve the Theo chat app (index.html) at /app.
 
+    The app lived at / until 2026-07; it moved so / can serve the
+    public landing page carriers review for toll-free verification
+    (see _landing_handler). The app's WebSocket connects to the
+    absolute path /ws, so it works unchanged from /app."""
     print(f"[HTTP] Serving index.html to {request.remote}", flush=True)
     file_path = os.path.join(PROJECT_DIR, "index.html")
     if os.path.isfile(file_path):
@@ -1339,6 +1339,108 @@ def _legal_page(title, body_html):
 </body></html>"""
 
 
+# ─── Public landing page (/) ─────────────────────────────────────────
+#
+# The business-facing homepage carriers open during Toll-Free
+# Verification review (rejection 30489: "website must be established
+# and active" — the reviewer saw only the app shell). Static inline
+# HTML, fully readable without JavaScript. The SMS-program wording
+# here must stay consistent with /privacy, /terms, and /sms-signup
+# and with the TFV submission (up to 4 msgs/day, HELP/STOP, data
+# rates, web-form opt-in).
+
+_LANDING_CSS = _PAGE_CSS + """
+.hero { margin-top: 24px; }
+.hero h1 { font-size: 40px; margin-bottom: 4px; }
+.tagline { font-size: 19px; color: #444; margin-bottom: 16px; }
+.cta { display: inline-block; margin: 20px 0; padding: 12px 28px;
+       font-size: 16px; font-weight: 600; color: #fff; background: #2563eb;
+       border-radius: 8px; text-decoration: none; }
+.steps { padding-left: 0; list-style: none; counter-reset: step; }
+.steps li { counter-increment: step; margin: 14px 0; padding-left: 40px;
+            position: relative; }
+.steps li::before { content: counter(step); position: absolute; left: 0;
+                    top: 0; width: 26px; height: 26px; border-radius: 50%;
+                    background: #2563eb; color: #fff; font-weight: 600;
+                    font-size: 14px; display: flex; align-items: center;
+                    justify-content: center; }
+.sms-box { margin-top: 28px; padding: 18px 20px; border: 1px solid #ddd;
+           border-radius: 10px; background: #f8f9fb; font-size: 15px; }
+.sms-box h2 { margin-top: 0; }
+"""
+
+
+async def _landing_handler(request):
+    # Legacy fallback: early clients opened their WebSocket against /
+    # instead of /ws, so the upgrade check stays with the root route.
+    if request.headers.get("Upgrade", "").lower() == "websocket":
+        print(f"[WS] Upgrade on / from {request.remote}", flush=True)
+        return await ws_handler(request)
+
+    body = """
+<div class="hero">
+  <h1>Theo</h1>
+  <p class="tagline">Your AI learning coach</p>
+  <p>Theo is a personal learning companion built and operated by
+  Green Gables Studio LLC. Whatever you are using to learn — an online
+  course, YouTube tutorials, a textbook, your own project — Theo helps
+  you actually sit down, start, and keep going, with coaching
+  conversations that adapt to how you learn. Theo is currently an
+  invite-only pilot with a small group of 5&ndash;10 learners.</p>
+  <a class="cta" href="/app">Open Theo</a>
+</div>
+
+<h2>How it works</h2>
+<ol class="steps">
+  <li><strong>Sign up with consent.</strong> Pilot members join through
+      our <a href="/sms-signup">web signup form</a>, which collects
+      explicit consent before any message is sent.</li>
+  <li><strong>Coaching by text message.</strong> Theo sends SMS coaching
+      check-ins and holds two-way conversations to help you start and
+      stay in your study sessions.</li>
+  <li><strong>Study with your own materials.</strong> Sessions use
+      whatever you are already learning with — Theo coaches alongside
+      your course, tutorial, or project rather than replacing it.</li>
+</ol>
+
+<div class="sms-box">
+  <h2>Theo SMS program</h2>
+  <p><strong>Message frequency:</strong> up to 4 messages per day;
+  actual frequency varies with your replies.</p>
+  <p><strong>Standard rates:</strong> Message and data rates may apply
+  depending on your mobile phone service plan.</p>
+  <p><strong>Help &amp; stop:</strong> Reply <strong>HELP</strong> for
+  help or <strong>STOP</strong> to cancel at any time.</p>
+  <p>Participation is opt-in only, via the
+  <a href="/sms-signup">SMS signup form</a>. See our
+  <a href="/terms">Terms of Service</a> and
+  <a href="/privacy">Privacy Policy</a>.</p>
+</div>
+
+<h2>Contact</h2>
+<p>Questions about Theo or the pilot? Email
+<a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a>.</p>
+"""
+    html = f"""<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<title>Theo — AI learning coach</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Theo is a personal AI learning coach
+by Green Gables Studio LLC — SMS coaching check-ins and two-way
+learning support. Invite-only pilot.">
+<style>{_LANDING_CSS}</style>
+</head><body>
+{body}
+<div class="footer">
+  <p><a href="/sms-signup">SMS Signup</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> ·
+  <a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a></p>
+  <p>Theo is a product of Green Gables Studio LLC · © 2026 Green Gables Studio LLC</p>
+</div>
+</body></html>"""
+    return web.Response(text=html, content_type="text/html")
+
+
 async def _privacy_handler(request):
     body = """
 <h1>Privacy Policy</h1>
@@ -1587,7 +1689,10 @@ def start_ws_server():
         app = web.Application(middlewares=[_log_middleware])
         app.router.add_get("/health", _health_handler)
         app.router.add_get("/ws", ws_handler)
-        app.router.add_get("/", _root_handler)
+        # / is the public landing page (TFV-reviewed business website);
+        # the chat app moved to /app.
+        app.router.add_get("/", _landing_handler)
+        app.router.add_get("/app", _app_handler)
         # Admin routes — registered BEFORE the static catch-all so they
         # take precedence. Auth is enforced inside each handler via
         # ADMIN_PASSWORD env var (returns 503 if unset, 401 otherwise).
