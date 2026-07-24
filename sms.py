@@ -474,10 +474,20 @@ def _process_ignition_markers(user_id, text, trigger):
     score_match = _IGNITION_SCORE_RE.search(text)
     if score_match:
         score = int(score_match.group(1))
-        db.log_event(user_id, "ignition_judgment",
-                     {"score": score, "trigger": trigger,
-                      "marker": db.get_user_phase(user_id)["ignition_marker"]},
-                     source="sms")
+        marker = db.get_user_phase(user_id)["ignition_marker"]
+        if marker:
+            db.log_event(user_id, "ignition_judgment",
+                         {"score": score, "trigger": trigger,
+                          "marker": marker},
+                         source="sms")
+        else:
+            # Prompt forbids scoring before a marker is defined, but
+            # LLM compliance isn't a guarantee (observed in prod:
+            # score 1 emitted on a cron send with marker ""). A score
+            # with no definition is unjudgeable noise — strip the tag,
+            # record nothing.
+            print(f"[SMS] stray [IGNITION: {score}] with no marker "
+                  f"defined — dropped", flush=True)
         text = _IGNITION_SCORE_RE.sub("", text)
 
     text = re.sub(r"\n{3,}", "\n\n", text).strip()

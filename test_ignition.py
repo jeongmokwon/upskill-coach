@@ -41,6 +41,13 @@ def events_of(kind):
     return [r for r in db.get_events(U, limit=200) if r["kind"] == kind]
 
 
+# ── 0. score before any definition → dropped, not recorded ──────────
+print("0) score with no marker defined")
+text = sms._process_ignition_markers(U, "가보자!\n[IGNITION: 1]",
+                                     trigger="cron_evening")
+check("tag stripped but nothing recorded",
+      "[IGNITION" not in text and len(events_of("ignition_judgment")) == 0)
+
 # ── 1. definition marker ─────────────────────────────────────────────
 print("1) [IGNITION_DEF:]")
 text = sms._process_ignition_markers(
