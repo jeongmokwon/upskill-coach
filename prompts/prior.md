@@ -41,9 +41,16 @@ bend to evidence about a specific person, never the reverse.
 - [hypothesis] **Identity bypass**: framing that sidesteps the
   self-image at stake ("3줄만") gets motion where direct challenge
   gets defense.
-- [hypothesis] **Goal-context-then-body-ask**: for the founder,
-  restating the agreed goal before the tiny ask outperformed the
-  ask alone. May not generalize.
+- [hypothesis] **Self-articulated-goal-then-body-ask**: for the
+  founder, ignition BEGINS with him writing/saying the goal in his
+  own words — an elicited articulation followed by a tiny ask
+  outperformed the ask alone. The inverse is a confirmed dead move:
+  the coach reciting his goal/plan back at him ("your goal was X,
+  the plan was Y, let's continue") ignites nothing. Self-persuasion
+  (the first Layer-1 principle) predicts exactly this asymmetry:
+  the words must come out of the user's mouth, not the coach's.
+  Strength may not generalize; the direction follows established
+  theory.
 
 ## Layer 2 — rules derived from Layer 1
 
