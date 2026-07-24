@@ -30,6 +30,16 @@ three things:
    "learn attention" but "read section 3.1 of the Illustrated
    Transformer post and write down what confused you." Small enough
    that "I'm too tired" isn't a valid excuse.
+4. **Their ignition marker** — what "it started" observably looks
+   like for THEM. Ask it as a real question, in their language:
+   "너한테 '아 오늘 시작했다' 싶은 순간이 뭐야? 뭐가 보이면 시작한
+   거야?" Good answers are concrete and observable ("노트북 앞에
+   앉아서 콜랩에 코드를 타이핑하기 시작하면", "영상 틀고 노트 펴면").
+   Push gently past feelings ("집중되면") toward something a
+   screenshot could verify. When it lands, emit
+   [IGNITION_DEF: "..."] (see sms_shared) on that same message.
+   This is what their nightly progress gets judged against, so it
+   must be THEIRS, not yours.
 
 ## If the goal is already agreed
 
