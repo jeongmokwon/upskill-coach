@@ -1141,6 +1141,61 @@ async def _debug_learner_state_handler(request):
     return web.Response(text="\n".join(parts), content_type="text/plain")
 
 
+async def _notes_handler(request):
+    """User-notes governance until the operator dashboard exists.
+
+    GET  /notes?secret=...[&user_id=X]           — view (incl. retired)
+    POST /notes?secret=...  body: JSON           — add or revise
+         {user_id?, note_id? (revise), claim, given?, when?, expect?,
+          evidence?, confidence?}
+    Retiring = POST with note_id + confidence="retired".
+    """
+    import db
+    import notes as notes_mod
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    default_user = os.environ.get("TUTOR_USER_ID", "").strip()
+
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(status=400, text="JSON body required")
+        user_id = (body.get("user_id") or default_user).strip()
+        if not (user_id and body.get("claim")):
+            return web.Response(status=400, text="user_id and claim required")
+        note_id, version = db.save_user_note(
+            user_id, body["claim"],
+            given=body.get("given"), when=body.get("when"),
+            expect=body.get("expect", ""),
+            evidence=body.get("evidence"),
+            confidence=body.get("confidence", "hypothesis"),
+            source="operator", note_id=body.get("note_id"))
+        return web.json_response({"ok": True, "note_id": note_id,
+                                  "version": version})
+
+    user_id = request.query.get("user_id", "").strip() or default_user
+    rows = db.get_user_notes(user_id, include_retired=True)
+    parts = [f"# user notes — {user_id} ({len(rows)} notes)", ""]
+    for n in rows:
+        parts += [f"[{n['note_id']} v{n['version']}] "
+                  f"({n['confidence']}, {n['source']}, {n['ts'][:10]})",
+                  f"  {n['claim']}",
+                  f"  given={n['given_json']} when={n['when_json']} "
+                  f"expect={n['expect']}",
+                  f"  evidence={n['evidence_json']}", ""]
+    parts += ["— rendered prompt block —", "",
+              notes_mod.render_notes_block(user_id) or "(empty)"]
+    return web.Response(text="\n".join(parts), content_type="text/plain")
+
+
 async def _debug_trace_handler(request):
     """Step-language trace of a user's recent days — exploration P1.
     The same rendering feeds the planner (block C), the founder's
@@ -1740,6 +1795,8 @@ def start_ws_server():
         app.router.add_get("/debug/llm-call", _debug_llm_call_handler)
         app.router.add_get("/debug/learner-state", _debug_learner_state_handler)
         app.router.add_get("/debug/trace", _debug_trace_handler)
+        app.router.add_get("/notes", _notes_handler)
+        app.router.add_post("/notes", _notes_handler)
         app.router.add_post("/annotate/run", _annotate_run_handler)
         app.router.add_post("/sms/set-bite", _sms_set_bite_handler)
         # Screen observer — local agent (observer.py) endpoints.
