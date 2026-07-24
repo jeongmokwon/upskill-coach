@@ -3,6 +3,55 @@
 > Companion to PROJECT_BRIEF.md §6 Week 1. Read INVENTORY.md first.
 > Tasks are ordered; each has acceptance criteria. Decisions D1-D4
 > need the operator's call BEFORE the task that depends on them.
+>
+> **This file also carries the running status below — the operator
+> decided (2026-07-24) that no WEEK2/3/4 order files will be
+> written.** Weeks 2-4 stay as roadmap sketches in brief §6; work is
+> picked from them and tracked here.
+
+## Status (2026-07-24)
+
+| Task | State |
+|---|---|
+| T0 docs | ✅ done |
+| T1 event log | ✅ done — verified live (prod timeline) |
+| T2/T2b prompt registry + rendered-call recorder | ✅ done (#52) |
+| T3 decision hook | ✅ done (#53) — width 0 everywhere, as designed |
+| T4 raw blob store | ⏸ blocked on **R2 signup** (operator) |
+| T5 LearnerState + nightly annotation | ✅ done (#57) — `/annotate/run` manual; nightly Render cron not yet added |
+| T6 infra events + capture gaps | ✅ done (#56) — first real catch: flagged undelivered sends into an expired sandbox |
+| T6b owned backups | ⏸ blocked on R2 signup |
+| T7 legacy quarantine | ⏸ blocked on **D3** (operator approval of INVENTORY §9 list) |
+| T8 learning-path schema | ◻ not started |
+| T9 bite progression | ◻ not started (after T8) |
+| T10 user_id audit | ◻ not started |
+
+**Out-of-band work shipped since (not in the original T-list):**
+- **Rebrand → Theo** (#54, #55): product + persona named Theo,
+  learningtheo.com live (custom domain + TLS), legal pages/signup
+  rebranded, prompts carry the persona.
+- **Onboarding bypass** (#58) + **Apprentice Mode entry hidden**
+  (#59): the public URL now lands on a clean Theo home screen —
+  carrier reviewers open this URL.
+- **Step vocabulary** (#60, brief §7): 17-tag coaching-move lexicon
+  with intensity, self-tagged on every send, server-tagged `hold` on
+  skips. Descriptive stage; prescriptive flip pending the
+  exploration design session.
+- **Per-user ignition marker** (#61→#63 re-land, #64 guard):
+  `[IGNITION_DEF:]` elicited in discovery, `[IGNITION: 1-5]`
+  real-time scores on reply paths, nightly annotation as the
+  authoritative judge. See D4 note below.
+- **Ops:** Twilio Business Profile approved (2026-07-22, LLC +
+  Mountain View + CP575/bank-statement chain); old toll-free number
+  deleted, new number's TFV submitted → rejected 30489 (website must
+  be established) → landing-page task open; duplicate Render crons
+  (double evening fire at 20:0x UTC) deleted 2026-07-24.
+
+**Next up (no new week files):** exploration-layer design session
+(featurize → per-user sequence plan → step selection → replan
+triggers — brief §1 pilot objective), TFV landing page + resubmit,
+R2 signup → T4/T6b, D3 → T7, then T8-T10; week-2 Chrome extension
+remains on the list, scheduled against recruit device mix.
 
 ## Open decisions (operator input needed)
 
@@ -50,6 +99,15 @@ ignition success + ≥25 min total engagement without a ≥10-min
 avoidance gap." Versioned as `outcome_v1`; expected to be wrong;
 revised against raw data later.
 → **Needs operator: edit/approve wording.**
+
+*Amended 2026-07-23 (operator decision, shipped):* ignition is now
+judged primarily against each user's OWN observable definition —
+the per-user **ignition marker** (brief §7), elicited during
+discovery and stored per user. The generic wording above survives
+as the **fallback** for users with no marker yet, and its exact
+wording still needs the operator's sign-off. T5's annotation prompt
+already implements this two-level scheme; re-annotation applies any
+future wording change retroactively.
 
 ## Tasks
 

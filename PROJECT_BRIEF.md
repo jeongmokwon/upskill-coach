@@ -1,7 +1,7 @@
 # PROJECT BRIEF — Theo (AI learning coach): Pilot Instrument
 
 > Read this file fully before writing any code. This is the persistent context for all build work.
-> This document defines WHAT we are building and WHY. Weekly order files (WEEK1_ORDER.md, etc.) define the current tasks.
+> This document defines WHAT we are building and WHY. WEEK1_ORDER.md defines the detailed week-1 tasks **and carries the running status of everything since** — the operator decided (2026-07-24) that no further WEEK2/3/4 order files will be written; weeks 2-4 remain as roadmap sketches in §6 and work is picked from them as needed.
 >
 > **Working with the operator:** Converse with the operator in Korean; keep code, comments, commit messages, and docs in English. When the spec is ambiguous or conflicts with what you find in the repo, ask the operator instead of assuming.
 >
@@ -17,6 +17,38 @@ An AI coach that sits as a **layer on top of whatever the user is using to upski
 4. **Route-keeping** — maintain each user's learning path (direction / project / bite, §7) so every session has a concrete next step and progress stays visible.
 
 The competitor is user inertia (YouTube, Netflix, webtoons), not other edtech.
+
+**Pilot objective, sharpened (2026-07-24).** The pilot is not "observe
+whether ignition happens" — for busy adults the base rate may be near
+zero if approached blindly. The objective is **matching**: extract
+maximally-diagnostic data in the user's freshest window (the first
+onboarding conversations), and use it to assign each user the
+intervention approach most likely to reach ignition — then refine
+per user from ongoing conversation. Two structural commitments follow:
+- **A sequence is not an atomic object.** It is a trajectory of
+  per-moment step choices (see §7 "Step vocabulary"): user A's winning
+  path (elicit their why → tiny dictation-level bite → merge into main
+  content) shares individual steps with user B's different path, and
+  user A when tired may need user C's opening. The unit of learning is
+  the step decision, not the whole sequence — which also means step
+  samples pool ACROSS users, the only way n=5-10 × 4 weeks yields
+  enough data.
+- **Theory structures the hypothesis space; the field disposes.**
+  Decades of behavioral science (SDT, self-efficacy, implementation
+  intentions, motivational interviewing...) provide the candidate
+  levers and the diagnostic first-questions; the founder's n=1
+  discoveries are instances of known constructs (ego friction =
+  self-efficacy threat; cognitive-altitude jumps = load violations),
+  not new physics. Blind generalization of the n=1 sequence to all
+  users is explicitly rejected.
+
+Current instrumentation stage (shipped): step vocabulary self-tagging
++ per-user ignition markers (§7) — descriptive today. The
+prescriptive layer (featurize user → per-user sequence plan → step
+selection → generation, with replan triggers on signals like repeated
+no-reply) is the week-3 "initial policy generation" slot, sharpened;
+its design session is pending. Until then the coach runs the global
+prompt and tags what it did.
 
 **Vision vs. current wedge:** the product's end state is an AI tutor
 that multiplies learning efficiency. Fast/frequent/deep flow entry
@@ -171,6 +203,8 @@ First task of week 1 is a written inventory of this repo before any changes.
 - **Friction:** signals that the last learning step was too big (rewrite loops, regressing questions, tab-switching to YouTube, early session exit).
 - **Ego friction:** distinct axis from cognitive friction. Coach utterances that bruise ("this is easy — need me to explain?") are a confirmed churn trigger. Tracked separately.
 - **Ignition ritual:** near-zero-cognitive-load starter task (e.g., "type these 3 lines") that changes posture/body state and is physically continuous with the real work.
+- **Ignition marker (per user, shipped 2026-07-23):** each user's OWN observable definition of "it started" — the founder's is "sat at the laptop, typed code into an IDE/Colab"; the next user's will differ. Elicited during discovery as its 4th deliverable ("뭐가 보이면 시작한 거야?" — pushed past feelings toward something a screenshot could verify), persisted via `[IGNITION_DEF:]` to `user_profiles.ignition_marker`, refinable anytime. Judged two-tier: a cheap real-time `[IGNITION: 1-5]` score on reply paths (never pinging into silence — silence may BE ignition), and the authoritative nightly annotation, which sees the screen record and the silences and treats live scores as claims to verify. This makes D4's generic outcome_v1 wording the *fallback*, not the primary criterion.
+- **Step vocabulary (shipped 2026-07-23):** the finite lexicon of coaching moves — 17 tags in 6 families (접촉 connect/validate · 동기 elicit_why/identity_frame/spark_curiosity · 구조 map/secure_commit · 효능감, Bandura's four sources: evoke_mastery/vicarious_model/affirm_ability/reframe_state · 점화 micro_ask/choice_offer/implementation_cue/handoff · 페이싱 release/hold · drain none), each with intensity 1-3 anchored by per-level example utterances in the prompt. Ignition-only scope: learning-steering moves (teach/consolidate/step-up) are deliberately excluded — this experiment measures getting people TO the highway, not driving on it. Every outbound message self-tags `[STEP: tag@n, ...]` → `steps` in the sms_out event; unsent slots are server-tagged `hold`. **Descriptive today, prescriptive later:** currently the LLM reports what it did (known weakness: post-hoc self-labeling mislabels — observed `connect@1` on a goal-recall message); the planned flip is choose-the-step-then-write, at which point the same `{tag, intensity}` shape becomes the planning language and the label becomes a decision record. The vocabulary itself is pruned by data: never-used tags die, confused pairs merge, `none` share >30-40% signals a coverage hole.
 - **Learning path (per user):** the loose curriculum. Three layers defined by *psychological function*, with durations that flex per user:
   - **Direction** (motivation source; months-to-years; e.g., "career change into ML")
   - **Project** (the progress-visibility unit: a concrete deliverable WITH a completion condition; horizon flexes — one week for some users, ~3 months for others; e.g., "MNIST classifier from scratch, ≥95% accuracy, by end of August")
