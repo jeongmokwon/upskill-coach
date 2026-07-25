@@ -253,9 +253,29 @@ def init_db():
                 id SERIAL PRIMARY KEY,
                 phone TEXT NOT NULL,
                 consented_at TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending'
+                status TEXT NOT NULL DEFAULT 'pending',
+                name TEXT DEFAULT '',
+                email TEXT DEFAULT '',
+                consent_checkins INTEGER DEFAULT 0,
+                consent_support INTEGER DEFAULT 0
             )
         """)
+        # Migrate: per-purpose consent columns (TFV round-2, 2026-07-25).
+        # Carrier review requires a separate opt-in per messaging
+        # purpose, and the signup form now collects name/email so the
+        # form can be completed without SMS consent. Each ALTER in its
+        # own transaction (same rationale as user_profiles above).
+        for col, ddl in [
+            ("name", "TEXT DEFAULT ''"),
+            ("email", "TEXT DEFAULT ''"),
+            ("consent_checkins", "INTEGER DEFAULT 0"),
+            ("consent_support", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                conn.cursor().execute(f"ALTER TABLE sms_signups ADD COLUMN {col} {ddl}")
+                conn.commit()
+            except Exception:
+                conn.rollback()
         # Unified append-only event log (WEEK1_ORDER T1, brief §4.1).
         # Dialect discipline per D1.3: this table is touched only by
         # INSERT and SELECT; payload is JSON serialized to TEXT in
@@ -453,6 +473,17 @@ def init_db():
                 conn.execute(f"ALTER TABLE messages ADD COLUMN {col} {default}")
             except Exception:
                 pass
+        # TFV round-2 migration — see Postgres branch for rationale.
+        for col, default in [
+            ("name", "TEXT DEFAULT ''"),
+            ("email", "TEXT DEFAULT ''"),
+            ("consent_checkins", "INTEGER DEFAULT 0"),
+            ("consent_support", "INTEGER DEFAULT 0"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE sms_signups ADD COLUMN {col} {default}")
+            except Exception:
+                pass
         # Screen-observer tables — see Postgres branch for isolation
         # rationale (kept separate from web `sessions`).
         conn.executescript("""
@@ -475,7 +506,11 @@ def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 phone TEXT NOT NULL,
                 consented_at TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending'
+                status TEXT NOT NULL DEFAULT 'pending',
+                name TEXT DEFAULT '',
+                email TEXT DEFAULT '',
+                consent_checkins INTEGER DEFAULT 0,
+                consent_support INTEGER DEFAULT 0
             );
 
             CREATE TABLE IF NOT EXISTS events (
@@ -1711,18 +1746,26 @@ def save_observation(session_id, user_id, summary):
     conn.close()
 
 
-def save_sms_signup(phone):
+def save_sms_signup(phone, name="", email="", consent_checkins=False,
+                    consent_support=False):
     """Record a web opt-in consent (phone already normalized E.164).
-    Returns the row id. Duplicate phones allowed — each submission is
-    its own consent record with its own timestamp."""
+    Each row is one consent submission with per-purpose flags — carrier
+    verification requires a separate opt-in per messaging purpose.
+    Duplicate phones allowed — each submission is its own consent
+    record with its own timestamp."""
     conn = get_conn()
     cur = _execute(conn,
-        f"INSERT INTO sms_signups (phone, consented_at) VALUES ({_P}, {_P})",
-        (phone, datetime.now().isoformat())
+        f"INSERT INTO sms_signups (phone, consented_at, name, email, "
+        f"consent_checkins, consent_support) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+        (phone, datetime.now().isoformat(), name, email,
+         int(consent_checkins), int(consent_support))
     )
     conn.commit()
     conn.close()
-    print(f"  [DB] SMS signup consent recorded for {phone}", flush=True)
+    print(f"  [DB] SMS signup consent recorded for {phone} "
+          f"(checkins={int(consent_checkins)}, support={int(consent_support)})",
+          flush=True)
 
 
 def get_open_observe_session(user_id):

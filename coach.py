@@ -1455,6 +1455,12 @@ _LANDING_CSS = _PAGE_CSS + """
 """
 
 
+# Registered business address shown on the landing page. Must match
+# the Twilio Business Profile (TFV round-2: business details on the
+# website must match the verification submission).
+_BUSINESS_ADDRESS = "2605 Miller Avenue, Unit 3401, Mountain View, CA 94040"
+
+
 async def _landing_handler(request):
     # Legacy fallback: early clients opened their WebSocket against /
     # instead of /ws, so the upgrade check stays with the root route.
@@ -1462,7 +1468,7 @@ async def _landing_handler(request):
         print(f"[WS] Upgrade on / from {request.remote}", flush=True)
         return await ws_handler(request)
 
-    body = """
+    body = f"""
 <div class="hero">
   <h1>Theo</h1>
   <p class="tagline">Your AI learning coach</p>
@@ -1477,9 +1483,10 @@ async def _landing_handler(request):
 
 <h2>How it works</h2>
 <ol class="steps">
-  <li><strong>Sign up with consent.</strong> Pilot members join through
-      our <a href="/sms-signup">web signup form</a>, which collects
-      explicit consent before any message is sent.</li>
+  <li><strong>Sign up for the pilot.</strong> Pilot members join through
+      our <a href="/sms-signup">web signup form</a>. Text-message
+      coaching is optional and requires your explicit opt-in consent,
+      collected on that form before any message is sent.</li>
   <li><strong>Coaching by text message.</strong> Theo sends SMS coaching
       check-ins and holds two-way conversations to help you start and
       stay in your study sessions.</li>
@@ -1502,9 +1509,23 @@ async def _landing_handler(request):
   <a href="/privacy">Privacy Policy</a>.</p>
 </div>
 
-<h2>Contact</h2>
-<p>Questions about Theo or the pilot? Email
-<a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a>.</p>
+<h2>About Green Gables Studio LLC</h2>
+<p>Green Gables Studio LLC is an independent software studio based in
+Mountain View, California. The studio designs and operates Theo
+end-to-end: the coaching program, the web application at
+learningtheo.com, and the SMS coaching service described above.
+"Theo" is the product and brand name under which Green Gables Studio
+LLC provides this service.</p>
+
+<div class="sms-box">
+  <h2>Business &amp; contact information</h2>
+  <p><strong>Legal name:</strong> Green Gables Studio LLC</p>
+  <p><strong>Product / DBA:</strong> Theo</p>
+  <p><strong>Address:</strong> {_BUSINESS_ADDRESS}</p>
+  <p><strong>Email:</strong>
+  <a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a></p>
+  <p><strong>Website:</strong> <a href="/">www.learningtheo.com</a></p>
+</div>
 """
     html = f"""<!DOCTYPE html>
 <html><head>
@@ -1537,16 +1558,22 @@ numbers and message content are handled.</p>
 
 <h2>What we collect</h2>
 <ul>
-  <li>The mobile phone number of the single registered user (the owner).</li>
-  <li>SMS messages exchanged with the user, stored for the purpose of
-      providing learning context to subsequent messages.</li>
-  <li>Web app usage data tied to the same user account.</li>
+  <li>Contact details submitted through our
+      <a href="/sms-signup">pilot signup form</a>: name, email address,
+      and — if provided — mobile phone number, together with the
+      text-message consent choices made on that form.</li>
+  <li>SMS messages exchanged with pilot participants, stored for the
+      purpose of providing learning context to subsequent messages.</li>
+  <li>Web app usage data tied to the participant's account.</li>
 </ul>
 
 <h2>How we use it</h2>
-<p>Mobile numbers and message content are used solely to deliver
-educational content, study reminders, and motivation to the owner. They
-are not used for marketing or advertising of any kind.</p>
+<p>Contact details and message content are used solely to operate the
+pilot: delivering educational content, study check-ins, and coaching
+conversations to participants, and contacting participants about their
+pilot enrollment. They are not used for marketing or advertising of
+any kind. Text messages are sent only for the purposes a participant
+has separately consented to on the signup form.</p>
 
 <h2>Sharing</h2>
 <p><strong>We do not sell, rent, or share mobile information with third
@@ -1637,66 +1664,93 @@ number and messages are handled.</p>
 # The compliant web opt-in form for the SMS coaching pilot. Serves two
 # purposes: (1) the real consent-capture entry point for pilot users,
 # (2) the public "opt-in policy proof" URL for Twilio's Toll-Free
-# Verification review. Built to the carrier checklist: phone field,
-# NOT-pre-checked consent checkbox, message-type description,
-# frequency, data-rates disclaimer, HELP/STOP, ToS/Privacy links,
-# explicit submit button. Submissions are consent records only —
-# status stays 'pending' until the founder activates the user; the
-# form never triggers messages by itself.
+# Verification review. Built to the carrier checklist AND the TFV
+# round-2 rejection feedback (2026-07-25):
+#   - one NOT-pre-checked checkbox PER messaging purpose (coaching
+#     check-ins vs two-way learning support), each describing the
+#     message type it covers;
+#   - SMS consent is OPTIONAL: email is the primary signup field, the
+#     submit button is always enabled, and the form states explicitly
+#     that signup works without either box checked;
+#   - frequency, data-rates, HELP/STOP, ToS/Privacy links kept.
+# Submissions are consent records only — status stays 'pending' until
+# the founder activates the user; the form never triggers messages by
+# itself.
+
+_FIELD_STYLE = ("margin-top:6px; padding:10px 12px; width:100%; "
+                "max-width:340px; font-size:16px; border:1px solid #ccc; "
+                "border-radius:8px;")
+
 
 async def _sms_signup_page_handler(request):
-    body = """
-<h1>Theo — SMS Coaching Signup</h1>
+    body = f"""
+<h1>Theo — Pilot Signup</h1>
 <div class="meta">Invite-only pilot · Green Gables Studio LLC</div>
 
-<p>Sign up to receive AI coaching check-ins and two-way learning
-support by text message.</p>
+<p>Join the Theo pilot. Text-message consent below is optional — you
+can sign up without it and we will contact you by email.</p>
 
 <form method="POST" action="/sms-signup" style="margin-top:20px">
-  <label for="phone" style="font-weight:600">Mobile Phone Number *</label><br>
-  <input type="tel" id="phone" name="phone" required
-         placeholder="(555) 123-4567" autocomplete="tel"
-         style="margin-top:6px; padding:10px 12px; width:100%; max-width:340px;
-                font-size:16px; border:1px solid #ccc; border-radius:8px;">
+  <label for="name" style="font-weight:600">Full Name</label><br>
+  <input type="text" id="name" name="name"
+         placeholder="Type your full name" autocomplete="name"
+         style="{_FIELD_STYLE}">
 
-  <div style="margin-top:16px; display:flex; gap:10px; align-items:flex-start;">
-    <input type="checkbox" id="consent" name="consent" value="yes"
-           style="margin-top:4px; width:16px; height:16px;">
-    <label for="consent">Yes, I would like to receive automated text
-    messages from Theo with coaching check-ins and two-way
-    learning support for my study goals. I understand I will receive
-    up to 4 messages per day.</label>
+  <div style="margin-top:14px">
+  <label for="email" style="font-weight:600">Email *</label><br>
+  <input type="email" id="email" name="email" required
+         placeholder="Enter your email" autocomplete="email"
+         style="{_FIELD_STYLE}">
   </div>
 
-  <p style="margin-top:16px"><strong>Message Frequency:</strong> Up to 4
-  messages per day; actual frequency varies with your replies.</p>
+  <div style="margin-top:14px">
+  <label for="phone" style="font-weight:600">Mobile Phone Number</label><br>
+  <input type="tel" id="phone" name="phone"
+         placeholder="(555) 123-4567" autocomplete="tel"
+         style="{_FIELD_STYLE}">
+  <div style="font-size:13px; color:#666; margin-top:4px">Only needed
+  if you opt in to text messages below.</div>
+  </div>
+
+  <div style="margin-top:18px; display:flex; gap:10px; align-items:flex-start;">
+    <input type="checkbox" id="consent_checkins" name="consent_checkins"
+           value="yes" style="margin-top:4px; width:16px; height:16px;">
+    <label for="consent_checkins">I consent to receive <strong>coaching
+    check-in</strong> text messages from Theo (Green Gables Studio LLC)
+    at the phone number provided — scheduled check-ins and reminders
+    about my study plan. Message &amp; data rates may apply. Reply HELP
+    for help, STOP to opt out.</label>
+  </div>
+
+  <div style="margin-top:12px; display:flex; gap:10px; align-items:flex-start;">
+    <input type="checkbox" id="consent_support" name="consent_support"
+           value="yes" style="margin-top:4px; width:16px; height:16px;">
+    <label for="consent_support">I consent to receive <strong>two-way
+    learning support</strong> text messages from Theo (Green Gables
+    Studio LLC) at the phone number provided — conversational replies
+    that help me during my study sessions. Message &amp; data rates may
+    apply. Reply HELP for help, STOP to opt out.</label>
+  </div>
+
+  <p style="margin-top:16px"><strong>Consent is optional:</strong> both
+  checkboxes are optional and you can complete this signup without
+  checking either. Consent is not a condition of any purchase.</p>
+  <p><strong>Message Frequency:</strong> Up to 4 messages per day
+  combined across both message types; actual frequency varies with
+  your replies.</p>
   <p><strong>Standard Rates:</strong> Message and data rates may apply
   depending on your mobile phone service plan.</p>
   <p><strong>Help &amp; Stop:</strong> Reply HELP for help or STOP to
-  cancel at any time. By providing your phone number and checking the
-  box above, you agree to receive text messages from Theo
-  (Green Gables Studio LLC). Consent is not a condition of any
-  purchase.</p>
+  cancel at any time.</p>
 
   <p><a href="/terms">Terms of Service</a> · <a href="/privacy">Privacy Policy</a></p>
 
-  <button id="submit-btn" type="submit" disabled
+  <button type="submit"
           style="margin-top:12px; padding:12px 28px; font-size:16px;
                  border:none; border-radius:8px; background:#2563eb;
-                 color:#fff; cursor:pointer; opacity:0.5;">
-    Yes, sign me up!</button>
+                 color:#fff; cursor:pointer;">
+    Sign me up</button>
 </form>
-
-<script>
-  // Consent checkbox must be actively selected — submit stays
-  // disabled until it is.
-  const cb = document.getElementById('consent');
-  const btn = document.getElementById('submit-btn');
-  cb.addEventListener('change', () => {
-    btn.disabled = !cb.checked;
-    btn.style.opacity = cb.checked ? '1' : '0.5';
-  });
-</script>
 """
     return web.Response(text=_legal_page("SMS Signup", body),
                         content_type="text/html")
@@ -1713,31 +1767,72 @@ def _normalize_us_phone(raw):
     return None
 
 
+def _signup_error(msg):
+    body = f"""
+<h1>Hmm — something didn't look right</h1>
+<p>{msg}</p>
+<p><a href="/sms-signup">← Back to signup</a></p>
+"""
+    return web.Response(status=400, text=_legal_page("SMS Signup", body),
+                        content_type="text/html")
+
+
 async def _sms_signup_submit_handler(request):
     import db
 
     form = await request.post()
-    if form.get("consent") != "yes":
-        return web.Response(status=400, text="Consent checkbox is required.")
-    phone = _normalize_us_phone(form.get("phone", ""))
-    if not phone:
-        body = """
-<h1>Hmm — that number didn't look right</h1>
-<p>Please enter a valid US mobile number, e.g. (555) 123-4567.</p>
-<p><a href="/sms-signup">← Back to signup</a></p>
-"""
-        return web.Response(status=400, text=_legal_page("SMS Signup", body),
-                            content_type="text/html")
+    name = (form.get("name") or "").strip()[:200]
+    email = (form.get("email") or "").strip()[:200]
+    consent_checkins = form.get("consent_checkins") == "yes"
+    consent_support = form.get("consent_support") == "yes"
+    any_consent = consent_checkins or consent_support
 
-    db.save_sms_signup(phone)
-    db.log_event(phone, "signup_consent", {"phone": phone}, source="web")
-    body = """
+    # Email is the primary signup field — SMS consent is optional
+    # (TFV round-2: consent must not gate completing the signup).
+    if not email or "@" not in email:
+        return _signup_error("Please enter a valid email address.")
+
+    phone_raw = (form.get("phone") or "").strip()
+    phone = _normalize_us_phone(phone_raw) if phone_raw else None
+    if any_consent and not phone:
+        return _signup_error(
+            "To receive text messages, please enter a valid US mobile "
+            "number, e.g. (555) 123-4567 — or uncheck the text-message "
+            "consent boxes to sign up by email only.")
+    if phone_raw and not phone:
+        return _signup_error(
+            "That phone number didn't look right — please enter a valid "
+            "US mobile number, e.g. (555) 123-4567, or leave it blank.")
+
+    if any_consent:
+        # A consent record row is written ONLY when a box was checked;
+        # email-only signups carry no SMS consent to record.
+        db.save_sms_signup(phone, name=name, email=email,
+                           consent_checkins=consent_checkins,
+                           consent_support=consent_support)
+    db.log_event(phone or email,
+                 "signup_consent" if any_consent else "signup_submitted",
+                 {"phone": phone or "", "name": name, "email": email,
+                  "consent_checkins": consent_checkins,
+                  "consent_support": consent_support},
+                 source="web")
+
+    if any_consent:
+        body = """
 <h1>You're on the list 🎉</h1>
 <p>Thanks — your signup is recorded. Because this is a small
 invite-only pilot, we activate participants one at a time; you'll
 receive a welcome text from Theo when your spot opens.</p>
 <p>You can reply STOP at any time to cancel, or HELP for assistance.
 Message and data rates may apply.</p>
+<p><a href="/">← Home</a></p>
+"""
+    else:
+        body = """
+<h1>You're on the list 🎉</h1>
+<p>Thanks — your signup is recorded. Because this is a small
+invite-only pilot, we activate participants one at a time; we'll
+reach out to you by email when your spot opens.</p>
 <p><a href="/">← Home</a></p>
 """
     return web.Response(text=_legal_page("SMS Signup", body),
