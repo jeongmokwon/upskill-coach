@@ -464,8 +464,12 @@ def _build_system_prompt(slot, user_id):
     context, ctx_versions = _build_context_blocks(user_id)
     versions = {"sms_shared": h_shared, prompt_name: h_slot,
                 **ctx_versions}
-    return (context + "\n\n---\n\n" + rendered_shared
-            + "\n\n---\n\n" + rendered_slot), versions
+    parts = [context, rendered_shared, rendered_slot]
+    # Assignment last — recency makes it the most salient instruction.
+    plan_block = _build_plan_block(user_id)
+    if plan_block:
+        parts.append(plan_block)
+    return "\n\n---\n\n".join(parts), versions
 
 
 # ─── Commit-marker protocol (Phase 0 → Phase 1) ──────────────────────
@@ -533,6 +537,91 @@ def _process_ignition_markers(user_id, text, trigger):
 
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
+
+
+# Sequence-plan markers (exploration v2). The plan lives server-side
+# as state; the LLM's judgments about it travel as markers:
+#   [ADVANCE]          — the user's latest reply completed the current
+#                        step's purpose; move the cursor forward.
+#   [REPLAN: "reason"] — the plan no longer fits the signals; recorded
+#                        for the operator/nightly to re-plan. Cursor
+#                        stays; the planner may act on prior+notes in
+#                        the meantime.
+# ([STAY] is accepted and stripped as an explicit no-op.)
+_ADVANCE_RE = re.compile(r'\[ADVANCE\]')
+_STAY_RE = re.compile(r'\[STAY\]')
+_REPLAN_RE = re.compile(r'\[REPLAN:\s*"([^"]{3,300})"\s*\]', re.DOTALL)
+
+
+def _process_plan_markers(user_id, text, trigger):
+    """Parse & act on [ADVANCE]/[STAY]/[REPLAN:]; return stripped text."""
+    if _ADVANCE_RE.search(text):
+        plan = db.get_current_plan(user_id)
+        if plan:
+            new_idx = min(plan["cursor"] + 1, len(plan["steps"]))
+            db.move_plan_cursor(user_id, new_idx,
+                                reason=f"advance via {trigger}")
+            if new_idx >= len(plan["steps"]):
+                db.log_event(user_id, "plan_completed",
+                             {"version": plan["version"]}, source="sms")
+                print(f"[PLAN] {user_id}: plan v{plan['version']} complete",
+                      flush=True)
+        else:
+            print(f"[PLAN] stray [ADVANCE] with no plan — ignored", flush=True)
+        text = _ADVANCE_RE.sub("", text)
+    replan = _REPLAN_RE.search(text)
+    if replan:
+        db.log_event(user_id, "plan_replan_requested",
+                     {"reason": replan.group(1).strip(), "trigger": trigger},
+                     source="sms")
+        text = _REPLAN_RE.sub("", text)
+    text = _STAY_RE.sub("", text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
+
+
+def _build_plan_block(user_id):
+    """The assignment block (exploration v2): the LLM receives ONLY
+    the current step as its job — later steps exist server-side, so
+    collapsing a sequence into one send is structurally impossible,
+    not merely forbidden. Empty string when the user has no plan
+    (planner falls back to free choice per prior+notes)."""
+    plan = db.get_current_plan(user_id)
+    if not plan or not plan["steps"]:
+        return ""
+    cur, steps = plan["cursor"], plan["steps"]
+    if cur >= len(steps):
+        return ("## Sequence assignment\n\n"
+                f"Plan v{plan['version']} is COMPLETE. Choose freely per "
+                "the prior and this user's notes; a new plan will be set "
+                "at the next review. Emit [REPLAN: \"...\"] with a "
+                "suggestion if you see the natural next sequence.")
+    step = steps[cur]
+    intent = step.get("intent", "")
+    lines = [
+        "## Sequence assignment (this message's job — nothing more)",
+        "",
+        f"Plan v{plan['version']}, step {cur + 1} of {len(steps)}: "
+        f"**{step['tag']}@{step.get('intensity', 2)}** — {intent}",
+        "",
+        "Execute THIS step only. Later steps of the plan are not yours "
+        "to perform in this message, and are shown by name only so you "
+        "can angle the conversation toward them without starting them.",
+    ]
+    if cur + 1 < len(steps):
+        lines.append(f"Next (name only, do NOT perform): "
+                     f"{steps[cur + 1]['tag']}")
+    lines += [
+        "",
+        "Plan judgments (markers, stripped by the server):",
+        "- When REPLYING to the user: if their latest message completed "
+        "the current step's purpose, emit [ADVANCE] — your message then "
+        "works the NEXT step. If not yet, emit [STAY] and keep working "
+        "this step.",
+        "- If the plan visibly no longer fits the signals, emit "
+        "[REPLAN: \"reason\"] and act per the prior and notes instead.",
+    ]
+    return "\n".join(lines)
 
 
 # [STEP: tag@2, tag@1] — the LLM self-tags which behavioral levers
@@ -809,6 +898,8 @@ def handle_inbound(from_number, body):
     reply_text = _process_commit_marker(user_id, reply_text)
     reply_text = _process_ignition_markers(user_id, reply_text,
                                            trigger="inbound_reply")
+    reply_text = _process_plan_markers(user_id, reply_text,
+                                       trigger="inbound_reply")
     expect, reply_text = _process_expect_marker(reply_text)
     steps, reply_text = _process_step_marker(user_id, reply_text)
     send_sms(from_number, reply_text, user_id=user_id)
@@ -843,8 +934,11 @@ def _build_system_prompt_for_reply(user_id):
     context, ctx_versions = _build_context_blocks(user_id)
     versions = {"sms_shared": h_shared, mode_name: h_mode,
                 **ctx_versions}
-    return (context + "\n\n---\n\n" + rendered_shared
-            + "\n\n---\n\n" + rendered_mode), versions
+    parts = [context, rendered_shared, rendered_mode]
+    plan_block = _build_plan_block(user_id)
+    if plan_block:
+        parts.append(plan_block)
+    return "\n\n---\n\n".join(parts), versions
 
 
 # ─── Scheduled slot handling ────────────────────────────────────────
@@ -965,6 +1059,7 @@ def handle_cron_tick(slot):
     # Parse & handle [COMMIT: "..."] marker (Phase 0→1), strip it out.
     text = _process_commit_marker(user_id, text)
     text = _process_ignition_markers(user_id, text, trigger=f"cron_{slot}")
+    text = _process_plan_markers(user_id, text, trigger=f"cron_{slot}")
     expect, text = _process_expect_marker(text)
     steps, text = _process_step_marker(user_id, text)
 
