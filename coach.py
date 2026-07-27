@@ -1631,9 +1631,13 @@ schedule and replies. You can lower or pause the frequency at any time
 by replying STOP.</p>
 
 <h2>Opt-in</h2>
-<p>By providing your mobile number during onboarding and confirming
-the verification flow, you consent to receive automated SMS messages
-from Theo.</p>
+<p>Consent to receive text messages is collected through our
+<a href="/sms-signup">web signup form</a>, which offers a separate,
+optional checkbox for each message type (coaching check-ins and
+two-way learning support). You will only receive the message types
+you have checked. Providing your phone number alone does not
+constitute consent, and consent is not a condition of signing up
+for the pilot.</p>
 
 <h2>Opt-out and help</h2>
 <ul>
