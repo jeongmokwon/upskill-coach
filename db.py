@@ -199,6 +199,11 @@ def init_db():
             # the [IGNITION_DEF:] marker; ignition judgments are
             # scored against THIS, per user, not a generic rule.
             ("ignition_marker", "TEXT DEFAULT ''"),
+            # Position in the current sequence plan (exploration v2:
+            # the sequence lives server-side as state; the LLM only
+            # receives the CURRENT step as its assignment). Mutable
+            # like phase; every move is an event.
+            ("plan_cursor", "INTEGER DEFAULT 0"),
         ]:
             try:
                 conn.cursor().execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {ddl}")
@@ -375,6 +380,23 @@ def init_db():
         conn.cursor().execute(
             "CREATE INDEX IF NOT EXISTS idx_notes_user ON user_notes (user_id, note_id)"
         )
+        # Sequence plans (exploration v2). Append-only plan CONTENT;
+        # the moving cursor lives on user_profiles (mutable state,
+        # like phase) and every move is an event.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS sequence_plans (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                steps_json TEXT NOT NULL,
+                rationale TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'operator'
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_plans_user ON sequence_plans (user_id, version)"
+        )
         conn.commit()
     else:
         conn.executescript("""
@@ -459,6 +481,7 @@ def init_db():
             ("agreed_at", "TEXT"),
             ("agreed_goal", "TEXT DEFAULT ''"),
             ("ignition_marker", "TEXT DEFAULT ''"),
+            ("plan_cursor", "INTEGER DEFAULT 0"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {default}")
@@ -577,6 +600,18 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_notes_user ON user_notes (user_id, note_id);
+
+            CREATE TABLE IF NOT EXISTS sequence_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                steps_json TEXT NOT NULL,
+                rationale TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'operator'
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_plans_user ON sequence_plans (user_id, version);
         """)
 
     conn.commit()
@@ -1317,6 +1352,72 @@ def get_user_notes(user_id, include_retired=False):
     if not include_retired:
         notes = [n for n in notes if n["confidence"] != "retired"]
     return notes
+
+
+# ─── Sequence plans (exploration v2) ─────────────────────────────
+
+def save_sequence_plan(user_id, steps, rationale="", source="operator"):
+    """Append a new plan version and reset the cursor to step 0.
+    steps: ordered list of {"tag", "intensity", "intent"} — intent is
+    a one-line human/LLM-readable purpose ("open why question, his
+    own words"). Returns the new version number."""
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT MAX(version) AS v FROM sequence_plans WHERE user_id = {_P}",
+        (user_id,))
+    row = _fetchone(cur)
+    version = (row["v"] or 0) + 1 if row else 1
+    _execute(conn,
+        f"INSERT INTO sequence_plans (user_id, version, ts, steps_json, "
+        f" rationale, source) VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+        (user_id, version, datetime.now().isoformat(),
+         json.dumps(steps, ensure_ascii=False), rationale, source))
+    _execute(conn,
+        f"UPDATE user_profiles SET plan_cursor = 0 WHERE user_id = {_P}",
+        (user_id,))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "sequence_plan_set",
+              {"version": version, "steps": steps,
+               "rationale": rationale[:300]}, source=source)
+    print(f"  [PLAN] v{version} set for {user_id} ({len(steps)} steps)",
+          flush=True)
+    return version
+
+
+def get_current_plan(user_id):
+    """Latest plan + live cursor → {'version', 'steps', 'cursor',
+    'rationale'} or None if the user has no plan."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM sequence_plans WHERE user_id = {_P} "
+        f"ORDER BY version DESC LIMIT 1", (user_id,))
+    row = _fetchone(cur)
+    conn.close()
+    if not row:
+        return None
+    prof = get_user_profile_by_id(user_id) or {}
+    return {
+        "version": row["version"],
+        "steps": json.loads(row["steps_json"]),
+        "cursor": prof.get("plan_cursor") or 0,
+        "rationale": row["rationale"],
+    }
+
+
+def move_plan_cursor(user_id, new_index, reason, source="llm_marker"):
+    """Move the cursor (an [ADVANCE] judgment, or an operator fix).
+    Every move is an event — cursor motion is an intervention."""
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET plan_cursor = {_P} WHERE user_id = {_P}",
+        (new_index, user_id))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "plan_cursor_moved",
+              {"to": new_index, "reason": reason}, source=source)
 
 
 # ─── LearnerState snapshots (T5) ─────────────────────────────────

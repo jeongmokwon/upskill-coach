@@ -1196,6 +1196,55 @@ async def _notes_handler(request):
     return web.Response(text="\n".join(parts), content_type="text/plain")
 
 
+async def _plan_handler(request):
+    """Sequence-plan governance (exploration v2).
+
+    GET  /plan?secret=...[&user_id=X]     — current plan + cursor
+    POST /plan?secret=...  body: JSON     — set a new plan version
+         {user_id?, steps: [{tag, intensity, intent}], rationale?}
+    """
+    import db
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    default_user = os.environ.get("TUTOR_USER_ID", "").strip()
+
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            return web.Response(status=400, text="JSON body required")
+        user_id = (body.get("user_id") or default_user).strip()
+        steps = body.get("steps")
+        if not (user_id and isinstance(steps, list) and steps):
+            return web.Response(status=400,
+                                text="user_id and non-empty steps required")
+        version = db.save_sequence_plan(
+            user_id, steps, rationale=body.get("rationale", ""),
+            source="operator")
+        return web.json_response({"ok": True, "version": version})
+
+    user_id = request.query.get("user_id", "").strip() or default_user
+    plan = db.get_current_plan(user_id)
+    if not plan:
+        return web.Response(text=f"(no plan for {user_id})",
+                            content_type="text/plain")
+    parts = [f"# sequence plan — {user_id} v{plan['version']} "
+             f"(cursor at step {plan['cursor'] + 1} of {len(plan['steps'])})",
+             f"rationale: {plan['rationale']}", ""]
+    for i, s in enumerate(plan["steps"]):
+        mark = "→" if i == plan["cursor"] else " "
+        parts.append(f" {mark} {i + 1}. {s['tag']}@{s.get('intensity', 2)}"
+                     f" — {s.get('intent', '')}")
+    return web.Response(text="\n".join(parts), content_type="text/plain")
+
+
 async def _debug_trace_handler(request):
     """Step-language trace of a user's recent days — exploration P1.
     The same rendering feeds the planner (block C), the founder's
@@ -1896,6 +1945,8 @@ def start_ws_server():
         app.router.add_get("/debug/trace", _debug_trace_handler)
         app.router.add_get("/notes", _notes_handler)
         app.router.add_post("/notes", _notes_handler)
+        app.router.add_get("/plan", _plan_handler)
+        app.router.add_post("/plan", _plan_handler)
         app.router.add_post("/annotate/run", _annotate_run_handler)
         app.router.add_post("/sms/set-bite", _sms_set_bite_handler)
         # Screen observer — local agent (observer.py) endpoints.
