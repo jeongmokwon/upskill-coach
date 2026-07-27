@@ -30,7 +30,12 @@ def render_notes_block(user_id):
         return ""
     lines = ["## What is KNOWN about this user (scored notes — trust "
              "confirmed > hypothesis; never contradict a confirmed note "
-             "without new evidence)", ""]
+             "without new evidence)",
+             "",
+             "Move chains below are multi-TURN protocols: play the "
+             "first move, wait for the user's response, then advance. "
+             "Never collapse a chain into one message.",
+             ""]
     for n in notes:
         given = _fmt_given(json.loads(n["given_json"]))
         when = ", ".join(json.loads(n["when_json"])) or "?"
