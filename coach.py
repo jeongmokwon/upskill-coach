@@ -932,6 +932,38 @@ async def _sms_set_goal_handler(request):
     return web.json_response({"ok": True, "user_id": user_id, "agreed_goal": goal})
 
 
+async def _sms_set_ignition_handler(request):
+    """Admin rescue: directly set the user's ignition marker (their
+    observable definition of "it started"). The designed path is the
+    onboarding conversation ([IGNITION_DEF:] marker); this covers
+    users who predate that flow, until re-onboarding.
+
+    POST /sms/set-ignition?secret=...&marker=<url-encoded text>[&user_id=X]
+    """
+    import db
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = (request.query.get("user_id", "").strip()
+               or os.environ.get("TUTOR_USER_ID", "").strip())
+    if not user_id:
+        return web.Response(status=500, text="user_id unresolved")
+
+    marker = request.query.get("marker", "").strip()
+    if not marker:
+        return web.Response(status=400, text="marker param required")
+
+    db.set_ignition_marker(user_id, marker, source="admin")
+    return web.json_response({"ok": True, "user_id": user_id,
+                              "ignition_marker": marker})
+
+
 async def _sms_status_handler(request):
     """Diagnosis: report the tutor user's current phase state so we
     can see server-side truth without shelling into the DB.
@@ -1937,6 +1969,7 @@ def start_ws_server():
         app.router.add_post("/sms/cron-tick", _sms_cron_tick_handler)
         app.router.add_post("/sms/reset-and-fire", _sms_reset_and_fire_handler)
         app.router.add_post("/sms/set-goal", _sms_set_goal_handler)
+        app.router.add_post("/sms/set-ignition", _sms_set_ignition_handler)
         app.router.add_get("/sms/status", _sms_status_handler)
         app.router.add_get("/debug/timeline", _debug_timeline_handler)
         app.router.add_get("/debug/prompt", _debug_prompt_handler)
