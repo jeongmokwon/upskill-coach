@@ -465,15 +465,21 @@ def _build_system_prompt(slot, user_id):
     versions = {"sms_shared": h_shared, prompt_name: h_slot,
                 **ctx_versions}
     parts = [context, rendered_shared, rendered_slot]
-    # Last block wins on recency. Dormancy gate outranks the plan:
-    # when the server detects dormancy, the assignment is swapped
-    # for the zero-demand re-opening directive (plan paused).
+    # Last block wins on recency. Precedence: dormancy gate >
+    # onboarding checklist > sequence assignment. Dormancy overrides
+    # everything; an incomplete onboarding shows the checklist (there
+    # is no plan yet during onboarding); a completed user gets the
+    # plan assignment.
     if _is_dormant(user_id):
         parts.append(_build_dormant_block(user_id))
     else:
-        plan_block = _build_plan_block(user_id)
-        if plan_block:
-            parts.append(plan_block)
+        ob_block = _build_onboarding_block(user_id)
+        if ob_block:
+            parts.append(ob_block)
+        else:
+            plan_block = _build_plan_block(user_id)
+            if plan_block:
+                parts.append(plan_block)
     return "\n\n---\n\n".join(parts), versions
 
 
@@ -542,6 +548,96 @@ def _process_ignition_markers(user_id, text, trigger):
 
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
+
+
+# Onboarding markers (P0-A). Two more fill-a-field markers in the
+# GOAL/COMMIT family:
+#   [PATH: "direction | project | project done-condition"] — the
+#     three-layer route (T8). Exactly three '|'-separated parts.
+#   [SCHEDULE: "20:00-22:00, 08:00-08:30"] — agreed send windows,
+#     comma-separated HH:MM-HH:MM in the user's local day. Parsed
+#     mechanically (the hourly tick consumes it); an unparseable
+#     value is NOT saved — logged, and the field stays missing on
+#     the checklist so the conversation returns to it.
+_PATH_MARKER_RE = re.compile(r'\[PATH:\s*"([^"]{3,600})"\s*\]', re.DOTALL)
+_SCHEDULE_MARKER_RE = re.compile(r'\[SCHEDULE:\s*"([^"]{3,200})"\s*\]')
+_WINDOW_RE = re.compile(r'^([01]?\d|2[0-3]):([0-5]\d)-([01]?\d|2[0-3]):([0-5]\d)$')
+
+
+def _process_onboarding_markers(user_id, text):
+    """Parse & act on [PATH:] and [SCHEDULE:]; strip both; then let
+    the server recompute the checklist (completion may flip here)."""
+    m = _PATH_MARKER_RE.search(text)
+    if m:
+        parts = [p.strip() for p in m.group(1).split("|")]
+        if len(parts) == 3 and all(parts):
+            db.save_learning_path(user_id, direction=parts[0],
+                                  project=parts[1],
+                                  done_condition=parts[2])
+        else:
+            print(f"[SMS] ⚠️ malformed [PATH:] ({len(parts)} parts) — "
+                  f"not saved", flush=True)
+        text = _PATH_MARKER_RE.sub("", text)
+
+    m = _SCHEDULE_MARKER_RE.search(text)
+    if m:
+        raw = m.group(1).strip()
+        tokens = [t.strip() for t in raw.split(",") if t.strip()]
+        windows = []
+        ok = bool(tokens)
+        for t in tokens:
+            wm = _WINDOW_RE.match(t)
+            if not wm:
+                ok = False
+                break
+            windows.append({"start": f"{int(wm.group(1)):02d}:{wm.group(2)}",
+                            "end": f"{int(wm.group(3)):02d}:{wm.group(4)}"})
+        if ok:
+            db.save_user_schedule(user_id, windows, raw_text=raw)
+        else:
+            print(f"[SMS] ⚠️ malformed [SCHEDULE:] {raw!r} — not saved",
+                  flush=True)
+        text = _SCHEDULE_MARKER_RE.sub("", text)
+
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
+
+
+def _build_onboarding_block(user_id):
+    """The checklist block (P0-A): injected into every call while
+    onboarding is incomplete, so the conversation keeps steering
+    toward the missing fields. Empty string once completed."""
+    state = db.get_onboarding_state(user_id)
+    if state["completed_at"]:
+        return ""
+    label = {"goal": "goal (their own words — [GOAL:])",
+             "path": "big-steps path ([PATH: \"direction | project | "
+                     "done-condition\"])",
+             "bite": "first concrete task for the next day-or-two "
+                     "([COMMIT:])",
+             "ignition_marker": "their observable definition of \"it "
+                                "started\" ([IGNITION_DEF:])",
+             "schedule": "agreed messaging windows ([SCHEDULE: "
+                         "\"20:00-22:00\"], their local time)"}
+    lines = [
+        "## Onboarding checklist (server-computed — fill fields via "
+        "markers, never announce completion yourself)",
+        "",
+        "Filled: " + (", ".join(state["filled"]) or "(none yet)"),
+        "Missing:",
+    ]
+    for f in state["missing"]:
+        lines.append(f"- {label[f]}")
+    lines += [
+        "",
+        "Steer the conversation toward the missing fields naturally — "
+        "no interrogation; a couple of fields per evening is fine "
+        "(discovery runs up to 3 days). Fill a field ONLY when the "
+        "user has actually said/agreed to it — never speculatively. "
+        "The server flips onboarding to complete when the last field "
+        "fills; until then this checklist reappears every call.",
+    ]
+    return "\n".join(lines)
 
 
 # Sequence-plan markers (exploration v2). The plan lives server-side
@@ -794,8 +890,12 @@ def _process_commit_marker(user_id, text):
                 options=["accept", "hold"],
                 context={"bite": bite[:200]})
             if choice == "accept":
-                db.commit_first_bite(user_id, bite, decision_id=decision_id)
-                print(f"[SMS] Phase 0→1 for {user_id} on user agreement: {bite!r}", flush=True)
+                # P0-A: the bite is ONE checklist field, not the whole
+                # graduation — the phase flips only when the full
+                # onboarding predicate completes (see
+                # check_and_complete_onboarding, called after marker
+                # processing on both paths).
+                db.set_agreed_bite(user_id, bite, decision_id=decision_id)
         else:
             # LLM emitted a commit while already in Phase 1 — ignore, log.
             print(f"[SMS] stray COMMIT marker while phase={phase!r}, ignoring", flush=True)
@@ -951,10 +1051,15 @@ def handle_inbound(from_number, body):
     reply_text = _process_commit_marker(user_id, reply_text)
     reply_text = _process_ignition_markers(user_id, reply_text,
                                            trigger="inbound_reply")
+    reply_text = _process_onboarding_markers(user_id, reply_text)
     reply_text = _process_plan_markers(user_id, reply_text,
                                        trigger="inbound_reply")
     expect, reply_text = _process_expect_marker(reply_text)
     steps, reply_text = _process_step_marker(user_id, reply_text)
+    # Field fills above may have completed the checklist — code, not
+    # the LLM, makes that call.
+    db.check_and_complete_onboarding(user_id)
+    db.mark_onboarding_started(user_id)
     send_sms(from_number, reply_text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", reply_text, "out")
     db.log_event(user_id, "sms_out",
@@ -988,9 +1093,15 @@ def _build_system_prompt_for_reply(user_id):
     versions = {"sms_shared": h_shared, mode_name: h_mode,
                 **ctx_versions}
     parts = [context, rendered_shared, rendered_mode]
-    plan_block = _build_plan_block(user_id)
-    if plan_block:
-        parts.append(plan_block)
+    # Same precedence as the scheduled path, minus dormancy (the
+    # user just messaged us — by definition not dormant).
+    ob_block = _build_onboarding_block(user_id)
+    if ob_block:
+        parts.append(ob_block)
+    else:
+        plan_block = _build_plan_block(user_id)
+        if plan_block:
+            parts.append(plan_block)
     return "\n\n---\n\n".join(parts), versions
 
 
@@ -1112,9 +1223,12 @@ def handle_cron_tick(slot):
     # Parse & handle [COMMIT: "..."] marker (Phase 0→1), strip it out.
     text = _process_commit_marker(user_id, text)
     text = _process_ignition_markers(user_id, text, trigger=f"cron_{slot}")
+    text = _process_onboarding_markers(user_id, text)
     text = _process_plan_markers(user_id, text, trigger=f"cron_{slot}")
     expect, text = _process_expect_marker(text)
     steps, text = _process_step_marker(user_id, text)
+    db.check_and_complete_onboarding(user_id)
+    db.mark_onboarding_started(user_id)
 
     # Dormant-mode enforcement (detection tier): the step tags confess
     # if the planner played an ask into a dormant channel.

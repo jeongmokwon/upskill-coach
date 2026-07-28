@@ -49,6 +49,8 @@ def events_of(kind):
 
 PLAN = [{"tag": "elicit_why", "intensity": 2, "intent": "open why q"},
         {"tag": "micro_ask", "intensity": 1, "intent": "one line"}]
+db.ensure_user_profile_row(U)
+db.check_and_complete_onboarding(U, force=True)  # plans are post-onboarding
 db.save_sequence_plan(U, PLAN, rationale="t", source="operator")
 
 # ── 1. fresh user: never messaged → new, not dormant ─────────────────

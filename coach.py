@@ -1228,6 +1228,54 @@ async def _notes_handler(request):
     return web.Response(text="\n".join(parts), content_type="text/plain")
 
 
+async def _onboarding_handler(request):
+    """Onboarding state machine — observation + operator override.
+
+    GET  /onboarding?secret=...[&user_id=X]         — state + checklist
+    POST /onboarding?secret=...&action=complete[&force=1][&user_id=X]
+         — run the completion check now; force=1 is the operator
+           override/backfill (e.g. the founder, who predates the flow)
+    """
+    import db
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = (request.query.get("user_id", "").strip()
+               or os.environ.get("TUTOR_USER_ID", "").strip())
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+
+    if request.method == "POST":
+        if request.query.get("action") != "complete":
+            return web.Response(status=400, text="action=complete required")
+        force = request.query.get("force", "").strip() in ("1", "true")
+        changed = db.check_and_complete_onboarding(user_id, force=force)
+        return web.json_response({"ok": True, "completed_now": changed,
+                                  "state": db.get_onboarding_state(user_id)})
+
+    state = db.get_onboarding_state(user_id)
+    path = db.get_current_path(user_id)
+    sched = db.get_user_schedule(user_id)
+    parts = [f"# onboarding — {user_id}",
+             f"started_at:   {state['started_at']}",
+             f"completed_at: {state['completed_at']}",
+             f"filled:  {', '.join(state['filled']) or '(none)'}",
+             f"missing: {', '.join(state['missing']) or '(none)'}", ""]
+    if path:
+        parts += [f"path v{path['version']}: {path['direction']} | "
+                  f"{path['project']} | {path['project_done_condition']}"]
+    if sched:
+        parts += [f"schedule v{sched['version']}: {sched['windows_json']} "
+                  f"(raw: {sched['raw_text']})"]
+    return web.Response(text="\n".join(parts), content_type="text/plain")
+
+
 async def _plan_handler(request):
     """Sequence-plan governance (exploration v2).
 
@@ -1980,6 +2028,8 @@ def start_ws_server():
         app.router.add_post("/notes", _notes_handler)
         app.router.add_get("/plan", _plan_handler)
         app.router.add_post("/plan", _plan_handler)
+        app.router.add_get("/onboarding", _onboarding_handler)
+        app.router.add_post("/onboarding", _onboarding_handler)
         app.router.add_post("/annotate/run", _annotate_run_handler)
         app.router.add_post("/sms/set-bite", _sms_set_bite_handler)
         # Screen observer — local agent (observer.py) endpoints.
