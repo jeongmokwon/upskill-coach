@@ -204,6 +204,14 @@ def init_db():
             # receives the CURRENT step as its assignment). Mutable
             # like phase; every move is an event.
             ("plan_cursor", "INTEGER DEFAULT 0"),
+            # Onboarding state machine (P0-A). Timestamps, not
+            # booleans — duration is data. started_at = first coach
+            # send to this user; completed_at is set by CODE when the
+            # five required fields are all non-empty (goal, path,
+            # bite, ignition marker, schedule) — never asserted by
+            # the LLM.
+            ("onboarding_started_at", "TEXT"),
+            ("onboarding_completed_at", "TEXT"),
         ]:
             try:
                 conn.cursor().execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {ddl}")
@@ -397,6 +405,45 @@ def init_db():
         conn.cursor().execute(
             "CREATE INDEX IF NOT EXISTS idx_plans_user ON sequence_plans (user_id, version)"
         )
+        # Learning paths (T8, brief §7) — the three-layer route:
+        # direction / project + done-condition / bites. Append-only
+        # versions; onboarding's [PATH:] marker writes v1.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS learning_paths (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                project TEXT NOT NULL DEFAULT '',
+                project_done_condition TEXT NOT NULL DEFAULT '',
+                bites_done TEXT NOT NULL DEFAULT '[]',
+                current_bite TEXT NOT NULL DEFAULT '',
+                next_candidates TEXT NOT NULL DEFAULT '[]',
+                changed_by TEXT NOT NULL DEFAULT 'llm_marker',
+                decision_id TEXT
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_paths_user ON learning_paths (user_id, version)"
+        )
+        # Per-user send schedule (storage here; the hourly tick that
+        # consumes it is P0-C). windows_json: [{"start": "HH:MM",
+        # "end": "HH:MM"}] in the user's local (PT) day.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS user_schedule (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                windows_json TEXT NOT NULL,
+                raw_text TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'llm_marker'
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_sched_user ON user_schedule (user_id, version)"
+        )
         conn.commit()
     else:
         conn.executescript("""
@@ -482,6 +529,8 @@ def init_db():
             ("agreed_goal", "TEXT DEFAULT ''"),
             ("ignition_marker", "TEXT DEFAULT ''"),
             ("plan_cursor", "INTEGER DEFAULT 0"),
+            ("onboarding_started_at", "TEXT"),
+            ("onboarding_completed_at", "TEXT"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {default}")
@@ -612,6 +661,35 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_plans_user ON sequence_plans (user_id, version);
+
+            CREATE TABLE IF NOT EXISTS learning_paths (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                direction TEXT NOT NULL,
+                project TEXT NOT NULL DEFAULT '',
+                project_done_condition TEXT NOT NULL DEFAULT '',
+                bites_done TEXT NOT NULL DEFAULT '[]',
+                current_bite TEXT NOT NULL DEFAULT '',
+                next_candidates TEXT NOT NULL DEFAULT '[]',
+                changed_by TEXT NOT NULL DEFAULT 'llm_marker',
+                decision_id TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_paths_user ON learning_paths (user_id, version);
+
+            CREATE TABLE IF NOT EXISTS user_schedule (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                windows_json TEXT NOT NULL,
+                raw_text TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'llm_marker'
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_sched_user ON user_schedule (user_id, version);
         """)
 
     conn.commit()
@@ -1352,6 +1430,186 @@ def get_user_notes(user_id, include_retired=False):
     if not include_retired:
         notes = [n for n in notes if n["confidence"] != "retired"]
     return notes
+
+
+# ─── Onboarding state machine (P0-A) ─────────────────────────────
+#
+# Completion is a DERIVED predicate over five stored fields — code
+# decides, the LLM only fills fields via markers. started_at = the
+# first coach send to this user.
+
+def set_agreed_bite(user_id, bite_text, source="llm_marker",
+                    decision_id=None):
+    """Save the agreed first bite WITHOUT a phase transition — under
+    the onboarding state machine, the phase flips only when the full
+    checklist completes (check_and_complete_onboarding), not on the
+    bite alone. commit_first_bite (bite + forced transition) remains
+    for the operator rescue endpoint."""
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET agreed_first_bite = {_P}, "
+        f"agreed_at = {_P} WHERE user_id = {_P}",
+        (bite_text, datetime.now().isoformat(), user_id))
+    conn.commit()
+    conn.close()
+    print(f"  [DB] First bite saved for {user_id}: {bite_text!r}", flush=True)
+    log_event(user_id, "bite_committed",
+              {"bite": bite_text, "decision_id": decision_id}, source=source)
+
+
+def save_learning_path(user_id, direction, project="",
+                       done_condition="", source="llm_marker"):
+    """Append a learning-path version (T8; [PATH:] writes v1).
+    current_bite mirrors agreed_first_bite at write time so the path
+    row is self-contained."""
+    ensure_user_profile_row(user_id)
+    prof = get_user_profile_by_id(user_id) or {}
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT MAX(version) AS v FROM learning_paths WHERE user_id = {_P}",
+        (user_id,))
+    row = _fetchone(cur)
+    version = (row["v"] or 0) + 1 if row else 1
+    _execute(conn,
+        f"INSERT INTO learning_paths (user_id, version, ts, direction, "
+        f" project, project_done_condition, current_bite, changed_by) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+        (user_id, version, datetime.now().isoformat(), direction,
+         project, done_condition, prof.get("agreed_first_bite") or "",
+         source))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "path_set",
+              {"version": version, "direction": direction,
+               "project": project, "done_condition": done_condition},
+              source=source)
+    return version
+
+
+def get_current_path(user_id):
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM learning_paths WHERE user_id = {_P} "
+        f"ORDER BY version DESC LIMIT 1", (user_id,))
+    row = _fetchone(cur)
+    conn.close()
+    return row
+
+
+def save_user_schedule(user_id, windows, raw_text="",
+                       source="llm_marker"):
+    """Append a schedule version. windows: [{"start": "HH:MM",
+    "end": "HH:MM"}] in the user's local day. The hourly tick (P0-C)
+    consumes the latest version."""
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT MAX(version) AS v FROM user_schedule WHERE user_id = {_P}",
+        (user_id,))
+    row = _fetchone(cur)
+    version = (row["v"] or 0) + 1 if row else 1
+    _execute(conn,
+        f"INSERT INTO user_schedule (user_id, version, ts, windows_json, "
+        f" raw_text, source) VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+        (user_id, version, datetime.now().isoformat(),
+         json.dumps(windows, ensure_ascii=False), raw_text, source))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "schedule_set",
+              {"version": version, "windows": windows,
+               "raw": raw_text[:200]}, source=source)
+    return version
+
+
+def get_user_schedule(user_id):
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM user_schedule WHERE user_id = {_P} "
+        f"ORDER BY version DESC LIMIT 1", (user_id,))
+    row = _fetchone(cur)
+    conn.close()
+    return row
+
+
+def mark_onboarding_started(user_id):
+    """Idempotent: stamp onboarding_started_at at the first coach
+    send to this user."""
+    ensure_user_profile_row(user_id)
+    prof = get_user_profile_by_id(user_id) or {}
+    if prof.get("onboarding_started_at"):
+        return prof["onboarding_started_at"]
+    now = datetime.now().isoformat()
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET onboarding_started_at = {_P} "
+        f"WHERE user_id = {_P}", (now, user_id))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "onboarding_started", {}, source="server")
+    return now
+
+
+ONBOARDING_FIELDS = ("goal", "path", "bite", "ignition_marker", "schedule")
+
+
+def get_onboarding_state(user_id):
+    """→ {'started_at', 'completed_at', 'missing': [...], 'filled':
+    [...]} — the checklist, computed mechanically from stored data."""
+    prof = get_user_profile_by_id(user_id) or {}
+    filled = []
+    if (prof.get("agreed_goal") or "").strip():
+        filled.append("goal")
+    if get_current_path(user_id):
+        filled.append("path")
+    if (prof.get("agreed_first_bite") or "").strip():
+        filled.append("bite")
+    if (prof.get("ignition_marker") or "").strip():
+        filled.append("ignition_marker")
+    if get_user_schedule(user_id):
+        filled.append("schedule")
+    return {
+        "started_at": prof.get("onboarding_started_at"),
+        "completed_at": prof.get("onboarding_completed_at"),
+        "filled": filled,
+        "missing": [f for f in ONBOARDING_FIELDS if f not in filled],
+    }
+
+
+def check_and_complete_onboarding(user_id, force=False):
+    """If all five fields are filled (or force=True, operator
+    override/backfill) and not yet completed: stamp completed_at,
+    transition discovery→first_bite, emit events. Returns True if
+    completion happened on THIS call."""
+    state = get_onboarding_state(user_id)
+    if state["completed_at"]:
+        return False
+    if state["missing"] and not force:
+        return False
+    now = datetime.now().isoformat()
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET onboarding_completed_at = {_P} "
+        f"WHERE user_id = {_P}", (now, user_id))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "onboarding_completed",
+              {"forced": force, "missing_at_completion": state["missing"]},
+              source="admin" if force else "server")
+    phase = get_user_phase(user_id)["phase"]
+    if phase == "discovery":
+        conn = get_conn()
+        _execute(conn,
+            f"UPDATE user_profiles SET phase = 'first_bite' "
+            f"WHERE user_id = {_P}", (user_id,))
+        conn.commit()
+        conn.close()
+        log_event(user_id, "phase_transition",
+                  {"to": "first_bite", "via": "onboarding_completed"},
+                  source="server")
+    print(f"  [DB] Onboarding completed for {user_id} (forced={force})",
+          flush=True)
+    return True
 
 
 # ─── Sequence plans (exploration v2) ─────────────────────────────

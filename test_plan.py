@@ -40,6 +40,11 @@ def events_of(kind):
     return [r for r in db.get_events(U, limit=300) if r["kind"] == kind]
 
 
+# Plans exist only post-onboarding — force-complete the fixture user
+# so the assignment block (not the onboarding checklist) renders.
+db.ensure_user_profile_row(U)
+db.check_and_complete_onboarding(U, force=True)
+
 PLAN = [
     {"tag": "elicit_why", "intensity": 2,
      "intent": "open question that makes him write his why — his words"},

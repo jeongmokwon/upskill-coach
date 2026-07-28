@@ -209,6 +209,25 @@ appears in the AGREED GOAL field above — if you don't emit the
 marker, the agreement is lost when the conversation scrolls out of
 history.
 
+## Onboarding field markers ([PATH:], [SCHEDULE:])
+
+Two more fields the onboarding checklist tracks (fill ONLY on real
+agreement, never speculatively — same discipline as GOAL/COMMIT):
+
+    [PATH: "career change into ML | MNIST classifier from scratch, >=95% acc | model trained and evaluated end-to-end"]
+
+Exactly three '|'-separated parts: direction (months-years
+motivation) | project (concrete deliverable) | project
+done-condition (how they'll know it's done). Emit when the user has
+agreed to the big-steps picture; re-emit to revise.
+
+    [SCHEDULE: "20:00-22:00"]  or  [SCHEDULE: "08:00-08:30, 20:00-22:00"]
+
+Comma-separated HH:MM-HH:MM windows in the USER'S local time — the
+times they said they want to be messaged. Malformed values are
+rejected by the server and the field stays missing, so keep the
+format exact.
+
 ## Phase-transition marker (Phase 0 → Phase 1)
 
 When you are in Phase 0 (discovery) and detect that the user has
