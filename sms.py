@@ -465,10 +465,15 @@ def _build_system_prompt(slot, user_id):
     versions = {"sms_shared": h_shared, prompt_name: h_slot,
                 **ctx_versions}
     parts = [context, rendered_shared, rendered_slot]
-    # Assignment last — recency makes it the most salient instruction.
-    plan_block = _build_plan_block(user_id)
-    if plan_block:
-        parts.append(plan_block)
+    # Last block wins on recency. Dormancy gate outranks the plan:
+    # when the server detects dormancy, the assignment is swapped
+    # for the zero-demand re-opening directive (plan paused).
+    if _is_dormant(user_id):
+        parts.append(_build_dormant_block(user_id))
+    else:
+        plan_block = _build_plan_block(user_id)
+        if plan_block:
+            parts.append(plan_block)
     return "\n\n---\n\n".join(parts), versions
 
 
@@ -578,6 +583,54 @@ def _process_plan_markers(user_id, text, trigger):
     text = _STAY_RE.sub("", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
+
+
+# Dormancy gate (operator decision 2026-07-28): the "no tasks while
+# dormant / zero-demand re-opening" rules were being left to the
+# LLM's judgment and were observably not followed. They are now
+# MECHANICAL: the server detects dormancy before the call and swaps
+# the sequence assignment for a re-opening directive. A fresh user
+# who has never messaged is new, not dormant.
+DORMANT_AFTER_H = int(os.environ.get("DORMANT_AFTER_H", "48"))
+
+_DORMANT_FORBIDDEN_TAGS = frozenset({
+    "micro_ask", "choice_offer", "implementation_cue", "handoff",
+    "secure_commit", "map",
+})
+
+
+def _dormancy_hours(user_id):
+    """Hours since the user's last inbound message, or None if they
+    have never messaged."""
+    last_in = db.get_last_event(user_id, "sms_in")
+    if not last_in:
+        return None
+    return (datetime.now()
+            - datetime.fromisoformat(last_in["ts"])).total_seconds() / 3600
+
+
+def _is_dormant(user_id):
+    hours = _dormancy_hours(user_id)
+    return hours is not None and hours >= DORMANT_AFTER_H
+
+
+def _build_dormant_block(user_id):
+    hours = _dormancy_hours(user_id)
+    return f"""## Mode: re-opening after dormancy (server-detected — OVERRIDES the sequence plan)
+
+The user has been silent for ~{int(hours)}h. Tonight's message is a
+ZERO-DEMAND re-opening. This is mechanical, not your judgment call:
+
+- No tasks, no bites, no asks, no laptop, no "오늘 저녁?" scheduling
+  pokes. Nothing the user could fail to do.
+- Allowed move families: connect, validate, elicit_why (@1 at
+  most), reframe_state, release — or hold (send nothing) if even a
+  warm touch would read as pressure today.
+- The sequence plan is PAUSED — do not perform its current step.
+  It resumes once the user speaks again.
+- Success tonight = the message is safe to read and not answer. An
+  unanswered zero-demand message costs nothing; an unanswered ask
+  poisons the channel."""
 
 
 def _build_plan_block(user_id):
@@ -1062,6 +1115,18 @@ def handle_cron_tick(slot):
     text = _process_plan_markers(user_id, text, trigger=f"cron_{slot}")
     expect, text = _process_expect_marker(text)
     steps, text = _process_step_marker(user_id, text)
+
+    # Dormant-mode enforcement (detection tier): the step tags confess
+    # if the planner played an ask into a dormant channel.
+    if _is_dormant(user_id):
+        bad = [s["tag"] for s in steps
+               if s.get("tag") in _DORMANT_FORBIDDEN_TAGS]
+        if bad:
+            print(f"[SMS] ⚠️ dormant-mode violation: {bad}", flush=True)
+            db.log_event(user_id, "planner_violation",
+                         {"mode": "dormant_reopen",
+                          "forbidden_steps": bad,
+                          "llm_call_id": llm_call_id}, source="cron")
 
     # The planner may CHOOSE silence on a scheduled send ([STEP: hold]
     # with no message body) — deliberate non-action is an action.
