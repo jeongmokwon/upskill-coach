@@ -125,7 +125,10 @@ class FakeClient:
 
 
 sms.anthropic.Anthropic = FakeClient
-sms.handle_cron_tick("evening")
+# P0-C: this user agreed a schedule above, so fixed crons stand down
+# (user_schedule_active) — the send now arrives via the hourly
+# schedule tick hitting the 20:00 window's start hour.
+sms.handle_schedule_tick(now=datetime.now().replace(hour=20, minute=5))
 check("first coach send stamps onboarding_started_at",
       db.get_onboarding_state(U)["started_at"] is not None
       and len(events_of("onboarding_started")) == 1)
