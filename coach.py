@@ -1851,8 +1851,10 @@ can sign up without it and we will contact you by email.</p>
     <label for="consent_checkins">I consent to receive <strong>coaching
     check-in</strong> text messages from Theo (Green Gables Studio LLC)
     at the phone number provided — scheduled check-ins and reminders
-    about my study plan. Message &amp; data rates may apply. Reply HELP
-    for help, STOP to opt out.</label>
+    about my study plan. Up to 4 messages per day total across all Theo
+    messages; actual frequency varies with my replies. Message and data
+    rates may apply. Reply HELP for help or STOP to cancel at any
+    time.</label>
   </div>
 
   <div style="margin-top:12px; display:flex; gap:10px; align-items:flex-start;">
@@ -1861,20 +1863,17 @@ can sign up without it and we will contact you by email.</p>
     <label for="consent_support">I consent to receive <strong>two-way
     learning support</strong> text messages from Theo (Green Gables
     Studio LLC) at the phone number provided — conversational replies
-    that help me during my study sessions. Message &amp; data rates may
-    apply. Reply HELP for help, STOP to opt out.</label>
+    that help me during my study sessions. Up to 4 messages per day
+    total across all Theo messages; actual frequency varies with my
+    replies. Message and data rates may apply. Reply HELP for help or
+    STOP to cancel at any time.</label>
   </div>
 
-  <p style="margin-top:16px"><strong>Consent is optional:</strong> both
-  checkboxes are optional and you can complete this signup without
-  checking either. Consent is not a condition of any purchase.</p>
-  <p><strong>Message Frequency:</strong> Up to 4 messages per day
-  combined across both message types; actual frequency varies with
-  your replies.</p>
-  <p><strong>Standard Rates:</strong> Message and data rates may apply
-  depending on your mobile phone service plan.</p>
-  <p><strong>Help &amp; Stop:</strong> Reply HELP for help or STOP to
-  cancel at any time.</p>
+  <p style="margin-top:16px"><strong>Consent is optional:</strong> each
+  checkbox above is a separate, optional consent for that message type
+  only, and you can complete this signup without checking either.
+  Consent is not required to use Theo and is not a condition of any
+  purchase.</p>
 
   <p><a href="/terms">Terms of Service</a> · <a href="/privacy">Privacy Policy</a></p>
 
