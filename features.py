@@ -39,6 +39,10 @@ def compute_features(user_id, now=None):
     signal, not an error)."""
     now = now or datetime.now()
     feats = {
+        # Wall-clock on the USER's clock. Without this the planner
+        # inferred the hour from the slot name and asserted it —
+        # observed: a noon send opening with "저녁 됐네".
+        "local_time": (now + timedelta(hours=TZ_OFFSET_H)).strftime("%H:%M"),
         "position": "opener",
         "last_steps": [],
         "silence_streak_days": None,
@@ -108,7 +112,10 @@ def compute_features(user_id, now=None):
 
 def render_features(feats):
     """One-line natural rendering for the planner prompt."""
-    parts = [f"position={feats['position']}"]
+    parts = []
+    if feats.get("local_time"):
+        parts.append(f"local_time={feats['local_time']}")
+    parts.append(f"position={feats['position']}")
     if feats["last_steps"]:
         parts.append("last_steps=" + ",".join(feats["last_steps"]))
     if feats["silence_streak_days"] is not None:

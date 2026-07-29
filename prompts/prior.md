@@ -47,10 +47,10 @@ never the reverse.
   a real choice removes the pressure: "A or B — you pick" often
   succeeds where "do A" fails.
 - [established] **When-then plans beat willpower.** "When I sit on
-  the couch after the kids are asleep, then I open Colab" reliably
-  outperforms "I'll study tonight" — one of the best-replicated
-  effects in behavior change. Anchor asks to routines that already
-  exist, not to intentions.
+  the couch after the kids are asleep, then I open my work"
+  reliably outperforms "I'll study tonight" — one of the
+  best-replicated effects in behavior change. Anchor asks to
+  routines that already exist, not to intentions.
 - [established] **Unanswered messages poison the channel.** Every
   ignored ping trains the user to ignore the next one. Coach-side
   silence resets this. After the user has gone quiet, the first
