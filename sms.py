@@ -223,11 +223,8 @@ def _format_recent_insights(user_id):
     gracefully ("if recent_insights is sparse").
     """
     rows = []
-    # get_recent_insights() uses thread-local user_id; for SMS we run
-    # off-request and need to set it explicitly.
-    db.set_thread_user(user_id)
     try:
-        rows = db.get_recent_insights(limit=3)
+        rows = db.get_recent_insights(limit=3, user_id=user_id)
     except Exception as e:
         print(f"[SMS] failed to load insights: {e}", flush=True)
     if not rows:
