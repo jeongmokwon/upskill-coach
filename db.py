@@ -1137,12 +1137,14 @@ def save_insight(analysis, session_id=None):
     print(f"  [DB] Insight saved for session {sid}")
 
 
-def get_recent_insights(limit=3):
-    """Get most recent N insights for the current user."""
+def get_recent_insights(limit=3, user_id=None):
+    """Get most recent N insights. `user_id=None` falls back to the
+    thread-local current user (legacy web-chat convention); pilot-path
+    callers pass user_id explicitly (T10)."""
     conn = get_conn()
     cur = _execute(conn,
         f"SELECT * FROM insights WHERE user_id = {_P} ORDER BY id DESC LIMIT {_P}",
-        (_uid(), limit)
+        (user_id or _uid(), limit)
     )
     result = _fetchall(cur)
     conn.close()
