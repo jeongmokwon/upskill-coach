@@ -1057,8 +1057,13 @@ def handle_inbound(from_number, body):
     expect, reply_text = _process_expect_marker(reply_text)
     steps, reply_text = _process_step_marker(user_id, reply_text)
     # Field fills above may have completed the checklist — code, not
-    # the LLM, makes that call.
-    db.check_and_complete_onboarding(user_id)
+    # the LLM, makes that call. Completion fires the initial plan
+    # generation in the background (P0-B) so this reply isn't
+    # delayed; the operator reviews /plan + /notes before the first
+    # sequence-mode send.
+    if db.check_and_complete_onboarding(user_id):
+        import genplan
+        genplan.generate_async(user_id)
     db.mark_onboarding_started(user_id)
     send_sms(from_number, reply_text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", reply_text, "out")
@@ -1227,7 +1232,9 @@ def handle_cron_tick(slot):
     text = _process_plan_markers(user_id, text, trigger=f"cron_{slot}")
     expect, text = _process_expect_marker(text)
     steps, text = _process_step_marker(user_id, text)
-    db.check_and_complete_onboarding(user_id)
+    if db.check_and_complete_onboarding(user_id):
+        import genplan
+        genplan.generate_async(user_id)
     db.mark_onboarding_started(user_id)
 
     # Dormant-mode enforcement (detection tier): the step tags confess

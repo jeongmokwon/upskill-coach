@@ -1228,6 +1228,37 @@ async def _notes_handler(request):
     return web.Response(text="\n".join(parts), content_type="text/plain")
 
 
+async def _plan_generate_handler(request):
+    """Run initial plan generation now (P0-B) — for reruns after a
+    p7_generation_failed, or manual triggering during rehearsal.
+
+    POST /plan/generate?secret=...[&user_id=X]
+    """
+    import genplan
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = (request.query.get("user_id", "").strip()
+               or os.environ.get("TUTOR_USER_ID", "").strip())
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+
+    result = await asyncio.get_event_loop().run_in_executor(
+        None, genplan.generate, user_id)
+    if result is None:
+        return web.json_response(
+            {"ok": False,
+             "hint": "see p7_generation_failed in /debug/timeline"},
+            status=500)
+    return web.json_response({"ok": True, **result})
+
+
 async def _onboarding_handler(request):
     """Onboarding state machine — observation + operator override.
 
@@ -2029,6 +2060,7 @@ def start_ws_server():
         app.router.add_post("/plan", _plan_handler)
         app.router.add_get("/onboarding", _onboarding_handler)
         app.router.add_post("/onboarding", _onboarding_handler)
+        app.router.add_post("/plan/generate", _plan_generate_handler)
         app.router.add_post("/annotate/run", _annotate_run_handler)
         app.router.add_post("/sms/set-bite", _sms_set_bite_handler)
         # Screen observer — local agent (observer.py) endpoints.
