@@ -112,21 +112,11 @@ check("fixed morning cron also suppressed",
 
 # ── 4. window start hour match → fires, with window in payloads ──────
 print("4) window fires")
-# Seed the thread with an explicit 'T'-isoformat timestamp: morning-
-# slot thread-keeping filters messages by `timestamp > phase_started_at`
-# as strings, and SQLite's CURRENT_TIMESTAMP default writes a
-# space-separated UTC form that sorts before any same-day isoformat
-# value ('T' > ' '), so rows saved by save_sms_message are invisible
-# to the filter in this local-sqlite harness (prod Postgres casts both
-# properly). Without a visible thread a morning-mapped window skips.
-_c = db.get_conn()
-db._execute(_c,
-    f"INSERT INTO messages (session_id, user_id, role, content, channel, "
-    f"direction, timestamp) VALUES ({db._P}, {db._P}, 'user', '내일 봐요', "
-    f"'sms', 'in', {db._P})",
-    (db._sms_sid(U), U, (real + timedelta(minutes=1)).isoformat()))
-_c.commit()
-_c.close()
+# Seed the thread so a morning-mapped window doesn't skip on
+# no_thread_this_phase. save_sms_message stamps an isoformat
+# timestamp (later than phase_started_at, which section 2's evening
+# fire set), so the row is visible to the `timestamp > since` filter.
+db.save_sms_message(U, "user", "내일 봐요", "in")
 r = sms.handle_schedule_tick(now=real)
 ev = cron_events()
 check("tick at the window's start hour fires", r is not None)
