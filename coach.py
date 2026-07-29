@@ -1524,46 +1524,30 @@ async def _observe_poll_handler(request):
 
 _PAGE_CSS = """
 body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
-       max-width: 720px; margin: 40px auto; padding: 0 24px; color: #1a1a1a;
-       line-height: 1.6; }
+       max-width: 720px; margin: 24px auto 40px; padding: 0 24px;
+       color: #1a1a1a; line-height: 1.6; }
 h1 { font-size: 28px; margin-bottom: 8px; }
 h2 { font-size: 18px; margin-top: 28px; margin-bottom: 4px; }
+h3 { font-size: 16px; margin-top: 20px; margin-bottom: 2px; }
 .meta { color: #888; font-size: 13px; margin-bottom: 24px; }
 p { margin: 8px 0; }
 ul { padding-left: 22px; }
 li { margin: 4px 0; }
 a { color: #2563eb; }
-.footer { margin-top: 48px; font-size: 13px; color: #666; }
-"""
-
-
-def _legal_page(title, body_html):
-    return f"""<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8">
-<title>{title} — Theo</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>{_PAGE_CSS}</style>
-</head><body>
-{body_html}
-<div class="footer">
-  <p>Theo · <a href="/">Home</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
-  <p>Theo is a product of Green Gables Studio LLC · © 2026 Green Gables Studio LLC</p>
-</div>
-</body></html>"""
-
-
-# ─── Public landing page (/) ─────────────────────────────────────────
-#
-# The business-facing homepage carriers open during Toll-Free
-# Verification review (rejection 30489: "website must be established
-# and active" — the reviewer saw only the app shell). Static inline
-# HTML, fully readable without JavaScript. The SMS-program wording
-# here must stay consistent with /privacy, /terms, and /sms-signup
-# and with the TFV submission (up to 4 msgs/day, HELP/STOP, data
-# rates, web-form opt-in).
-
-_LANDING_CSS = _PAGE_CSS + """
+.footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #eee;
+          font-size: 13px; color: #666; }
+.site-nav { display: flex; align-items: center; justify-content: space-between;
+            gap: 16px; padding-bottom: 16px; border-bottom: 1px solid #eee;
+            margin-bottom: 20px; flex-wrap: wrap; }
+.site-nav .brand { font-weight: 700; font-size: 18px; color: #1a1a1a;
+                   text-decoration: none; }
+.site-nav .links { display: flex; gap: 14px; align-items: center;
+                   flex-wrap: wrap; font-size: 14px; }
+.site-nav .links a { color: #444; text-decoration: none; }
+.site-nav .links a:hover { color: #2563eb; }
+.site-nav .nav-cta { padding: 7px 14px; border-radius: 8px;
+                     background: #2563eb; color: #fff !important;
+                     font-weight: 600; }
 .hero { margin-top: 24px; }
 .hero h1 { font-size: 40px; margin-bottom: 4px; }
 .tagline { font-size: 19px; color: #444; margin-bottom: 16px; }
@@ -1581,13 +1565,108 @@ _LANDING_CSS = _PAGE_CSS + """
 .sms-box { margin-top: 28px; padding: 18px 20px; border: 1px solid #ddd;
            border-radius: 10px; background: #f8f9fb; font-size: 15px; }
 .sms-box h2 { margin-top: 0; }
+.shot { margin: 28px 0; }
+.shot img { width: 100%; border: 1px solid #e3e3e3; border-radius: 12px;
+            box-shadow: 0 8px 30px rgba(0,0,0,.08); }
+.shot figcaption { font-size: 13px; color: #777; margin-top: 8px;
+                   text-align: center; }
 """
 
+_SITE_ORIGIN = "https://www.learningtheo.com"
+
+_SITE_DESC = ("Theo is a personal AI learning coach by Green Gables "
+              "Studio LLC — coaching check-ins and two-way learning "
+              "support for your own study goals. Invite-only pilot.")
+
+_SITE_NAV = """
+<nav class="site-nav">
+  <a class="brand" href="/">Theo</a>
+  <div class="links">
+    <a href="/#how-it-works">How it works</a>
+    <a href="/faq">FAQ</a>
+    <a href="/about">About</a>
+    <a href="/contact">Contact</a>
+    <a class="nav-cta" href="/app">Open Theo</a>
+  </div>
+</nav>
+"""
+
+_SITE_FOOTER = """
+<footer class="footer">
+  <p><a href="/">Home</a> · <a href="/faq">FAQ</a> · <a href="/about">About</a> ·
+  <a href="/contact">Contact</a> · <a href="/sms-signup">Pilot Signup</a> ·
+  <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
+  <p>Green Gables Studio LLC · 2605 Miller Avenue, Unit 3401, Mountain View,
+  CA 94040 · <a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a></p>
+  <p>Theo is a product of Green Gables Studio LLC · © 2026 Green Gables Studio LLC</p>
+</footer>
+"""
+
+
+def _site_page(title, body_html, desc=None, path="/"):
+    """Shared page chrome for all public pages: nav header, meta/OG
+    tags, favicon, footer with full business details. Static HTML,
+    readable without JavaScript — carriers review these pages."""
+    desc = desc or _SITE_DESC
+    return f"""<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>{title}</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="{desc}">
+<meta property="og:title" content="{title}">
+<meta property="og:description" content="{desc}">
+<meta property="og:type" content="website">
+<meta property="og:url" content="{_SITE_ORIGIN}{path}">
+<meta property="og:image" content="{_SITE_ORIGIN}/site_assets/theo-app.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" type="image/svg+xml" href="/site_assets/favicon.svg">
+<style>{_PAGE_CSS}</style>
+</head><body>
+{_SITE_NAV}
+{body_html}
+{_SITE_FOOTER}
+</body></html>"""
+
+
+_LEGAL_PATHS = {"Privacy Policy": "/privacy",
+                "Terms and Conditions": "/terms",
+                "SMS Signup": "/sms-signup"}
+
+
+def _legal_page(title, body_html):
+    """Back-compat wrapper: legal/compliance pages get the same site
+    chrome; their body content is unchanged."""
+    return _site_page(f"{title} — Theo", body_html,
+                      path=_LEGAL_PATHS.get(title, "/"))
+
+
+# ─── Public landing page (/) ─────────────────────────────────────────
+#
+# The business-facing homepage carriers open during Toll-Free
+# Verification review (rejection 30489: "website must be established
+# and active" — the reviewer saw only the app shell). Static inline
+# HTML, fully readable without JavaScript. The SMS-program wording
+# here must stay consistent with /privacy, /terms, and /sms-signup
+# and with the TFV submission (up to 4 msgs/day, HELP/STOP, data
+# rates, web-form opt-in).
 
 # Registered business address shown on the landing page. Must match
 # the Twilio Business Profile (TFV round-2: business details on the
 # website must match the verification submission).
 _BUSINESS_ADDRESS = "2605 Miller Avenue, Unit 3401, Mountain View, CA 94040"
+
+_BUSINESS_BLOCK = f"""
+<div class="sms-box">
+  <h2>Business &amp; contact information</h2>
+  <p><strong>Legal name:</strong> Green Gables Studio LLC</p>
+  <p><strong>Product / DBA:</strong> Theo</p>
+  <p><strong>Address:</strong> {_BUSINESS_ADDRESS}</p>
+  <p><strong>Email:</strong>
+  <a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a></p>
+  <p><strong>Website:</strong> <a href="/">www.learningtheo.com</a></p>
+</div>
+"""
 
 
 async def _landing_handler(request):
@@ -1610,7 +1689,7 @@ async def _landing_handler(request):
   <a class="cta" href="/app">Open Theo</a>
 </div>
 
-<h2>How it works</h2>
+<h2 id="how-it-works">How it works</h2>
 <ol class="steps">
   <li><strong>Sign up for the pilot.</strong> Pilot members join through
       our <a href="/sms-signup">web signup form</a>. Text-message
@@ -1623,6 +1702,12 @@ async def _landing_handler(request):
       whatever you are already learning with — Theo coaches alongside
       your course, tutorial, or project rather than replacing it.</li>
 </ol>
+
+<figure class="shot">
+  <img src="/site_assets/theo-app.png"
+       alt="Theo web app — the chat home screen where you ask your coach anything">
+  <figcaption>The Theo web app — ask anything, get coached step by step.</figcaption>
+</figure>
 
 <div class="sms-box">
   <h2>Theo SMS program</h2>
@@ -1644,36 +1729,187 @@ Mountain View, California. The studio designs and operates Theo
 end-to-end: the coaching program, the web application at
 learningtheo.com, and the SMS coaching service described above.
 "Theo" is the product and brand name under which Green Gables Studio
-LLC provides this service.</p>
+LLC provides this service. Read more about the studio and why we are
+building Theo on the <a href="/about">About page</a>, or see common
+questions in the <a href="/faq">FAQ</a>.</p>
 
-<div class="sms-box">
-  <h2>Business &amp; contact information</h2>
-  <p><strong>Legal name:</strong> Green Gables Studio LLC</p>
-  <p><strong>Product / DBA:</strong> Theo</p>
-  <p><strong>Address:</strong> {_BUSINESS_ADDRESS}</p>
-  <p><strong>Email:</strong>
-  <a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a></p>
-  <p><strong>Website:</strong> <a href="/">www.learningtheo.com</a></p>
-</div>
+{_BUSINESS_BLOCK}
 """
-    html = f"""<!DOCTYPE html>
-<html><head>
-<meta charset="utf-8">
-<title>Theo — AI learning coach</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Theo is a personal AI learning coach
-by Green Gables Studio LLC — SMS coaching check-ins and two-way
-learning support. Invite-only pilot.">
-<style>{_LANDING_CSS}</style>
-</head><body>
-{body}
-<div class="footer">
-  <p><a href="/sms-signup">SMS Signup</a> · <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> ·
-  <a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a></p>
-  <p>Theo is a product of Green Gables Studio LLC · © 2026 Green Gables Studio LLC</p>
-</div>
-</body></html>"""
-    return web.Response(text=html, content_type="text/html")
+    return web.Response(text=_site_page("Theo — AI learning coach", body,
+                                        path="/"),
+                        content_type="text/html")
+
+
+async def _about_handler(request):
+    body = f"""
+<h1>About</h1>
+<div class="meta">Green Gables Studio LLC · Mountain View, California</div>
+
+<p>Green Gables Studio LLC is an independent software studio that
+designs and operates <strong>Theo</strong>, an AI learning coach. The
+studio builds the whole service in-house: the coaching program, the
+web application at learningtheo.com, and the SMS coaching service.</p>
+
+<h2>Why we are building Theo</h2>
+<p>Theo comes out of a simple observation from our founder's own
+years of self-directed learning: adults who study on their own rarely
+fail because the material is too hard. They fail because sitting down
+and starting is hard. Courses, tutorials, and textbooks are everywhere
+— what's missing is the thing a good human coach provides: someone who
+knows how <em>you</em> work, notices when you stall, and makes the
+next step small enough to actually take.</p>
+
+<p>Before writing a line of product code, our founder — Jeongmo Kwon,
+a former iOS app developer and startup founder — spent months running
+the coaching loop manually as a self-experiment: daily coaching
+messages, real study sessions, and careful notes on what actually got
+a tired adult to open the laptop and begin. Theo is that experiment,
+productized: an AI coach that layers on top of whatever you are
+already using to learn, rather than another content library.</p>
+
+<h2>How Theo coaches</h2>
+<ul>
+  <li><strong>Start-first coaching.</strong> Theo's job begins before
+      the study session: check-ins, tiny first steps, and
+      conversations that lower the cost of starting.</li>
+  <li><strong>Your materials, not ours.</strong> Theo carries no
+      course catalog. It coaches you through your own course,
+      tutorial, textbook, or project.</li>
+  <li><strong>Grounded in behavioral science.</strong> The coaching
+      approach draws on established research — self-determination
+      theory, implementation intentions, and motivational
+      interviewing — rather than streaks and badges.</li>
+  <li><strong>Personal by design.</strong> Theo adapts its coaching
+      to how each learner actually starts, stalls, and recovers.</li>
+</ul>
+
+<h2>The pilot</h2>
+<p>Theo is currently an invite-only pilot with a small group of
+5&ndash;10 learners with US phone numbers. We keep it small on
+purpose: at this stage every participant gets hands-on attention, and
+every coaching decision is reviewed by a person. Participants join
+through our <a href="/sms-signup">signup form</a>; text-message
+coaching is optional and requires explicit per-purpose consent.
+There is no charge to participate in the pilot.</p>
+
+{_BUSINESS_BLOCK}
+"""
+    return web.Response(
+        text=_site_page("About — Theo", body,
+                        desc=("Green Gables Studio LLC is the independent "
+                              "software studio behind Theo, an AI learning "
+                              "coach grounded in behavioral science."),
+                        path="/about"),
+        content_type="text/html")
+
+
+async def _faq_handler(request):
+    body = """
+<h1>Frequently asked questions</h1>
+<div class="meta">Theo · Green Gables Studio LLC</div>
+
+<h2>About Theo</h2>
+
+<h3>What is Theo?</h3>
+<p>Theo is a personal AI learning coach. It helps you actually start
+and stay in study sessions — with coaching conversations in the web
+app and, if you opt in, by text message.</p>
+
+<h3>Is Theo a course?</h3>
+<p>No. Theo has no content library and doesn't replace your
+materials. You bring whatever you are learning with — an online
+course, YouTube tutorials, a textbook, your own project — and Theo
+coaches you through it.</p>
+
+<h3>Who can join?</h3>
+<p>Theo is currently an invite-only pilot with 5&ndash;10
+participants. SMS coaching requires a US phone number. If you'd like
+to be considered, leave your details on the
+<a href="/sms-signup">signup form</a> and we'll reach out as spots
+open.</p>
+
+<h3>How much does it cost?</h3>
+<p>Nothing during the pilot. Participation is free, and consent to
+text messages is not a condition of any purchase.</p>
+
+<h3>What do I need to use Theo?</h3>
+<p>A web browser for the Theo app. For SMS coaching, a US mobile
+number and your own opt-in on the signup form.</p>
+
+<h2>The SMS program</h2>
+
+<h3>How do I sign up for text messages?</h3>
+<p>On the <a href="/sms-signup">signup form</a>, each of the two
+message programs — coaching check-ins and two-way learning support —
+has its own separate, optional checkbox. You only receive the message
+types you checked, and only after you submit the form. No messages
+are ever sent without your explicit consent.</p>
+
+<h3>Do I have to receive texts to use Theo?</h3>
+<p>No. Text-message consent is optional. You can join the pilot with
+just your email and use the web app without any SMS.</p>
+
+<h3>How many messages will I get?</h3>
+<p>Up to 4 messages per day total across all Theo messages. The
+actual number varies with your replies and your study schedule.</p>
+
+<h3>Does it cost anything to receive messages?</h3>
+<p>Theo doesn't charge for messages, but standard message and data
+rates from your mobile carrier may apply.</p>
+
+<h3>How do I stop messages?</h3>
+<p>Reply <strong>STOP</strong> at any time. You'll get a single
+confirmation and then no further messages. Reply
+<strong>HELP</strong> at any time for help and contact
+information.</p>
+
+<h3>What happens to my information?</h3>
+<p>We collect only what the signup form asks for, use it only to run
+the pilot, and never sell, rent, or share mobile information with
+third parties for marketing. Details are in our
+<a href="/privacy">Privacy Policy</a> and
+<a href="/terms">Terms of Service</a>.</p>
+"""
+    return web.Response(
+        text=_site_page("FAQ — Theo", body,
+                        desc=("Common questions about Theo, the AI learning "
+                              "coach by Green Gables Studio LLC, and its "
+                              "opt-in SMS coaching program."),
+                        path="/faq"),
+        content_type="text/html")
+
+
+async def _contact_handler(request):
+    body = f"""
+<h1>Contact</h1>
+<div class="meta">Green Gables Studio LLC</div>
+
+<p>Questions about Theo, the pilot, or the SMS program? We'd love to
+hear from you.</p>
+
+<ul>
+  <li><strong>Email:</strong>
+      <a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a>
+      — we typically respond within 1&ndash;2 business days.</li>
+  <li><strong>Mail:</strong> Green Gables Studio LLC,
+      {_BUSINESS_ADDRESS}</li>
+  <li><strong>SMS participants:</strong> reply <strong>HELP</strong>
+      to any Theo message for help, or <strong>STOP</strong> to cancel
+      at any time.</li>
+</ul>
+
+<p>Interested in joining the pilot? Leave your details on the
+<a href="/sms-signup">signup form</a>.</p>
+
+{_BUSINESS_BLOCK}
+"""
+    return web.Response(
+        text=_site_page("Contact — Theo", body,
+                        desc=("Contact Green Gables Studio LLC, the studio "
+                              "behind Theo — email, mailing address, and "
+                              "SMS help."),
+                        path="/contact"),
+        content_type="text/html")
 
 
 async def _privacy_handler(request):
@@ -2041,6 +2277,10 @@ def start_ws_server():
         # compliance phrases.
         app.router.add_get("/privacy", _privacy_handler)
         app.router.add_get("/terms", _terms_handler)
+        # Public site pages (business credibility for TFV + recruits).
+        app.router.add_get("/about", _about_handler)
+        app.router.add_get("/faq", _faq_handler)
+        app.router.add_get("/contact", _contact_handler)
         # SMS pilot opt-in form (also the TFV opt-in policy proof URL).
         app.router.add_get("/sms-signup", _sms_signup_page_handler)
         app.router.add_post("/sms-signup", _sms_signup_submit_handler)
