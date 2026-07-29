@@ -1663,6 +1663,7 @@ def get_current_plan(user_id):
         "steps": json.loads(row["steps_json"]),
         "cursor": prof.get("plan_cursor") or 0,
         "rationale": row["rationale"],
+        "ts": row["ts"],
     }
 
 
