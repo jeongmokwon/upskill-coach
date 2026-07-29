@@ -46,6 +46,11 @@ PROMPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts"
 
 SLOTS = ("morning", "lunch", "afternoon", "evening")
 
+# User-local time is approximated with a fixed offset from server
+# time (same convention as features.py/trace.py/annotate.py — no
+# zoneinfo; DST drift accepted for the pilot).
+TZ_OFFSET_H = int(os.environ.get("TZ_OFFSET_HOURS", "-8"))
+
 # Max one Anthropic Sonnet call per slot. Cheap enough we just always
 # use the same model as the web tutor for now — consistency beats
 # pennies of savings.
@@ -1219,7 +1224,7 @@ def _build_system_prompt_for_reply(user_id):
 
 # ─── Scheduled slot handling ────────────────────────────────────────
 
-def handle_cron_tick(slot):
+def handle_cron_tick(slot, window=None):
     """Run a scheduled slot: decide whether to send, and if so,
     load prompt, call Claude, send WhatsApp.
 
@@ -1232,10 +1237,20 @@ def handle_cron_tick(slot):
       afternoon — always skip (same reason)
       evening  — the anchor slot; discovery or first_bite prompt
                  depending on user's current phase.
+
+    `window` ("HH:MM-HH:MM") is set when the call comes from the
+    per-user schedule tick (P0-C) rather than a fixed cron. It rides
+    along into the cron_tick and sms_out event payloads so the trace
+    shows which agreed window fired — and so the schedule tick can
+    dedupe against the event log.
     """
     if slot not in SLOTS:
         print(f"[SMS] unknown slot {slot!r}", flush=True)
         return None
+
+    # Extra payload fields for window-driven calls; empty for the
+    # legacy fixed crons so their event shape is unchanged.
+    win_extra = {"window": window} if window else {}
 
     user_id = os.environ.get("TUTOR_USER_ID", "").strip()
     to_number = os.environ.get("TUTOR_USER_PHONE", "").strip()
@@ -1253,12 +1268,22 @@ def handle_cron_tick(slot):
         # self-tag). Silence enters the same step-labeled dataset.
         db.log_event(user_id, "cron_tick",
                      {"slot": slot, "action": "skipped", "reason": reason,
-                      "steps": [{"tag": "hold", "intensity": None}]},
+                      "steps": [{"tag": "hold", "intensity": None}],
+                      **win_extra},
                      source="cron")
         return None
 
     if _is_skipped_today(user_id):
         return _skip("user_skip_today")
+
+    # Fixed-slot suppression (P0-C): once a user has an agreed
+    # schedule, the hourly schedule tick owns their sends — the
+    # legacy fixed crons stand down, so a window coinciding with a
+    # fixed slot can never double-send. Calls carrying `window` ARE
+    # the schedule tick and pass through.
+    if window is None and slot in ("morning", "evening") \
+            and db.get_user_schedule(user_id):
+        return _skip("user_schedule_active")
 
     # Slot-specific gating.
     if slot in ("lunch", "afternoon"):
@@ -1367,7 +1392,8 @@ def handle_cron_tick(slot):
                      {"slot": slot, "action": "held_by_planner",
                       "decision_id": fire_decision_id,
                       "llm_call_id": llm_call_id,
-                      "steps": steps, "expect": expect},
+                      "steps": steps, "expect": expect,
+                      **win_extra},
                      source="cron")
         return None
 
@@ -1375,12 +1401,131 @@ def handle_cron_tick(slot):
     db.save_sms_message(user_id, "assistant", text, "out")
     db.log_event(user_id, "cron_tick",
                  {"slot": slot, "action": "fired",
-                  "decision_id": fire_decision_id}, source="cron")
+                  "decision_id": fire_decision_id, **win_extra},
+                 source="cron")
     db.log_event(user_id, "sms_out",
                  {"text": text, "trigger": f"cron_{slot}",
                   "prompt_versions": prompt_versions,
                   "llm_call_id": llm_call_id,
                   "steps": steps, "expect": expect,
-                  "phase": db.get_user_phase(user_id)["phase"]},
+                  "phase": db.get_user_phase(user_id)["phase"],
+                  **win_extra},
                  source="cron")
     return text
+
+
+# ─── Per-user schedule tick (P0-C) ──────────────────────────────────
+#
+# A single hourly Render cron POSTs /sms/schedule-tick. The handler
+# checks the active user's latest agreed schedule ([SCHEDULE:] rows,
+# versioned in user_schedule) and fires any window whose start hour
+# equals the user's current local hour. Slot semantics are mapped
+# mechanically — a window starting before 12:00 local runs the
+# morning-slot behavior, 12:00 or later runs the evening-slot
+# behavior — by delegating to handle_cron_tick(slot, window=...).
+# Windows fire once per day, deduped against the event log: every
+# window-driven cron_tick payload carries the window token, and a
+# match within WINDOW_DEDUP_H hours means "already served today".
+
+# 20h (not 24h) so normal cron jitter or a DST-shifted local hour
+# can't make a daily window miss its next-day firing.
+WINDOW_DEDUP_H = 20
+
+
+def _window_token(w):
+    return f"{w['start']}-{w['end']}"
+
+
+def _window_fired_recently(user_id, token, now):
+    """ts of the last cron_tick that served this window within the
+    dedup horizon, else None. Substring match on the JSON payload —
+    same dialect-neutral trick as the infra sweep (T6)."""
+    ev = db.get_last_event(user_id, "cron_tick",
+                           payload_contains=f'"window": "{token}"')
+    if not ev:
+        return None
+    age_h = (now - datetime.fromisoformat(ev["ts"])).total_seconds() / 3600
+    return ev["ts"] if age_h < WINDOW_DEDUP_H else None
+
+
+def handle_schedule_tick(now=None):
+    """Run the hourly per-user send-window check (P0-C).
+
+    Single-user shim like the rest of the pipeline: serves
+    TUTOR_USER_ID only. No schedule rows → no-op (the founder's
+    fixed crons keep serving him). `now` is injectable for tests
+    (naive server-local, matching event timestamps).
+
+    Returns the sent text, or None if nothing fired.
+    """
+    user_id = os.environ.get("TUTOR_USER_ID", "").strip()
+    if not user_id:
+        print("[SMS] schedule-tick: TUTOR_USER_ID not set — no-op",
+              flush=True)
+        return None
+
+    sched = db.get_user_schedule(user_id)
+    if not sched:
+        print(f"[SMS] schedule-tick: no schedule for {user_id} — no-op",
+              flush=True)
+        return None
+    try:
+        windows = json.loads(sched["windows_json"])
+    except Exception as e:
+        print(f"[SMS] ⚠️ schedule-tick: unreadable windows_json "
+              f"v{sched['version']}: {e}", flush=True)
+        return None
+
+    now = now or datetime.now()
+    local_hour = (now + timedelta(hours=TZ_OFFSET_H)).hour
+
+    for w in windows:
+        try:
+            start_hour = int(w["start"].split(":")[0])
+        except (KeyError, ValueError, AttributeError):
+            print(f"[SMS] ⚠️ schedule-tick: malformed window {w!r} — "
+                  f"skipped", flush=True)
+            continue
+        if local_hour != start_hour:
+            continue
+        token = _window_token(w)
+        fired_ts = _window_fired_recently(user_id, token, now)
+        if fired_ts:
+            print(f"[SMS] schedule-tick: window {token} already served "
+                  f"at {fired_ts} — deduped", flush=True)
+            continue
+        slot = "morning" if start_hour < 12 else "evening"
+        print(f"[SMS] schedule-tick: window {token} → {slot} semantics",
+              flush=True)
+        return handle_cron_tick(slot, window=token)
+    return None
+
+
+def schedule_status(user_id, now=None):
+    """Debug snapshot for GET /schedule: the latest schedule version
+    plus per-window served-today state (same dedup rule the tick
+    uses, so the view answers "will the next tick fire?")."""
+    sched = db.get_user_schedule(user_id)
+    if not sched:
+        return {"schedule": None, "windows": []}
+    now = now or datetime.now()
+    try:
+        windows = json.loads(sched["windows_json"])
+    except Exception:
+        windows = []
+    out = []
+    for w in windows:
+        token = _window_token(w)
+        try:
+            start_hour = int(w["start"].split(":")[0])
+        except (KeyError, ValueError, AttributeError):
+            continue
+        fired_ts = _window_fired_recently(user_id, token, now)
+        out.append({"window": token,
+                    "slot": "morning" if start_hour < 12 else "evening",
+                    "fired_today": bool(fired_ts),
+                    "last_fired": fired_ts})
+    return {"schedule": {"version": sched["version"], "ts": sched["ts"],
+                         "raw_text": sched["raw_text"],
+                         "source": sched["source"]},
+            "windows": out}

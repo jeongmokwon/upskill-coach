@@ -867,6 +867,72 @@ async def _sms_cron_tick_handler(request):
     return web.json_response({"ok": True, "slot": slot})
 
 
+async def _sms_schedule_tick_handler(request):
+    """Hourly Render cron → sms.handle_schedule_tick() (P0-C).
+
+    One fixed cron (`0 * * * *`) drives every per-user agreed send
+    window: the handler compares each window's start hour against
+    the user's current local hour and fires at most one send, with
+    morning/evening semantics decided by the window's start hour.
+    Same secret auth as /sms/cron-tick (header or ?secret=).
+    """
+    import sms
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        print(f"[SMS] ❌ schedule-tick auth failed (provided={provided[:8]}...)", flush=True)
+        return web.Response(status=403, text="bad secret")
+
+    print("[SMS] schedule-tick", flush=True)
+
+    # Run the LLM + send in a thread — same reasoning as cron-tick.
+    asyncio.get_event_loop().run_in_executor(
+        None, sms.handle_schedule_tick
+    )
+
+    return web.json_response({"ok": True})
+
+
+async def _schedule_debug_handler(request):
+    """GET /schedule?secret=...[&user_id=X] — the latest agreed
+    windows + raw text + which windows already fired today (the same
+    dedup rule the tick uses). P0-C observation surface, same shape
+    as /onboarding."""
+    import sms
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = (request.query.get("user_id", "").strip()
+               or os.environ.get("TUTOR_USER_ID", "").strip())
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+
+    status = sms.schedule_status(user_id)
+    parts = [f"# schedule — {user_id}"]
+    if not status["schedule"]:
+        parts.append("(no schedule rows — fixed crons serve this user)")
+        return web.Response(text="\n".join(parts),
+                            content_type="text/plain")
+    s = status["schedule"]
+    parts += [f"v{s['version']} at {s['ts']} (source: {s['source']})",
+              f"raw: {s['raw_text']}", ""]
+    for w in status["windows"]:
+        state = (f"fired today at {w['last_fired']}" if w["fired_today"]
+                 else "not fired today")
+        parts.append(f"- {w['window']} → {w['slot']} — {state}")
+    return web.Response(text="\n".join(parts), content_type="text/plain")
+
+
 async def _sms_reset_and_fire_handler(request):
     """One-shot rescue endpoint: reset the tutor user's phase state
     (fresh Phase 0 with timer starting NOW, cutting off old SMS
@@ -2281,6 +2347,8 @@ def start_ws_server():
         # SMS — POST endpoints, registered before the static catch-all.
         app.router.add_post("/sms/inbound", _sms_inbound_handler)
         app.router.add_post("/sms/cron-tick", _sms_cron_tick_handler)
+        app.router.add_post("/sms/schedule-tick", _sms_schedule_tick_handler)
+        app.router.add_get("/schedule", _schedule_debug_handler)
         app.router.add_post("/sms/reset-and-fire", _sms_reset_and_fire_handler)
         app.router.add_post("/sms/set-goal", _sms_set_goal_handler)
         app.router.add_post("/sms/set-ignition", _sms_set_ignition_handler)
