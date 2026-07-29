@@ -1,12 +1,13 @@
 """
-Sequence-plan (exploration v2) tests.
+Sequence-plan (exploration v2) + step-judge (P0-D) tests.
 
 Run: ./venv/bin/python test_plan.py  (sqlite; anthropic mocked)
 
-The structural claim under test: the LLM's prompt contains ONLY the
-current step as an assignment (next step name-only), so a sequence
-cannot be collapsed into one send; cursor movement happens through
-[ADVANCE] judgments parsed server-side.
+Structural claims under test: the LLM's prompt contains ONLY the
+current step (next by name); the CURSOR is owned by the dedicated
+server-side judge call (generation's [ADVANCE] is a stray);
+deviations (playing a later step than the cursor) are detected from
+the step tags.
 """
 
 import json
@@ -40,8 +41,7 @@ def events_of(kind):
     return [r for r in db.get_events(U, limit=300) if r["kind"] == kind]
 
 
-# Plans exist only post-onboarding — force-complete the fixture user
-# so the assignment block (not the onboarding checklist) renders.
+# Plans exist only post-onboarding.
 db.ensure_user_profile_row(U)
 db.check_and_complete_onboarding(U, force=True)
 
@@ -60,7 +60,6 @@ v = db.save_sequence_plan(U, PLAN, rationale="bootstrap", source="operator")
 check("plan v1 saved, cursor reset", v == 1
       and db.get_current_plan(U)["cursor"] == 0
       and len(events_of("sequence_plan_set")) == 1)
-
 v2 = db.save_sequence_plan(U, PLAN[1:], rationale="revised")
 check("new version appends and resets cursor",
       v2 == 2 and db.get_current_plan(U)["version"] == 2)
@@ -70,85 +69,122 @@ db.save_sequence_plan(U, PLAN, rationale="back to full", source="operator")
 print("2) assignment block")
 block = sms._build_plan_block(U)
 check("current step is the assignment",
-      "step 1 of 3" in block and "elicit_why@2" in block
-      and "his words" in block)
+      "step 1 of 3" in block and "elicit_why@2" in block)
 check("next step by NAME only — later intents absent",
       "Next (name only, do NOT perform): micro_ask" in block
-      and "dictation-level 3-liner" not in block
-      and "handoff" not in block)
-check("no plan → empty block (free mode)",
-      sms._build_plan_block("nobody") == "")
+      and "dictation-level 3-liner" not in block)
+check("assignment tells the model the server owns the cursor",
+      "judged SERVER-SIDE" in block and "[ADVANCE]" not in block)
+check("no plan → empty block", sms._build_plan_block("nobody") == "")
 
-prompt, _ = sms._build_system_prompt("evening", U)
-check("assignment block rides at the END of the system prompt",
-      prompt.rstrip().endswith(prompt.split("## Sequence assignment")[-1].rstrip())
-      and "step 1 of 3" in prompt)
-
-# ── 3. markers move the cursor ───────────────────────────────────────
+# ── 3. markers: ADVANCE is a stray, REPLAN still records ─────────────
 print("3) plan markers")
-text = sms._process_plan_markers(U, "좋다, 그럼 다음으로.\n[ADVANCE]",
-                                 trigger="inbound_reply")
-check("[ADVANCE] stripped and cursor moved",
-      "[ADVANCE" not in text and db.get_current_plan(U)["cursor"] == 1
-      and len(events_of("plan_cursor_moved")) >= 1)
-
-block = sms._build_plan_block(U)
-check("assignment follows the cursor",
-      "step 2 of 3" in block and "micro_ask@1" in block)
-
-text = sms._process_plan_markers(U, "x [STAY]", trigger="inbound_reply")
-check("[STAY] is a stripped no-op",
-      "[STAY" not in text and db.get_current_plan(U)["cursor"] == 1)
-
+text = sms._process_plan_markers(U, "좋아!\n[ADVANCE]", trigger="t")
+check("[ADVANCE] stripped but cursor UNCHANGED (judge owns it)",
+      "[ADVANCE" not in text and db.get_current_plan(U)["cursor"] == 0)
+text = sms._process_plan_markers(U, "x [STAY]", trigger="t")
+check("[STAY] stripped no-op", "[STAY" not in text)
 text = sms._process_plan_markers(
-    U, 'x [REPLAN: "user pivoted to a new goal entirely"]',
-    trigger="inbound_reply")
-check("[REPLAN] logged, cursor unchanged",
-      "[REPLAN" not in text and db.get_current_plan(U)["cursor"] == 1
-      and json.loads(events_of("plan_replan_requested")[-1]["payload"])
-          ["reason"].startswith("user pivoted"))
+    U, 'x [REPLAN: "user pivoted entirely"]', trigger="t")
+check("[REPLAN] logged",
+      "[REPLAN" not in text
+      and len(events_of("plan_replan_requested")) == 1)
 
-sms._process_plan_markers(U, "[ADVANCE]", trigger="inbound_reply")
-sms._process_plan_markers(U, "[ADVANCE]", trigger="inbound_reply")
-check("advancing past the end → plan_completed",
-      len(events_of("plan_completed")) == 1)
-check("completed plan renders free-mode assignment",
-      "COMPLETE" in sms._build_plan_block(U))
-
-# ── 4. end-to-end: reply path with plan judgment ─────────────────────
-print("4) end-to-end")
-db.save_sequence_plan(U, PLAN, rationale="e2e", source="operator")
+# ── 4. the judge owns the cursor (end-to-end inbound) ────────────────
+print("4) step judge")
 
 
-class FakeClient:
+class QueueFake:
+    """Serves queued responses: dicts → tool_use blocks, strings →
+    text blocks. handle_inbound makes judge call first, reply second."""
+    queue = []
+
     def __init__(self, *a, **kw):
         pass
 
     class messages:
         @staticmethod
         def create(**kwargs):
-            class _B:
-                text = ("오 진짜 좋은 이유네. 그럼 손 한번 풀어보자 — "
-                        "콜랩에 이 한 줄만: x = torch.tensor([2.0])\n"
-                        "[ADVANCE]\n[STEP: micro_ask@1]\n[EXPECT: advance]")
+            item = QueueFake.queue.pop(0)
 
-            class _R:
-                content = [_B()]
-            return _R()
+            class _Resp:
+                pass
+            if isinstance(item, dict):
+                class _B:
+                    type = "tool_use"
+                    input = item
+                _Resp.content = [_B()]
+            else:
+                class _B:
+                    type = "text"
+                    text = item
+                _Resp.content = [_B()]
+            return _Resp()
 
 
-sms.anthropic.Anthropic = FakeClient
-reply = sms.handle_inbound("+15550001111",
-                           "ML로 내 스타트업 제품을 직접 만들고 싶어서야")
-check("reply clean of all markers",
-      reply and "[ADVANCE" not in reply and "[STEP" not in reply
-      and "[EXPECT" not in reply)
-check("cursor advanced by the judgment",
-      db.get_current_plan(U)["cursor"] == 1)
-out = json.loads(events_of("sms_out")[-1]["payload"])
-check("steps + expect still recorded alongside",
-      out.get("steps") == [{"tag": "micro_ask", "intensity": 1}]
-      and out.get("expect") == "advance")
+sms.anthropic.Anthropic = QueueFake
+
+QueueFake.queue = [
+    {"completed": "yes", "reason": "he articulated a concrete why"},
+    ("오 좋은 이유다. 그럼 손 풀자 — 한 줄만: x = torch.tensor([2.0])\n"
+     "[STEP: micro_ask@1]\n[EXPECT: advance]"),
+]
+reply = sms.handle_inbound("+15550001111", "스타트업에 ML을 직접 쓰고 싶어서야")
+check("judge yes → cursor advanced BEFORE reply",
+      db.get_current_plan(U)["cursor"] == 1
+      and len(events_of("step_judged")) == 1
+      and json.loads(events_of("step_judged")[0]["payload"])["completed"] == "yes")
+check("reply clean + steps/expect recorded",
+      reply and "[STEP" not in reply
+      and json.loads(events_of("sms_out")[-1]["payload"])["expect"] == "advance")
+check("judge call flight-recorded",
+      db.get_llm_call(json.loads(events_of("step_judged")[0]["payload"])
+                      ["llm_call_id"]) is not None)
+
+QueueFake.queue = [
+    {"completed": "no", "reason": "he acknowledged but did not act"},
+    "천천히 해도 돼. 준비되면 그 한 줄부터.\n[STEP: validate@1]\n[EXPECT: reply]",
+]
+sms.handle_inbound("+15550001111", "음 알겠어")
+check("judge no → cursor stays", db.get_current_plan(U)["cursor"] == 1)
+
+QueueFake.queue = [
+    {"completed": "uncertain", "reason": "ambiguous"},
+    "그 줄 쳐보니 어때?\n[STEP: micro_ask@1]\n[EXPECT: reply]",
+]
+sms.handle_inbound("+15550001111", "ㅎㅎ")
+check("uncertain → cursor stays", db.get_current_plan(U)["cursor"] == 1)
+
+# ── 5. deviation net ─────────────────────────────────────────────────
+print("5) deviation")
+QueueFake.queue = [
+    {"completed": "no", "reason": "not yet"},
+    ("이제 캬파시 영상 10:32부터 틀어!\n"
+     "[STEP: handoff@2]\n[EXPECT: reply]"),
+]
+sms.handle_inbound("+15550001111", "좀 이따가")
+dev = events_of("planner_deviation")
+check("playing a later step than the cursor → planner_deviation",
+      len(dev) == 1
+      and json.loads(dev[0]["payload"])["played_ahead"] == ["handoff"])
+
+# ── 6. completion through the judge ──────────────────────────────────
+print("6) completion")
+QueueFake.queue = [
+    {"completed": "yes", "reason": "he typed the line and reported output"},
+    "됐다!! 다음 줄 가자.\n[STEP: evoke_mastery@1]\n[EXPECT: reply]",
+]
+sms.handle_inbound("+15550001111", "쳤어. tensor([2.]) 나왔어")
+QueueFake.queue = [
+    {"completed": "yes", "reason": "he merged into the main task"},
+    "고고. 이제 네 거다.\n[STEP: release@1]\n[EXPECT: no_reply]",
+]
+sms.handle_inbound("+15550001111", "영상 틀었고 노트 열었어")
+check("two more yes verdicts complete the plan",
+      db.get_current_plan(U)["cursor"] == 3
+      and len(events_of("plan_completed")) == 1)
+check("completed plan renders free-mode assignment",
+      "COMPLETE" in sms._build_plan_block(U))
 
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

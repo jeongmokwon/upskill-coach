@@ -655,20 +655,16 @@ _REPLAN_RE = re.compile(r'\[REPLAN:\s*"([^"]{3,300})"\s*\]', re.DOTALL)
 
 
 def _process_plan_markers(user_id, text, trigger):
-    """Parse & act on [ADVANCE]/[STAY]/[REPLAN:]; return stripped text."""
+    """Parse & act on plan markers; return stripped text.
+
+    P0-D: cursor movement is now the dedicated judge's job
+    (_judge_step_completion, run BEFORE reply generation). A stray
+    [ADVANCE]/[STAY] from the generation model is stripped and
+    ignored — one judgment, one authority. [REPLAN:] remains the
+    generation model's channel for flagging plan misfit."""
     if _ADVANCE_RE.search(text):
-        plan = db.get_current_plan(user_id)
-        if plan:
-            new_idx = min(plan["cursor"] + 1, len(plan["steps"]))
-            db.move_plan_cursor(user_id, new_idx,
-                                reason=f"advance via {trigger}")
-            if new_idx >= len(plan["steps"]):
-                db.log_event(user_id, "plan_completed",
-                             {"version": plan["version"]}, source="sms")
-                print(f"[PLAN] {user_id}: plan v{plan['version']} complete",
-                      flush=True)
-        else:
-            print(f"[PLAN] stray [ADVANCE] with no plan — ignored", flush=True)
+        print(f"[PLAN] stray [ADVANCE] from generation ({trigger}) — "
+              f"ignored; the judge owns the cursor", flush=True)
         text = _ADVANCE_RE.sub("", text)
     replan = _REPLAN_RE.search(text)
     if replan:
@@ -729,6 +725,115 @@ ZERO-DEMAND re-opening. This is mechanical, not your judgment call:
   poisons the channel."""
 
 
+# Step-completion judge (P0-D). Side-duty judgments were observably
+# dropped by the generation call, so completion is a DEDICATED
+# single-task LLM call that runs BEFORE the reply prompt is built —
+# the generation then receives the already-updated assignment. Code
+# moves the cursor; the judge only answers one question.
+_JUDGE_TOOL = {
+    "name": "judge_step",
+    "description": "Judge whether the user's latest reply completed "
+                   "the current coaching step's purpose.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "completed": {"type": "string",
+                          "enum": ["yes", "no", "uncertain"]},
+            "reason": {"type": "string"},
+        },
+        "required": ["completed", "reason"],
+    },
+}
+
+
+def _judge_step_completion(user_id, user_text):
+    """Run the dedicated judge on an inbound reply. Advances the
+    cursor on a confident 'yes'. Never raises — judging must not be
+    able to break the reply path."""
+    try:
+        if db.get_onboarding_state(user_id)["completed_at"] is None:
+            return
+        plan = db.get_current_plan(user_id)
+        if not plan or plan["cursor"] >= len(plan["steps"]):
+            return
+        step = plan["steps"][plan["cursor"]]
+        last_out = db.get_last_event(user_id, "sms_out")
+        last_coach = ""
+        if last_out:
+            try:
+                last_coach = json.loads(last_out["payload"]).get("text", "")
+            except Exception:
+                pass
+        system = (
+            "You judge ONE thing for a coaching system: did the user's "
+            "latest reply complete the current step's purpose?\n\n"
+            f"Current step: {step['tag']}@{step.get('intensity', 2)} — "
+            f"{step.get('intent', '')}\n\n"
+            "yes = the reply itself accomplishes what the step was for "
+            "(e.g. for an elicit step: they actually articulated it; "
+            "for an ask step: they did or committed to the thing). "
+            "no = not yet. uncertain = genuinely ambiguous — treated "
+            "as no. Judge the substance, not politeness."
+        )
+        messages = [{"role": "user", "content":
+                     f"COACH (last message): {last_coach}\n\n"
+                     f"USER (latest reply): {user_text}"}]
+        client = anthropic.Anthropic()
+        resp = client.messages.create(
+            model=MODEL, max_tokens=300, system=system,
+            messages=messages, tools=[_JUDGE_TOOL],
+            tool_choice={"type": "tool", "name": "judge_step"},
+        )
+        verdict = next((b.input for b in resp.content
+                        if getattr(b, "type", "") == "tool_use"), None)
+        llm_call_id = db.save_llm_call(
+            user_id, "step_judge", MODEL, system, messages,
+            prompt_versions={},
+            response_text=json.dumps(verdict, ensure_ascii=False)
+            if verdict else "")
+        if not verdict:
+            return
+        db.log_event(user_id, "step_judged",
+                     {"step_index": plan["cursor"], "tag": step["tag"],
+                      "completed": verdict.get("completed"),
+                      "reason": verdict.get("reason", "")[:300],
+                      "llm_call_id": llm_call_id}, source="sms")
+        if verdict.get("completed") == "yes":
+            new_idx = plan["cursor"] + 1
+            db.move_plan_cursor(user_id, new_idx,
+                                reason=f"judge: {verdict.get('reason', '')[:120]}")
+            if new_idx >= len(plan["steps"]):
+                db.log_event(user_id, "plan_completed",
+                             {"version": plan["version"]}, source="sms")
+                print(f"[PLAN] {user_id}: plan v{plan['version']} complete",
+                      flush=True)
+    except Exception as e:
+        print(f"[JUDGE] ⚠️ step judge failed for {user_id}: {e}",
+              flush=True)
+
+
+def _check_plan_deviation(user_id, steps):
+    """Detection net (P0-D): the generation's step tags confess when
+    it played a LATER plan step than the cursor allows — a deviation
+    that should have been a [REPLAN:]. Detection only; the message
+    already went out."""
+    try:
+        plan = db.get_current_plan(user_id)
+        if not plan or plan["cursor"] >= len(plan["steps"]):
+            return
+        later = {s["tag"] for s in plan["steps"][plan["cursor"] + 1:]}
+        played = [s.get("tag") for s in steps if s.get("tag") in later]
+        if played:
+            print(f"[PLAN] ⚠️ deviation: played {played} while cursor at "
+                  f"step {plan['cursor'] + 1}", flush=True)
+            db.log_event(user_id, "planner_deviation",
+                         {"played_ahead": played,
+                          "cursor": plan["cursor"],
+                          "plan_version": plan["version"]}, source="sms")
+    except Exception as e:
+        print(f"[PLAN] ⚠️ deviation check failed: {e}", flush=True)
+
+
 def _build_plan_block(user_id):
     """The assignment block (exploration v2): the LLM receives ONLY
     the current step as its job — later steps exist server-side, so
@@ -762,11 +867,9 @@ def _build_plan_block(user_id):
                      f"{steps[cur + 1]['tag']}")
     lines += [
         "",
-        "Plan judgments (markers, stripped by the server):",
-        "- When REPLYING to the user: if their latest message completed "
-        "the current step's purpose, emit [ADVANCE] — your message then "
-        "works the NEXT step. If not yet, emit [STAY] and keep working "
-        "this step.",
+        "Step completion is judged SERVER-SIDE before each of your "
+        "replies — this assignment already reflects that judgment, so "
+        "just work the step shown. One marker remains yours:",
         "- If the plan visibly no longer fits the signals, emit "
         "[REPLAN: \"reason\"] and act per the prior and notes instead.",
     ]
@@ -1019,6 +1122,12 @@ def handle_inbound(from_number, body):
     # `history` ends with the user message we just inserted, which is
     # what the Anthropic API expects (last message = user turn).
 
+    # P0-D: judge the current plan step against this reply BEFORE
+    # building the prompt — the generation call receives the
+    # already-advanced assignment (judge is a no-op for users without
+    # a plan or mid-onboarding).
+    _judge_step_completion(user_id, body)
+
     # Use the phase-specific evening prompt for inbound replies too —
     # the LLM should be in the same mode whether the user is replying
     # to a scheduled ping or texting spontaneously.
@@ -1056,6 +1165,7 @@ def handle_inbound(from_number, body):
                                        trigger="inbound_reply")
     expect, reply_text = _process_expect_marker(reply_text)
     steps, reply_text = _process_step_marker(user_id, reply_text)
+    _check_plan_deviation(user_id, steps)
     # Field fills above may have completed the checklist — code, not
     # the LLM, makes that call. Completion fires the initial plan
     # generation in the background (P0-B) so this reply isn't
@@ -1232,6 +1342,7 @@ def handle_cron_tick(slot):
     text = _process_plan_markers(user_id, text, trigger=f"cron_{slot}")
     expect, text = _process_expect_marker(text)
     steps, text = _process_step_marker(user_id, text)
+    _check_plan_deviation(user_id, steps)
     if db.check_and_complete_onboarding(user_id):
         import genplan
         genplan.generate_async(user_id)
