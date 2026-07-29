@@ -1094,14 +1094,26 @@ def log_practice_requested(code_context, study_topic=None, tutorial_section=None
 # ─── Messages & Insights ─────────────────────────────────────────
 
 def save_message(role, content, session_id=None):
-    """Save a coach or user message to the messages table."""
+    """Save a coach or user message to the messages table.
+
+    timestamp is written explicitly from Python (never left to the
+    column's CURRENT_TIMESTAMP default): SQLite's default writes
+    "YYYY-MM-DD HH:MM:SS" (space separator, UTC) while every reader
+    that compares this column — get_recent_sms_messages(since=...),
+    get_last_activity_time — works with datetime.now().isoformat()
+    values, and SQLite compares TEXT lexically (' ' < 'T'), so
+    default-stamped rows sort before any same-day isoformat value
+    and vanish from the filters. Postgres casts both, hiding the
+    bug in prod. Writing isoformat here keeps one format per D1.3.
+    """
     sid = session_id or _sid()
     if not sid:
         return
     conn = get_conn()
     _execute(conn,
-        f"INSERT INTO messages (session_id, user_id, role, content) VALUES ({_P}, {_P}, {_P}, {_P})",
-        (sid, _uid(), role, content)
+        f"INSERT INTO messages (session_id, user_id, role, content, timestamp) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P})",
+        (sid, _uid(), role, content, datetime.now().isoformat())
     )
     conn.commit()
     conn.close()
@@ -1215,13 +1227,18 @@ def save_sms_message(user_id, role, content, direction):
     role: 'user' or 'assistant' (matches Anthropic API shape so the
           thread can be fed straight back into Claude)
     direction: 'in' (user → us) or 'out' (us → user)
+
+    timestamp is written explicitly (isoformat) rather than left to
+    the column default — see save_message for why the SQLite default
+    breaks the `timestamp > since` phase filter.
     """
     conn = get_conn()
     _execute(conn,
         f"INSERT INTO messages "
-        f"(session_id, user_id, role, content, channel, direction) "
-        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
-        (_sms_sid(user_id), user_id, role, content, "sms", direction)
+        f"(session_id, user_id, role, content, channel, direction, timestamp) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+        (_sms_sid(user_id), user_id, role, content, "sms", direction,
+         datetime.now().isoformat())
     )
     conn.commit()
     conn.close()
