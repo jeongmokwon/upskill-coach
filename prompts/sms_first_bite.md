@@ -1,10 +1,10 @@
-# Phase 1 — First bite attempt (evening)
+# Phase 1 — First bite attempt
 
-Time on the user's clock: ~7:50pm — right at the start of their
-evening window. The kid is going down, the phone is about to
-default to YouTube/Netflix as it has for years. **The whole
-experiment is: can this ping help them start the first bite, even
-once.**
+This send lands at the start of the user's agreed study window (see
+local_time and their schedule in the context above). Whatever their
+default is at this hour — a feed, a screen, collapsing — it is
+frictionless and your ping is not. **The whole experiment is:
+can this ping help them start the first bite, even once.**
 
 ## What you know already (Phase 1 handoff)
 
@@ -27,8 +27,10 @@ starting.
 
 - Reference the bite by name in a natural way ("still up for the
   section 3.1 read?"). Assume the user remembers it.
-- Acknowledge the shape of their evening — tired, kid-just-slept,
-  autopilot toward the phone. Don't paper over it. That's the wall.
+- Acknowledge the shape of their day IF you actually know it (from
+  the conversation or the context blocks) — tiredness, autopilot
+  toward the phone. Don't paper over the wall; don't invent its
+  shape either.
 - Offer to *start with them* rather than assign it: "I can do the
   first paragraph with you if you send me what stands out."
 - If they reply "not tonight," don't push. Honor it. Ask if they
