@@ -283,6 +283,123 @@ def generate(user_id):
             "llm_call_id": llm_call_id}
 
 
+_REPLAN_TOOL = {
+    "name": "submit_plan_proposal",
+    "description": "Propose a revised sequence plan for this user.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "steps": _TOOL["input_schema"]["properties"]["plan"]
+                     ["properties"]["steps"],
+            "rationale": {"type": "string"},
+        },
+        "required": ["steps", "rationale"],
+    },
+}
+
+
+def propose_replan(user_id, reasons, client=None):
+    """Generate a plan-v2 PROPOSAL after [REPLAN:] requests (P0-D
+    part 2). Deliberately does NOT save a sequence_plans row — the
+    latest saved version is the ACTIVE plan, so activation is the
+    operator's move: review the plan_proposed event, then POST the
+    steps to /plan. Inputs: prior + vocabulary + the user's notes +
+    the recent trajectory + the current plan and the replan reasons.
+    Returns the proposal dict or None."""
+    import notes as notes_mod
+    import trace as trace_mod
+
+    plan = db.get_current_plan(user_id)
+    prior, h_prior = sms._read_prompt_versioned("prior")
+    plan_text = "(no active plan)"
+    if plan:
+        plan_text = f"v{plan['version']}, cursor at step {plan['cursor'] + 1}:\n" + \
+            "\n".join(f"  {i+1}. {s['tag']}@{s.get('intensity', 2)} — "
+                      f"{s.get('intent', '')}"
+                      for i, s in enumerate(plan["steps"]))
+    system = f"""You are the planning layer of Theo, an AI learning coach. The
+coach flagged that this user's current sequence plan no longer fits
+the signals. Propose a REVISED plan (2-5 steps, {{tag, intensity
+1-3, intent}}) via the submit_plan_proposal tool (you MUST call
+it). Ground every step in the user's notes or the prior; the
+rationale must say what the old plan got wrong, citing the replan
+reasons and the trajectory.
+
+---
+
+{prior}
+
+---
+
+{_vocab_section()}
+
+---
+
+{notes_mod.render_notes_block(user_id) or "(no notes yet)"}
+
+---
+
+## Current plan (being replaced)
+
+{plan_text}
+
+## Why the coach requested a replan
+
+{chr(10).join('- ' + r for r in reasons)}
+
+## Recent trajectory
+
+{trace_mod.render_trace(user_id, days=7)}"""
+    messages = [{"role": "user", "content": "Propose the revised plan."}]
+    if client is None:
+        client = anthropic.Anthropic()
+    payload, errors, llm_call_id = None, [], None
+    for attempt in range(MAX_ATTEMPTS):
+        try:
+            resp = client.messages.create(
+                model=MODEL, max_tokens=2000, system=system,
+                messages=messages, tools=[_REPLAN_TOOL],
+                tool_choice={"type": "tool",
+                             "name": "submit_plan_proposal"})
+            tool_input = next((b.input for b in resp.content
+                               if getattr(b, "type", "") == "tool_use"),
+                              None)
+        except Exception as e:
+            print(f"[GENPLAN] ❌ replan call failed: {e}", flush=True)
+            db.log_event(user_id, "llm_error",
+                         {"where": "propose_replan",
+                          "error": str(e)[:300]}, source="genplan")
+            return None
+        raw = json.dumps(tool_input, ensure_ascii=False) if tool_input else ""
+        llm_call_id = db.save_llm_call(
+            user_id, f"replan_attempt{attempt + 1}", MODEL, system,
+            messages, prompt_versions={"prior": h_prior},
+            response_text=raw)
+        errors = (["no tool_use block"] if tool_input is None
+                  else _validate({"notes": [], "plan": tool_input}))
+        if not errors:
+            payload = tool_input
+            break
+        messages = messages + [
+            {"role": "assistant", "content": raw or "(no tool call)"},
+            {"role": "user", "content": "Validation failed:\n- "
+             + "\n- ".join(errors) + "\nResubmit corrected."}]
+    if payload is None:
+        db.log_event(user_id, "replan_proposal_failed",
+                     {"errors": errors[:10], "llm_call_id": llm_call_id},
+                     source="genplan")
+        return None
+    db.log_event(user_id, "plan_proposed",
+                 {"steps": payload["steps"],
+                  "rationale": payload["rationale"][:600],
+                  "replan_reasons": reasons[:5],
+                  "llm_call_id": llm_call_id}, source="genplan")
+    print(f"[GENPLAN] {user_id}: plan proposal logged — review the "
+          f"plan_proposed event, then POST /plan to activate",
+          flush=True)
+    return payload
+
+
 def generate_async(user_id):
     """Fire-and-forget wrapper for the completion hook — generation
     takes tens of seconds and must not delay the reply that
