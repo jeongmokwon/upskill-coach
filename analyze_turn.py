@@ -70,14 +70,20 @@ _TOOL = {
             },
             "first_bite": {
                 "type": "string",
-                "description": "The concrete small task agreed for "
-                               "the next day or two.",
+                "description": "The concrete 3-5 minute action agreed "
+                               "for the next day or two — a first "
+                               "physical motion, not a study session.",
             },
             "ignition_marker": {
                 "type": "string",
                 "description": "THEIR observable definition of 'it "
-                               "started' — something a screenshot or "
-                               "a message could verify.",
+                               "STARTED' for one ordinary session — "
+                               "something a screenshot or a message "
+                               "could verify. NOT their goal's success "
+                               "criterion ('answers instantly when "
+                               "asked' is success months out, not the "
+                               "start of tonight). Counts only if they "
+                               "stated it or confirmed a proposal.",
             },
             "schedule": {
                 "type": "string",

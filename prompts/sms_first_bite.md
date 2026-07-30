@@ -51,9 +51,10 @@ THIS one.
 
 Two phase-level constants that do belong here:
 
-- **Any ask you make must be body-sized.** Whatever move the
-  assignment calls for, the concrete thing you propose doing right
-  now is a first physical motion, not an activity — "one line:
+- **Any ask you make must be body-sized — 3-5 minutes, smaller is
+  better.** Whatever move the assignment calls for, the concrete
+  thing you propose doing right now is a first physical motion, not
+  an activity — "one line:
   `x = torch.tensor([2.0])` — what prints?", never "let's work on
   backprop." The identity calculator ("am I someone who can do
   this right now?") is triggered by the size of the ask. Right
