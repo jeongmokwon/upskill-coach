@@ -91,6 +91,18 @@ VALID = {
         ],
         "rationale": "choice_offer per note 1; opener per note 2",
     },
+    # The same call also produces the profile brief (step ④); `wants`
+    # quotes must be verbatim from the fixture conversation below.
+    "profile": {
+        "job": "",
+        "learning_types": ["project_completion"],
+        "materials": [],
+        "wants": [{"quote": "그건 내 방식대로 할게",
+                   "meaning": "자율성 우선 — 지시보다 선택지"}],
+        "personality": "짧고 단호, 저녁에만 여유",
+        "path_kind": "deliverable",
+        "rationale": "'내 방식대로'라는 표현이 자율성 신호",
+    },
 }
 
 # fixture conversation

@@ -5,12 +5,16 @@ called P7).
 
 When a user's onboarding completes, one dedicated LLM call reads
 the whole onboarding conversation through the prior's behavioral-
-science lens and produces two artifacts:
+science lens and produces three artifacts:
 
   1. initial user notes — hypothesis-confidence conditional
      statements, each quoting the onboarding conversation as
      evidence
   2. a sequence plan (2-5 steps) whose rationale cites those notes
+  3. a user profile brief (brief §7) — job, learning types from the
+     fixed taxonomy, learning materials, what they want from Theo as
+     VERBATIM quotes, a personality read, and which path_kind their
+     learning types prescribe
 
 The chain plan → notes → conversation quotes is the point: the
 rehearsal evaluates whether the reasoning was grounded, not whether
@@ -28,6 +32,7 @@ sequence-mode send.
 
 import json
 import os
+import re
 import threading
 
 import anthropic
@@ -41,6 +46,31 @@ MAX_ATTEMPTS = 3   # 1 try + 2 retries with validation feedback
 # Plan steps must be playable moves — the drain tag and the
 # server-side silence tag are not plannable intents.
 _PLANNABLE_TAGS = frozenset(sms.STEP_VOCABULARY) - {"none", "hold"}
+
+# Learning types (brief §7). A FIXED multi-label taxonomy, not free
+# text: the offer and the step selection branch on these, so a novel
+# value is a silent behavior hole rather than extra nuance. New types
+# are added here deliberately, from pilot evidence.
+LEARNING_TYPES = (
+    "memorization",              # retention of specific content
+    "retrieval_fluency",         # instant recall under questioning
+    "skill_mastery",             # practice toward doing it well
+    "conceptual_understanding",  # why it works, not just that it does
+    "project_completion",        # ship a concrete thing
+    "exam_prep",                 # a dated external bar
+    "language_acquisition",
+    "habit_formation",           # the doing itself is the goal
+    "exploration",               # deciding whether to pursue at all
+)
+
+# Which framing the learning path's middle layer takes for this user
+# (learning_paths.path_kind). project-shaped is one option, not the
+# assumption.
+PATH_KINDS = (
+    "deliverable",   # a project WITH a done-condition
+    "coverage",      # a body of material to reach a level over
+    "duration",      # sustained practice, measured in kept days
+)
 
 _TOOL = {
     "name": "submit_initial_plan",
@@ -91,8 +121,69 @@ _TOOL = {
                 },
                 "required": ["steps", "rationale"],
             },
+            "profile": {
+                "type": "object",
+                "description": ("Who this learner is, read off the "
+                                "conversation. Omit or leave empty any "
+                                "field the conversation does not support "
+                                "— never infer."),
+                "properties": {
+                    "job": {"type": "string",
+                            "description": "Their work/field, if stated."},
+                    "learning_types": {
+                        "type": "array",
+                        "items": {"type": "string",
+                                  "enum": list(LEARNING_TYPES)},
+                        "minItems": 1,
+                        "description": "Multi-label; from the fixed "
+                                       "taxonomy only.",
+                    },
+                    "materials": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "What they learn FROM (their own "
+                                       "notes, a specific book, a "
+                                       "course...).",
+                    },
+                    "wants": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "quote": {"type": "string",
+                                          "description": "VERBATIM words "
+                                                         "of the user."},
+                                "meaning": {"type": "string",
+                                            "description": "One line on "
+                                                           "what it asks "
+                                                           "of Theo."},
+                            },
+                            "required": ["quote", "meaning"],
+                        },
+                    },
+                    "personality": {
+                        "type": "string",
+                        "description": "Free-form read of how they engage.",
+                    },
+                    "path_kind": {
+                        "type": "string",
+                        "enum": list(PATH_KINDS),
+                        "description": "Which framing their learning path's "
+                                       "middle layer takes, given the "
+                                       "learning types.",
+                    },
+                    "rationale": {
+                        "type": "string",
+                        "description": "Which utterances drove this "
+                                       "reading — so a wrong read can be "
+                                       "told apart from a wrong rule.",
+                    },
+                },
+                "required": ["learning_types", "wants", "personality",
+                             "path_kind", "rationale"],
+            },
         },
-        "required": ["notes", "plan"],
+        "required": ["notes", "plan", "profile"],
     },
 }
 
@@ -111,9 +202,17 @@ def _vocab_section():
         return "Step tags: " + ", ".join(sorted(sms.STEP_VOCABULARY))
 
 
-def _validate(payload):
+def _norm(s):
+    """Whitespace-normalized text for verbatim matching (line breaks
+    and double spaces are not paraphrase)."""
+    return re.sub(r"\s+", " ", s or "").strip()
+
+
+def _validate(payload, user_text=None, require_profile=False):
     """Semantic checks the JSON schema can't express. → list of
-    error strings (empty = valid)."""
+    error strings (empty = valid). user_text: the user's own turns,
+    whitespace-normalized, against which `wants` quotes are checked
+    for being verbatim."""
     errors = []
     for i, n in enumerate(payload.get("notes", [])):
         for t in n.get("when", []):
@@ -133,6 +232,41 @@ def _validate(payload):
         if not isinstance(s.get("intensity"), int) \
                 or not 1 <= s["intensity"] <= 3:
             errors.append(f"plan.steps[{i}].intensity: must be 1-3")
+
+    profile = payload.get("profile")
+    if profile is None:
+        if require_profile:
+            errors.append("profile: missing (required)")
+        return errors
+    types = profile.get("learning_types") or []
+    if not types:
+        errors.append("profile.learning_types: at least one required")
+    for t in types:
+        if t not in LEARNING_TYPES:
+            errors.append(f"profile.learning_types: unknown type {t!r} "
+                          f"— must be one of {list(LEARNING_TYPES)}")
+    # Never a reading without its grounds — the rationale is what
+    # tells a wrong rule apart from a wrong read of the user.
+    if not (profile.get("rationale") or "").strip():
+        errors.append("profile.rationale: required — say which "
+                      "utterances drove this reading")
+    if profile.get("path_kind") not in PATH_KINDS:
+        errors.append(f"profile.path_kind: {profile.get('path_kind')!r} "
+                      f"not in {list(PATH_KINDS)}")
+    for i, w in enumerate(profile.get("wants") or []):
+        quote = _norm(w.get("quote"))
+        if not quote:
+            errors.append(f"profile.wants[{i}].quote: empty")
+            continue
+        # Verbatim or it is a bug: raw is sacred applies to
+        # self-description. Wrapping punctuation is forgiven, wording
+        # is not.
+        if user_text is not None \
+                and quote.strip(" \"'“”‘’.,!?~…。") not in user_text:
+            errors.append(
+                f"profile.wants[{i}].quote: {w.get('quote')!r} does not "
+                f"appear in what the user actually said — quote their "
+                f"exact words, never a paraphrase or a translation")
     return errors
 
 
@@ -168,6 +302,37 @@ via the submit_initial_plan tool (you MUST call it):
    one line the coach will receive as its per-message assignment.
    The rationale must cite your notes — a step with no grounding in
    a note should default to the prior's theory, and say so.
+3. **A profile brief**: who this learner is, for every future
+   message the coach writes.
+   - `job`: their work or field, only if they said it.
+   - `learning_types`: multi-label, ONLY from this fixed taxonomy —
+     {", ".join(LEARNING_TYPES)}. It decides what Theo offers them
+     (e.g. memorization + retrieval_fluency prescribes active
+     recall and spaced questioning; exploration prescribes low-
+     commitment sampling). Pick every one that applies.
+   - `materials`: what they learn FROM — their own notes, a named
+     book, a course, a codebase.
+   - `wants`: what they want from Theo, as **VERBATIM QUOTES of
+     their own words** (the server checks them against the
+     transcript and rejects paraphrase — copy the characters they
+     typed, do not clean up, translate, or summarize), each with a
+     one-line `meaning`.
+   - `personality`: a free-form read of how they engage — pace,
+     defensiveness, humor, what they respond to.
+   - `path_kind`: which framing their learning path's middle layer
+     takes, given the learning types — `deliverable` (a project
+     with a done-condition), `coverage` (a body of material to
+     reach a level over, e.g. "instant recall on the first 3
+     chapters"), `duration` (sustained practice).
+   - `rationale`: which utterances drove this reading, especially
+     the learning types and path_kind. When the coaching later
+     underperforms, this is what separates "wrong rule" from "wrong
+     read of the user".
+
+   A field the conversation does not support is left out. Do NOT
+   infer a job from a topic, a personality from politeness, or a
+   want they never expressed — an empty field is information; an
+   invented one is damage.
 
 The plan will be played ONE STEP PER TURN across real conversations
 (the server enforces this), so design steps as conversational
@@ -204,6 +369,10 @@ def generate(user_id):
     transcript = "\n".join(
         f"{'USER' if m['role'] == 'user' else 'COACH'}: {m['content']}"
         for m in convo)
+    # Only the user's own turns count as a source of verbatim quotes —
+    # quoting the coach back at itself is not self-description.
+    user_text = _norm(" ".join(m["content"] for m in convo
+                               if m["role"] == "user"))
     system, versions = _build_system(user_id)
     messages = [{"role": "user",
                  "content": "## Onboarding conversation (oldest first)\n\n"
@@ -238,7 +407,8 @@ def generate(user_id):
             messages, prompt_versions=versions, response_text=raw)
 
         errors = (["no tool_use block in response"] if tool_input is None
-                  else _validate(tool_input))
+                  else _validate(tool_input, user_text=user_text,
+                                 require_profile=True))
         if not errors:
             payload = tool_input
             break
@@ -269,17 +439,49 @@ def generate(user_id):
     plan_version = db.save_sequence_plan(
         user_id, payload["plan"]["steps"],
         rationale=payload["plan"]["rationale"], source="p7")
+
+    # The brief goes live immediately (operator decision): unlike the
+    # nightly proposals, a first read of the user has nothing to
+    # revise and every send until the operator looks is otherwise
+    # written blind.
+    profile = payload["profile"]
+    brief_version = db.save_user_profile_brief(
+        user_id, job=profile.get("job", ""),
+        learning_types=profile.get("learning_types") or [],
+        materials=profile.get("materials") or [],
+        wants=profile.get("wants") or [],
+        personality=profile.get("personality", ""),
+        rationale=profile.get("rationale", ""), source="p7",
+        llm_call_id=llm_call_id)
+
+    # path_kind is a property of the learning types, so it lands on
+    # the path as a new version (append-only) carrying the existing
+    # three layers forward. No path yet = nothing to stamp; the
+    # brief still records the learning types.
+    path_kind = profile.get("path_kind", "")
+    path = db.get_current_path(user_id)
+    if path and path_kind and path.get("path_kind") != path_kind:
+        db.save_learning_path(
+            user_id, path["direction"], project=path["project"],
+            done_condition=path["project_done_condition"],
+            source="p7", path_kind=path_kind)
+
     db.log_event(user_id, "plan_generated",
                  {"plan_version": plan_version,
                   "notes_count": len(payload["notes"]),
+                  "brief_version": brief_version,
+                  "path_kind": path_kind,
                   "llm_call_id": llm_call_id,
                   "onboarding_started_at": started},
                  source="genplan")
     print(f"[GENPLAN] {user_id}: plan v{plan_version} + "
-          f"{len(payload['notes'])} notes generated — review via "
-          f"/plan and /notes before the first sequence send", flush=True)
+          f"{len(payload['notes'])} notes + brief v{brief_version} "
+          f"generated — review via /plan and /notes before the first "
+          f"sequence send", flush=True)
     return {"plan_version": plan_version,
             "notes": len(payload["notes"]),
+            "brief_version": brief_version,
+            "path_kind": path_kind,
             "llm_call_id": llm_call_id}
 
 
