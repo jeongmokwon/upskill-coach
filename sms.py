@@ -819,6 +819,100 @@ _EXPECT_VOCAB = frozenset({"no_reply", "reply", "advance", "withdraw",
 _EXPECT_MARKER_RE = re.compile(r'\[EXPECT:\s*([a-z_]+)\s*\]', re.IGNORECASE)
 
 
+# ─── Send guards (mechanical, no LLM) ───────────────────────────────
+#
+# Pilot user #1 stopped replying at exactly the message that asked two
+# open-ended things at once. Question burden is the one conversational
+# rule we can enforce objectively, so we do: count question marks
+# across the whole outbound (bubbles included). One regeneration
+# attempt with the violation named; if it still violates we SEND
+# ANYWAY and log it — a coach that goes silent is worse than a coach
+# that asks two questions — and the violation rate becomes data.
+
+MAX_QUESTIONS = 1
+_QUESTION_RE = re.compile(r"[?？]")
+
+
+def check_send_guards(text, steps):
+    """→ list of violation strings ([] = clean)."""
+    violations = []
+    n = len(_QUESTION_RE.findall(text or ""))
+    if n > MAX_QUESTIONS:
+        violations.append(
+            f"{n} questions in one message — ask exactly one. Keep the "
+            f"single most important question and drop the rest (they "
+            f"can come in later turns).")
+    if not steps:
+        violations.append(
+            "missing [STEP: ...] — every message must record the "
+            "coaching move(s) it plays.")
+    return violations
+
+
+def generate_message(user_id, system_prompt, history, trigger,
+                     max_tokens=500, prompt_versions=None):
+    """Call the model, process its markers, and enforce the send
+    guards with ONE regeneration attempt.
+
+    Returns (text, steps, expect, llm_call_id) or (None, ...) if the
+    call itself failed. A message that still violates after the retry
+    is returned anyway — silence is worse — with a
+    send_guard_violation event recording what slipped through.
+    """
+    client = anthropic.Anthropic()
+    attempt_history = list(history)
+    text = steps = expect = llm_call_id = None
+    violations = []
+
+    for attempt in (1, 2):
+        try:
+            resp = client.messages.create(
+                model=MODEL, max_tokens=max_tokens,
+                system=system_prompt, messages=attempt_history)
+            raw = resp.content[0].text.strip()
+        except Exception as e:
+            print(f"[SMS] ❌ Claude call failed on {trigger}: {e}",
+                  flush=True)
+            db.log_event(user_id, "llm_error",
+                         {"where": trigger, "error": str(e)[:300]},
+                         source="sms")
+            return None, [], None, None
+
+        # Flight-record BEFORE any stripping (T2b): the record shows
+        # exactly what the model produced, markers included.
+        llm_call_id = db.save_llm_call(
+            user_id, trigger if attempt == 1 else f"{trigger}_retry",
+            MODEL, system_prompt, attempt_history,
+            prompt_versions or {}, raw)
+
+        text = _strip_extraction_markers(user_id, raw)
+        text = _process_ignition_markers(user_id, text, trigger=trigger)
+        text = _process_plan_markers(user_id, text, trigger=trigger)
+        expect, text = _process_expect_marker(text)
+        steps, text = _process_step_marker(user_id, text)
+
+        violations = check_send_guards(text, steps)
+        if not violations or attempt == 2:
+            break
+        print(f"[SMS] guard violation, regenerating: {violations}",
+              flush=True)
+        attempt_history = attempt_history + [
+            {"role": "assistant", "content": raw},
+            {"role": "user",
+             "content": "Your message broke a hard rule:\n- "
+                        + "\n- ".join(violations)
+                        + "\nRewrite it. Same intent, same warmth, "
+                          "rule respected."}]
+
+    if violations:
+        print(f"[SMS] ⚠️ sending despite violations: {violations}",
+              flush=True)
+        db.log_event(user_id, "send_guard_violation",
+                     {"violations": violations, "trigger": trigger,
+                      "llm_call_id": llm_call_id}, source="sms")
+    return text, steps, expect, llm_call_id
+
+
 def _process_expect_marker(text):
     """Extract [EXPECT: token] → (expect_or_None, stripped_text).
     Unknown tokens stored verbatim (vocabulary feedback), flagged."""
@@ -1003,7 +1097,8 @@ def handle_inbound(from_number, body):
     # before a phase transition don't bleed in.
     phase_state = db.get_user_phase(user_id)
     history = db.get_recent_sms_messages(
-        user_id, limit=HISTORY_LIMIT, since=phase_state["phase_started_at"]
+        user_id, limit=HISTORY_LIMIT, since=phase_state["phase_started_at"],
+        with_time=True
     )
     # `history` ends with the user message we just inserted, which is
     # what the Anthropic API expects (last message = user turn).
@@ -1023,37 +1118,11 @@ def handle_inbound(from_number, body):
     # to a scheduled ping or texting spontaneously.
     system_prompt, prompt_versions = _build_system_prompt_for_reply(user_id)
 
-    try:
-        client = anthropic.Anthropic()
-        resp = client.messages.create(
-            model=MODEL,
-            max_tokens=400,
-            system=system_prompt,
-            messages=history,
-        )
-        reply_text = resp.content[0].text.strip()
-    except Exception as e:
-        print(f"[SMS] ❌ Claude call failed on inbound: {e}", flush=True)
-        db.log_event(user_id, "llm_error",
-                     {"where": "inbound_reply", "error": str(e)[:300]},
-                     source="sms")
+    reply_text, steps, expect, llm_call_id = generate_message(
+        user_id, system_prompt, history, "inbound_reply",
+        max_tokens=400, prompt_versions=prompt_versions)
+    if reply_text is None:
         return None
-
-    # Flight-recorder snapshot of the call (T2b): the exact input the
-    # API received + the raw response, BEFORE marker-stripping so the
-    # record shows what the model actually produced.
-    llm_call_id = db.save_llm_call(
-        user_id, "inbound_reply", MODEL, system_prompt, history,
-        prompt_versions, reply_text)
-
-    # Parse & handle [COMMIT: "..."] marker, strip it from user-visible text.
-    reply_text = _strip_extraction_markers(user_id, reply_text)
-    reply_text = _process_ignition_markers(user_id, reply_text,
-                                           trigger="inbound_reply")
-    reply_text = _process_plan_markers(user_id, reply_text,
-                                       trigger="inbound_reply")
-    expect, reply_text = _process_expect_marker(reply_text)
-    steps, reply_text = _process_step_marker(user_id, reply_text)
     _check_plan_deviation(user_id, steps)
     # Field fills above may have completed the checklist — code, not
     # the LLM, makes that call. Completion fires the initial plan
@@ -1208,7 +1277,8 @@ def handle_cron_tick(slot, window=None):
     # Scope history to current phase — see get_recent_sms_messages docstring.
     phase_state = db.get_user_phase(user_id)
     history = db.get_recent_sms_messages(
-        user_id, limit=HISTORY_LIMIT, since=phase_state["phase_started_at"]
+        user_id, limit=HISTORY_LIMIT, since=phase_state["phase_started_at"],
+        with_time=True
     )
 
     # If there's no recent SMS history, prime with a single user-turn
@@ -1222,34 +1292,11 @@ def handle_cron_tick(slot, window=None):
         # system message; this is just a "go" signal.
         history.append({"role": "user", "content": f"(scheduled {slot} slot fired)"})
 
-    try:
-        client = anthropic.Anthropic()
-        resp = client.messages.create(
-            model=MODEL,
-            max_tokens=500,
-            system=system_prompt,
-            messages=history,
-        )
-        text = resp.content[0].text.strip()
-    except Exception as e:
-        print(f"[SMS] ❌ Claude call failed on {slot}: {e}", flush=True)
-        db.log_event(user_id, "llm_error",
-                     {"where": f"cron_{slot}", "error": str(e)[:300]},
-                     source="cron")
+    text, steps, expect, llm_call_id = generate_message(
+        user_id, system_prompt, history, f"cron_{slot}",
+        max_tokens=500, prompt_versions=prompt_versions)
+    if text is None:
         return None
-
-    # Flight-recorder snapshot of the call (T2b) — raw response,
-    # pre-marker-stripping.
-    llm_call_id = db.save_llm_call(
-        user_id, f"cron_{slot}", MODEL, system_prompt, history,
-        prompt_versions, text)
-
-    # Parse & handle [COMMIT: "..."] marker (Phase 0→1), strip it out.
-    text = _strip_extraction_markers(user_id, text)
-    text = _process_ignition_markers(user_id, text, trigger=f"cron_{slot}")
-    text = _process_plan_markers(user_id, text, trigger=f"cron_{slot}")
-    expect, text = _process_expect_marker(text)
-    steps, text = _process_step_marker(user_id, text)
     _check_plan_deviation(user_id, steps)
     if db.check_and_complete_onboarding(user_id):
         import genplan

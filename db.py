@@ -1250,7 +1250,8 @@ def save_sms_message(user_id, role, content, direction):
     conn.close()
 
 
-def get_recent_sms_messages(user_id, limit=20, since=None):
+def get_recent_sms_messages(user_id, limit=20, since=None,
+                            with_time=False):
     """Return last N SMS messages for `user_id`, oldest-first.
 
     Format matches Anthropic's messages array — [{role, content}, ...] —
@@ -1262,11 +1263,16 @@ def get_recent_sms_messages(user_id, limit=20, since=None):
     the LLM's visible history to the current phase, so old
     conversations from before a phase transition don't bleed into
     the current mode and cause the LLM to reconcile-then-hallucinate.
+
+    `with_time=True` prefixes each turn with how long ago it was
+    ("[3시간 전] ..."). Observed failure without it: the coach
+    referenced a message sent four hours earlier as "어제" — history
+    carries no clock, so elapsed time was guessed.
     """
     conn = get_conn()
     if since:
         cur = _execute(conn,
-            f"SELECT role, content FROM messages "
+            f"SELECT role, content, timestamp FROM messages "
             f"WHERE session_id = {_P} AND channel = 'sms' "
             f"AND timestamp > {_P} "
             f"ORDER BY id DESC LIMIT {_P}",
@@ -1274,7 +1280,7 @@ def get_recent_sms_messages(user_id, limit=20, since=None):
         )
     else:
         cur = _execute(conn,
-            f"SELECT role, content FROM messages "
+            f"SELECT role, content, timestamp FROM messages "
             f"WHERE session_id = {_P} AND channel = 'sms' "
             f"ORDER BY id DESC LIMIT {_P}",
             (_sms_sid(user_id), limit)
@@ -1282,7 +1288,30 @@ def get_recent_sms_messages(user_id, limit=20, since=None):
     rows = _fetchall(cur)
     conn.close()
     rows.reverse()  # oldest-first for the LLM
-    return [{"role": r["role"], "content": r["content"]} for r in rows]
+    if not with_time:
+        return [{"role": r["role"], "content": r["content"]} for r in rows]
+
+    now = datetime.now()
+    out = []
+    for r in rows:
+        label = ""
+        ts = r.get("timestamp")
+        if ts:
+            try:
+                # timestamps may be datetime (pg) or ISO text (sqlite)
+                when = ts if isinstance(ts, datetime) else \
+                    datetime.fromisoformat(str(ts).replace("Z", ""))
+                mins = (now - when).total_seconds() / 60.0
+                if mins < 90:
+                    label = f"[{max(1, round(mins))}분 전] "
+                elif mins < 60 * 36:
+                    label = f"[{round(mins / 60)}시간 전] "
+                else:
+                    label = f"[{round(mins / 1440)}일 전] "
+            except Exception:
+                label = ""
+        out.append({"role": r["role"], "content": label + r["content"]})
+    return out
 
 
 def get_today_sessions_for_user(user_id, tz_offset_hours=-8):
