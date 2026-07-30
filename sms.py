@@ -522,13 +522,11 @@ _IGNITION_SCORE_RE = re.compile(r'\[IGNITION:\s*([1-5])\s*\]')
 
 
 def _process_ignition_markers(user_id, text, trigger):
-    """Parse & act on [IGNITION_DEF:] and [IGNITION: n]; return text
-    with both stripped."""
-    def_match = _IGNITION_DEF_RE.search(text)
-    if def_match:
-        db.set_ignition_marker(user_id, def_match.group(1).strip())
-        text = _IGNITION_DEF_RE.sub("", text)
-
+    """Act on [IGNITION: n] — the coach's live cheap signal, a
+    judgment only the speaker can make in the moment. Returns the
+    text with the score stripped."""
+    # [IGNITION_DEF:] is an EXTRACTION marker — the analysis call owns
+    # it now; it is stripped (not acted on) by _strip_extraction_markers.
     score_match = _IGNITION_SCORE_RE.search(text)
     if score_match:
         score = int(score_match.group(1))
@@ -566,41 +564,45 @@ _SCHEDULE_MARKER_RE = re.compile(r'\[SCHEDULE:\s*"([^"]{3,200})"\s*\]')
 _WINDOW_RE = re.compile(r'^([01]?\d|2[0-3]):([0-5]\d)-([01]?\d|2[0-3]):([0-5]\d)$')
 
 
-def _process_onboarding_markers(user_id, text):
-    """Parse & act on [PATH:] and [SCHEDULE:]; strip both; then let
-    the server recompute the checklist (completion may flip here)."""
-    m = _PATH_MARKER_RE.search(text)
-    if m:
-        parts = [p.strip() for p in m.group(1).split("|")]
-        if len(parts) == 3 and all(parts):
-            db.save_learning_path(user_id, direction=parts[0],
-                                  project=parts[1],
-                                  done_condition=parts[2])
-        else:
-            print(f"[SMS] ⚠️ malformed [PATH:] ({len(parts)} parts) — "
-                  f"not saved", flush=True)
-        text = _PATH_MARKER_RE.sub("", text)
+def parse_schedule_windows(raw):
+    """'20:00-22:00, 08:00-08:30' → [{'start','end'}] or [] if any
+    token is malformed (all-or-nothing: a half-parsed schedule would
+    silently mis-time sends). Shared with the analysis call."""
+    tokens = [t.strip() for t in (raw or "").split(",") if t.strip()]
+    windows = []
+    for t in tokens:
+        m = _WINDOW_RE.match(t)
+        if not m:
+            return []
+        windows.append({"start": f"{int(m.group(1)):02d}:{m.group(2)}",
+                        "end": f"{int(m.group(3)):02d}:{m.group(4)}"})
+    return windows
 
-    m = _SCHEDULE_MARKER_RE.search(text)
-    if m:
-        raw = m.group(1).strip()
-        tokens = [t.strip() for t in raw.split(",") if t.strip()]
-        windows = []
-        ok = bool(tokens)
-        for t in tokens:
-            wm = _WINDOW_RE.match(t)
-            if not wm:
-                ok = False
-                break
-            windows.append({"start": f"{int(wm.group(1)):02d}:{wm.group(2)}",
-                            "end": f"{int(wm.group(3)):02d}:{wm.group(4)}"})
-        if ok:
-            db.save_user_schedule(user_id, windows, raw_text=raw)
-        else:
-            print(f"[SMS] ⚠️ malformed [SCHEDULE:] {raw!r} — not saved",
-                  flush=True)
-        text = _SCHEDULE_MARKER_RE.sub("", text)
 
+# Extraction markers are NO LONGER acted on here (brief §7 "Markers
+# vs. the analysis call"): those fields are recovered from the
+# transcript by analyze_turn, which is single-task, sees the whole
+# conversation, and is re-runnable. The generation model may still
+# emit them out of habit (they sit in its own history), so we strip
+# them so nothing leaks to the user — and log it, since a rising
+# count means the prompt still teaches them.
+_EXTRACTION_MARKER_RES = (
+    _GOAL_MARKER_RE, _COMMIT_MARKER_RE, _PATH_MARKER_RE,
+    _SCHEDULE_MARKER_RE, _IGNITION_DEF_RE,
+)
+
+
+def _strip_extraction_markers(user_id, text):
+    stripped = []
+    for rx in _EXTRACTION_MARKER_RES:
+        if rx.search(text):
+            stripped.append(rx.pattern.split(":")[0].strip("[\\"))
+            text = rx.sub("", text)
+    if stripped:
+        print(f"[SMS] stripped stale extraction markers {stripped} "
+              f"(analysis call owns these now)", flush=True)
+        db.log_event(user_id, "stale_marker_stripped",
+                     {"markers": stripped}, source="sms")
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
 
@@ -612,32 +614,33 @@ def _build_onboarding_block(user_id):
     state = db.get_onboarding_state(user_id)
     if state["completed_at"]:
         return ""
-    label = {"goal": "goal (their own words — [GOAL:])",
-             "path": "big-steps path ([PATH: \"direction | project | "
-                     "done-condition\"])",
-             "bite": "first concrete task for the next day-or-two "
-                     "([COMMIT:])",
-             "ignition_marker": "their observable definition of \"it "
-                                "started\" ([IGNITION_DEF:])",
-             "schedule": "agreed messaging windows ([SCHEDULE: "
-                         "\"20:00-22:00\"], their local time)"}
+    label = {"goal": "their goal, in their own words",
+             "path": "the big-steps picture: direction, a mid-horizon "
+                     "target, and how they'll know it's reached",
+             "bite": "one concrete task for the next day or two",
+             "ignition_marker": "their own observable definition of "
+                                "\"it started\"",
+             "schedule": "the times of day they want to hear from you",
+             "offer": "what YOU will do for them — proposed concretely "
+                      "and confirmed by them"}
+    missing = state["missing"]
     lines = [
-        "## Onboarding checklist (server-computed — fill fields via "
-        "markers, never announce completion yourself)",
+        "## Onboarding — what is still unsettled",
         "",
-        "Filled: " + (", ".join(state["filled"]) or "(none yet)"),
-        "Missing:",
+        "Settled so far: " + (", ".join(state["filled"]) or "(nothing yet)"),
     ]
-    for f in state["missing"]:
-        lines.append(f"- {label[f]}")
+    if missing:
+        lines += ["", f"**This message's focus: {label[missing[0]]}.**",
+                  "Work only that one. The rest are for later turns:"]
+        for f in missing[1:]:
+            lines.append(f"- {label[f]}")
     lines += [
         "",
-        "Steer the conversation toward the missing fields naturally — "
-        "no interrogation; a couple of fields per evening is fine "
-        "(discovery runs up to 3 days). Fill a field ONLY when the "
-        "user has actually said/agreed to it — never speculatively. "
-        "The server flips onboarding to complete when the last field "
-        "fills; until then this checklist reappears every call.",
+        "You do not record anything and you never announce that "
+        "onboarding is done — a separate pass reads the conversation "
+        "and the server decides. Just get REAL agreement on the focus "
+        "item, one at a time, at conversational pace (discovery runs "
+        "up to 3 days; a couple of items an evening is fine).",
     ]
     return "\n".join(lines)
 
@@ -732,88 +735,6 @@ ZERO-DEMAND re-opening. This is mechanical, not your judgment call:
 # single-task LLM call that runs BEFORE the reply prompt is built —
 # the generation then receives the already-updated assignment. Code
 # moves the cursor; the judge only answers one question.
-_JUDGE_TOOL = {
-    "name": "judge_step",
-    "description": "Judge whether the user's latest reply completed "
-                   "the current coaching step's purpose.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "completed": {"type": "string",
-                          "enum": ["yes", "no", "uncertain"]},
-            "reason": {"type": "string"},
-        },
-        "required": ["completed", "reason"],
-    },
-}
-
-
-def _judge_step_completion(user_id, user_text):
-    """Run the dedicated judge on an inbound reply. Advances the
-    cursor on a confident 'yes'. Never raises — judging must not be
-    able to break the reply path."""
-    try:
-        if db.get_onboarding_state(user_id)["completed_at"] is None:
-            return
-        plan = db.get_current_plan(user_id)
-        if not plan or plan["cursor"] >= len(plan["steps"]):
-            return
-        step = plan["steps"][plan["cursor"]]
-        last_out = db.get_last_event(user_id, "sms_out")
-        last_coach = ""
-        if last_out:
-            try:
-                last_coach = json.loads(last_out["payload"]).get("text", "")
-            except Exception:
-                pass
-        system = (
-            "You judge ONE thing for a coaching system: did the user's "
-            "latest reply complete the current step's purpose?\n\n"
-            f"Current step: {step['tag']}@{step.get('intensity', 2)} — "
-            f"{step.get('intent', '')}\n\n"
-            "yes = the reply itself accomplishes what the step was for "
-            "(e.g. for an elicit step: they actually articulated it; "
-            "for an ask step: they did or committed to the thing). "
-            "no = not yet. uncertain = genuinely ambiguous — treated "
-            "as no. Judge the substance, not politeness."
-        )
-        messages = [{"role": "user", "content":
-                     f"COACH (last message): {last_coach}\n\n"
-                     f"USER (latest reply): {user_text}"}]
-        client = anthropic.Anthropic()
-        resp = client.messages.create(
-            model=MODEL, max_tokens=300, system=system,
-            messages=messages, tools=[_JUDGE_TOOL],
-            tool_choice={"type": "tool", "name": "judge_step"},
-        )
-        verdict = next((b.input for b in resp.content
-                        if getattr(b, "type", "") == "tool_use"), None)
-        llm_call_id = db.save_llm_call(
-            user_id, "step_judge", MODEL, system, messages,
-            prompt_versions={},
-            response_text=json.dumps(verdict, ensure_ascii=False)
-            if verdict else "")
-        if not verdict:
-            return
-        db.log_event(user_id, "step_judged",
-                     {"step_index": plan["cursor"], "tag": step["tag"],
-                      "completed": verdict.get("completed"),
-                      "reason": verdict.get("reason", "")[:300],
-                      "llm_call_id": llm_call_id}, source="sms")
-        if verdict.get("completed") == "yes":
-            new_idx = plan["cursor"] + 1
-            db.move_plan_cursor(user_id, new_idx,
-                                reason=f"judge: {verdict.get('reason', '')[:120]}")
-            if new_idx >= len(plan["steps"]):
-                db.log_event(user_id, "plan_completed",
-                             {"version": plan["version"]}, source="sms")
-                print(f"[PLAN] {user_id}: plan v{plan['version']} complete",
-                      flush=True)
-    except Exception as e:
-        print(f"[JUDGE] ⚠️ step judge failed for {user_id}: {e}",
-              flush=True)
-
-
 def _check_plan_deviation(user_id, steps):
     """Detection net (P0-D): the generation's step tags confess when
     it played a LATER plan step than the cursor allows — a deviation
@@ -969,48 +890,11 @@ def _process_step_marker(user_id, text):
     return steps, text
 
 
-def _process_commit_marker(user_id, text):
-    """Parse and act on control markers the LLM may embed in its
-    response, and return the text with all markers stripped.
-
-    [GOAL: "..."]   — save/refine the agreed goal (any phase).
-    [COMMIT: "..."] — save first bite + transition discovery→first_bite.
-    """
-    goal_match = _GOAL_MARKER_RE.search(text)
-    if goal_match:
-        db.set_agreed_goal(user_id, goal_match.group(1).strip())
-        text = _GOAL_MARKER_RE.sub("", text)
-
-    match = _COMMIT_MARKER_RE.search(text)
-    if match:
-        bite = match.group(1).strip()
-        phase = db.get_user_phase(user_id)["phase"]
-        if phase == "discovery":
-            # Decision point (T3): accept the LLM's commit marker as a
-            # real phase transition. Deterministic accept today; the
-            # hook exists so acceptance policy (e.g. require explicit
-            # user confirmation) can be varied and joined to outcomes.
-            choice, decision_id = policy.decide(
-                "commit_marker_accept", user_id,
-                options=["accept", "hold"],
-                context={"bite": bite[:200]})
-            if choice == "accept":
-                # P0-A: the bite is ONE checklist field, not the whole
-                # graduation — the phase flips only when the full
-                # onboarding predicate completes (see
-                # check_and_complete_onboarding, called after marker
-                # processing on both paths).
-                db.set_agreed_bite(user_id, bite, decision_id=decision_id)
-        else:
-            # LLM emitted a commit while already in Phase 1 — ignore, log.
-            print(f"[SMS] stray COMMIT marker while phase={phase!r}, ignoring", flush=True)
-            db.log_event(user_id, "commit_marker_ignored",
-                         {"phase": phase, "bite": bite}, source="sms")
-        text = _COMMIT_MARKER_RE.sub("", text)
-
-    # Collapse the double-blank that stripping mid-paragraph can leave.
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    return text
+# _process_commit_marker is gone: [GOAL:] and [COMMIT:] were
+# extraction markers and the analysis call owns those fields now.
+# The operator rescue endpoints (/sms/set-goal, /sms/set-bite) still
+# write them directly, and db.commit_first_bite still exists for the
+# forced-transition rescue path.
 
 
 # ─── Inbound message handling ───────────────────────────────────────
@@ -1128,7 +1012,11 @@ def handle_inbound(from_number, body):
     # building the prompt — the generation call receives the
     # already-advanced assignment (judge is a no-op for users without
     # a plan or mid-onboarding).
-    _judge_step_completion(user_id, body)
+    # One analysis pass: extracts onboarding fields from the whole
+    # transcript AND judges the current plan step (brief §7). Runs
+    # before the prompt is built so generation sees updated state.
+    import analyze_turn
+    analyze_turn.analyze(user_id, trigger="inbound")
 
     # Use the phase-specific evening prompt for inbound replies too —
     # the LLM should be in the same mode whether the user is replying
@@ -1159,10 +1047,9 @@ def handle_inbound(from_number, body):
         prompt_versions, reply_text)
 
     # Parse & handle [COMMIT: "..."] marker, strip it from user-visible text.
-    reply_text = _process_commit_marker(user_id, reply_text)
+    reply_text = _strip_extraction_markers(user_id, reply_text)
     reply_text = _process_ignition_markers(user_id, reply_text,
                                            trigger="inbound_reply")
-    reply_text = _process_onboarding_markers(user_id, reply_text)
     reply_text = _process_plan_markers(user_id, reply_text,
                                        trigger="inbound_reply")
     expect, reply_text = _process_expect_marker(reply_text)
@@ -1358,9 +1245,8 @@ def handle_cron_tick(slot, window=None):
         prompt_versions, text)
 
     # Parse & handle [COMMIT: "..."] marker (Phase 0→1), strip it out.
-    text = _process_commit_marker(user_id, text)
+    text = _strip_extraction_markers(user_id, text)
     text = _process_ignition_markers(user_id, text, trigger=f"cron_{slot}")
-    text = _process_onboarding_markers(user_id, text)
     text = _process_plan_markers(user_id, text, trigger=f"cron_{slot}")
     expect, text = _process_expect_marker(text)
     steps, text = _process_step_marker(user_id, text)

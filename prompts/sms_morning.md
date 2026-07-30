@@ -45,5 +45,4 @@ to one line of pure hello and no ask.
 ## Output
 
 **Almost always ONE message**, under 100 characters. Two only in
-rare cases. Never emit the [COMMIT:] marker at 7am (Phase transitions
-happen in evening conversations, not here).
+rare cases.

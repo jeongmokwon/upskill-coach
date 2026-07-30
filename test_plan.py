@@ -95,8 +95,9 @@ print("4) step judge")
 
 
 class QueueFake:
-    """Serves queued responses: dicts → tool_use blocks, strings →
-    text blocks. handle_inbound makes judge call first, reply second."""
+    """Serves queued responses: dicts → tool_use blocks (the analysis
+    call), strings → text blocks (generation). sms and analyze_turn
+    share one anthropic module, so this fake serves both."""
     queue = []
 
     def __init__(self, *a, **kw):
@@ -122,34 +123,35 @@ class QueueFake:
             return _Resp()
 
 
+import analyze_turn  # noqa: E402
 sms.anthropic.Anthropic = QueueFake
 
 QueueFake.queue = [
-    {"completed": "yes", "reason": "he articulated a concrete why"},
+    {"step_completed": "yes", "step_reason": "he articulated a concrete why"},
     ("오 좋은 이유다. 그럼 손 풀자 — 한 줄만: x = torch.tensor([2.0])\n"
      "[STEP: micro_ask@1]\n[EXPECT: advance]"),
 ]
 reply = sms.handle_inbound("+15550001111", "스타트업에 ML을 직접 쓰고 싶어서야")
-check("judge yes → cursor advanced BEFORE reply",
+check("analysis yes → cursor advanced BEFORE reply",
       db.get_current_plan(U)["cursor"] == 1
       and len(events_of("step_judged")) == 1
       and json.loads(events_of("step_judged")[0]["payload"])["completed"] == "yes")
 check("reply clean + steps/expect recorded",
       reply and "[STEP" not in reply
       and json.loads(events_of("sms_out")[-1]["payload"])["expect"] == "advance")
-check("judge call flight-recorded",
+check("analysis call flight-recorded",
       db.get_llm_call(json.loads(events_of("step_judged")[0]["payload"])
                       ["llm_call_id"]) is not None)
 
 QueueFake.queue = [
-    {"completed": "no", "reason": "he acknowledged but did not act"},
+    {"step_completed": "no", "step_reason": "he acknowledged but did not act"},
     "천천히 해도 돼. 준비되면 그 한 줄부터.\n[STEP: validate@1]\n[EXPECT: reply]",
 ]
 sms.handle_inbound("+15550001111", "음 알겠어")
-check("judge no → cursor stays", db.get_current_plan(U)["cursor"] == 1)
+check("analysis no → cursor stays", db.get_current_plan(U)["cursor"] == 1)
 
 QueueFake.queue = [
-    {"completed": "uncertain", "reason": "ambiguous"},
+    {"step_completed": "uncertain", "step_reason": "ambiguous"},
     "그 줄 쳐보니 어때?\n[STEP: micro_ask@1]\n[EXPECT: reply]",
 ]
 sms.handle_inbound("+15550001111", "ㅎㅎ")
@@ -158,7 +160,7 @@ check("uncertain → cursor stays", db.get_current_plan(U)["cursor"] == 1)
 # ── 5. deviation net ─────────────────────────────────────────────────
 print("5) deviation")
 QueueFake.queue = [
-    {"completed": "no", "reason": "not yet"},
+    {"step_completed": "no", "step_reason": "not yet"},
     ("이제 캬파시 영상 10:32부터 틀어!\n"
      "[STEP: handoff@2]\n[EXPECT: reply]"),
 ]
@@ -171,12 +173,12 @@ check("playing a later step than the cursor → planner_deviation",
 # ── 6. completion through the judge ──────────────────────────────────
 print("6) completion")
 QueueFake.queue = [
-    {"completed": "yes", "reason": "he typed the line and reported output"},
+    {"step_completed": "yes", "step_reason": "he typed the line and reported output"},
     "됐다!! 다음 줄 가자.\n[STEP: evoke_mastery@1]\n[EXPECT: reply]",
 ]
 sms.handle_inbound("+15550001111", "쳤어. tensor([2.]) 나왔어")
 QueueFake.queue = [
-    {"completed": "yes", "reason": "he merged into the main task"},
+    {"step_completed": "yes", "step_reason": "he merged into the main task"},
     "고고. 이제 네 거다.\n[STEP: release@1]\n[EXPECT: no_reply]",
 ]
 sms.handle_inbound("+15550001111", "영상 틀었고 노트 열었어")
