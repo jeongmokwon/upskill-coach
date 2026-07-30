@@ -1433,9 +1433,10 @@ async def _onboarding_handler(request):
 
 
 async def _plan_handler(request):
-    """Sequence-plan governance (exploration v2).
+    """Sequence-plan governance (exploration v2) + the profile brief.
 
-    GET  /plan?secret=...[&user_id=X]     — current plan + cursor
+    GET  /plan?secret=...[&user_id=X]     — profile brief, path kind,
+                                            current plan + cursor
     POST /plan?secret=...  body: JSON     — set a new plan version
          {user_id?, steps: [{tag, intensity, intent}], rationale?}
     """
@@ -1467,13 +1468,44 @@ async def _plan_handler(request):
         return web.json_response({"ok": True, "version": version})
 
     user_id = request.query.get("user_id", "").strip() or default_user
+    parts = []
+
+    # Profile brief first — the plan only makes sense against who the
+    # user is (brief §7 "User profile brief").
+    brief = db.get_user_profile_brief(user_id)
+    path = db.get_current_path(user_id)
+    if brief:
+        wants = json.loads(brief["wants_json"] or "[]")
+        parts += [f"# profile brief — {user_id} v{brief['version']} "
+                  f"({brief['source']}, {brief['ts'][:16]})",
+                  f"job:             {brief['job'] or '(not stated)'}",
+                  f"learning types:  "
+                  f"{', '.join(json.loads(brief['learning_types_json'] or '[]')) or '(none)'}",
+                  f"materials:       "
+                  f"{', '.join(json.loads(brief['materials_json'] or '[]')) or '(none)'}",
+                  f"path kind:       "
+                  f"{(path or {}).get('path_kind') or '(not set)'}",
+                  "wants (their own words):"]
+        for w in wants:
+            parts.append(f"  · \"{w.get('quote', '')}\"  → "
+                         f"{w.get('meaning', '')}")
+        if not wants:
+            parts.append("  (none recorded)")
+        parts += [f"personality:     {brief['personality'] or '(none)'}",
+                  f"rationale:       {brief['rationale'] or '(none)'}",
+                  ""]
+    else:
+        parts += [f"# profile brief — {user_id}: (none generated — see "
+                  f"POST /plan/generate)", ""]
+
     plan = db.get_current_plan(user_id)
     if not plan:
-        return web.Response(text=f"(no plan for {user_id})",
+        parts.append(f"(no plan for {user_id})")
+        return web.Response(text="\n".join(parts),
                             content_type="text/plain")
-    parts = [f"# sequence plan — {user_id} v{plan['version']} "
-             f"(cursor at step {plan['cursor'] + 1} of {len(plan['steps'])})",
-             f"rationale: {plan['rationale']}", ""]
+    parts += [f"# sequence plan — {user_id} v{plan['version']} "
+              f"(cursor at step {plan['cursor'] + 1} of {len(plan['steps'])})",
+              f"rationale: {plan['rationale']}", ""]
     for i, s in enumerate(plan["steps"]):
         mark = "→" if i == plan["cursor"] else " "
         parts.append(f" {mark} {i + 1}. {s['tag']}@{s.get('intensity', 2)}"

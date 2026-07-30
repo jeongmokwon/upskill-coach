@@ -432,6 +432,49 @@ def init_db():
         conn.cursor().execute(
             "CREATE INDEX IF NOT EXISTS idx_paths_user ON learning_paths (user_id, version)"
         )
+        # Migrate: learning_paths.path_kind (brief §7 "Learning
+        # types"). The direction/project+done-condition/bite middle
+        # layer is project-shaped and does not fit every learner;
+        # path_kind records which framing applies — 'deliverable'
+        # (project with a done-condition) / 'coverage' (a body of
+        # material to reach a level over) / 'duration' (sustained
+        # practice). Own transaction, same rationale as above.
+        for col, ddl in [
+            ("path_kind", "TEXT DEFAULT ''"),
+        ]:
+            try:
+                conn.cursor().execute(f"ALTER TABLE learning_paths ADD COLUMN {col} {ddl}")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+        # User profile briefs (brief §7 "User profile brief").
+        # Generated at onboarding completion by the same call that
+        # produces notes + the sequence plan. Versioned + append-only
+        # like every other derived per-user artifact: a new read of
+        # the user is a new row, never an overwrite. Structured where
+        # a machine branches on it (learning_types), free-form where
+        # only the LLM consumes it (personality). wants_json holds
+        # VERBATIM user quotes — raw is sacred applies to
+        # self-description.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS user_profile_briefs (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                job TEXT NOT NULL DEFAULT '',
+                learning_types_json TEXT NOT NULL DEFAULT '[]',
+                materials_json TEXT NOT NULL DEFAULT '[]',
+                wants_json TEXT NOT NULL DEFAULT '[]',
+                personality TEXT NOT NULL DEFAULT '',
+                rationale TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'p7',
+                llm_call_id TEXT
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_briefs_user ON user_profile_briefs (user_id, version)"
+        )
         # Per-user send schedule (storage here; the hourly tick that
         # consumes it is P0-C). windows_json: [{"start": "HH:MM",
         # "end": "HH:MM"}] in the user's local (PT) day.
@@ -727,7 +770,33 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_avail_user ON availability_snapshots (user_id, version);
+
+            CREATE TABLE IF NOT EXISTS user_profile_briefs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                job TEXT NOT NULL DEFAULT '',
+                learning_types_json TEXT NOT NULL DEFAULT '[]',
+                materials_json TEXT NOT NULL DEFAULT '[]',
+                wants_json TEXT NOT NULL DEFAULT '[]',
+                personality TEXT NOT NULL DEFAULT '',
+                rationale TEXT NOT NULL DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'p7',
+                llm_call_id TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_briefs_user ON user_profile_briefs (user_id, version);
         """)
+        # learning_paths.path_kind migration — see Postgres branch for
+        # rationale. Runs after the table exists.
+        for col, default in [
+            ("path_kind", "TEXT DEFAULT ''"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE learning_paths ADD COLUMN {col} {default}")
+            except Exception:
+                pass
 
     conn.commit()
     conn.close()
@@ -1517,6 +1586,68 @@ def get_user_notes(user_id, include_retired=False):
     return notes
 
 
+# ─── User profile brief (brief §7 "User profile brief") ──────────
+#
+# Who this learner is, as read off their onboarding conversation:
+# job/field, learning types (the fixed multi-label taxonomy that the
+# offer and step selection branch on), what they learn FROM, what
+# they want from Theo AS VERBATIM QUOTES, and a free-form
+# personality read. Versioned + append-only; the latest version is
+# the live one. Immediate use, no approval gate — nightly revisions
+# to it will be proposal-gated later.
+
+def save_user_profile_brief(user_id, job="", learning_types=None,
+                            materials=None, wants=None, personality="",
+                            rationale="", source="p7", llm_call_id=None):
+    """Append a profile-brief version. wants: [{"quote", "meaning"}]
+    where quote is the user's OWN words. Returns the new version
+    number. Emits profile_brief_saved — a changed read of the user is
+    an intervention-shaping event and must be joinable to what the
+    coach did next."""
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT MAX(version) AS v FROM user_profile_briefs "
+        f"WHERE user_id = {_P}", (user_id,))
+    row = _fetchone(cur)
+    version = (row["v"] or 0) + 1 if row else 1
+    _execute(conn,
+        f"INSERT INTO user_profile_briefs (user_id, version, ts, job, "
+        f" learning_types_json, materials_json, wants_json, personality, "
+        f" rationale, source, llm_call_id) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, "
+        f"{_P}, {_P})",
+        (user_id, version, datetime.now().isoformat(), job,
+         json.dumps(learning_types or [], ensure_ascii=False),
+         json.dumps(materials or [], ensure_ascii=False),
+         json.dumps(wants or [], ensure_ascii=False),
+         personality, rationale, source, llm_call_id))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "profile_brief_saved",
+              {"version": version, "job": job,
+               "learning_types": learning_types or [],
+               "materials": materials or [],
+               "wants": [w.get("quote", "") for w in (wants or [])],
+               "llm_call_id": llm_call_id},
+              source=source)
+    print(f"  [BRIEF] v{version} saved for {user_id} "
+          f"(types: {', '.join(learning_types or []) or '-'})", flush=True)
+    return version
+
+
+def get_user_profile_brief(user_id):
+    """Latest brief for a user → row dict, or None if never
+    generated."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM user_profile_briefs WHERE user_id = {_P} "
+        f"ORDER BY version DESC LIMIT 1", (user_id,))
+    row = _fetchone(cur)
+    conn.close()
+    return row
+
+
 # ─── Onboarding state machine (P0-A) ─────────────────────────────
 #
 # Completion is a DERIVED predicate over five stored fields — code
@@ -1560,10 +1691,13 @@ def set_agreed_offer(user_id, offer_text, source="analyze"):
 
 
 def save_learning_path(user_id, direction, project="",
-                       done_condition="", source="llm_marker"):
+                       done_condition="", source="llm_marker",
+                       path_kind=""):
     """Append a learning-path version (T8; [PATH:] writes v1).
     current_bite mirrors agreed_first_bite at write time so the path
-    row is self-contained."""
+    row is self-contained. path_kind ('deliverable' / 'coverage' /
+    'duration', brief §7 "Learning types") records which framing the
+    middle layer takes for this user; '' = not yet judged."""
     ensure_user_profile_row(user_id)
     prof = get_user_profile_by_id(user_id) or {}
     conn = get_conn()
@@ -1574,16 +1708,18 @@ def save_learning_path(user_id, direction, project="",
     version = (row["v"] or 0) + 1 if row else 1
     _execute(conn,
         f"INSERT INTO learning_paths (user_id, version, ts, direction, "
-        f" project, project_done_condition, current_bite, changed_by) "
-        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+        f" project, project_done_condition, current_bite, changed_by, "
+        f" path_kind) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
         (user_id, version, datetime.now().isoformat(), direction,
          project, done_condition, prof.get("agreed_first_bite") or "",
-         source))
+         source, path_kind))
     conn.commit()
     conn.close()
     log_event(user_id, "path_set",
               {"version": version, "direction": direction,
-               "project": project, "done_condition": done_condition},
+               "project": project, "done_condition": done_condition,
+               "path_kind": path_kind},
               source=source)
     return version
 
