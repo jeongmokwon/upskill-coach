@@ -49,38 +49,33 @@ check("all five fields missing", s["missing"] == list(db.ONBOARDING_FIELDS)
       and s["started_at"] is None and s["completed_at"] is None)
 
 prompt, _ = sms._build_system_prompt("evening", U)
-check("checklist block injected with the missing fields",
-      "Onboarding checklist" in prompt and "[SCHEDULE:" in prompt
+check("checklist block injected, focused on the first missing field",
+      "Onboarding — what is still unsettled" in prompt
+      and "This message's focus: their goal" in prompt
       and "Sequence assignment" not in prompt)
 
 # ── 2. markers fill fields one by one ────────────────────────────────
 print("2) field fills")
-sms._process_commit_marker(U, '[COMMIT: "read 3.1 and note confusions"]')
-check("early COMMIT saves bite WITHOUT phase flip",
+db.set_agreed_bite(U, "read 3.1 and note confusions", source="analyze")
+check("early bite saves WITHOUT phase flip",
       db.get_user_phase(U)["phase"] == "discovery"
       and db.get_user_phase(U)["agreed_first_bite"] != ""
       and len(events_of("bite_committed")) == 1)
 
-text = sms._process_onboarding_markers(
-    U, 'x [PATH: "career change into ML | tiny classifier | trained & evaluated"]')
-check("[PATH:] saved and stripped",
-      "[PATH" not in text and db.get_current_path(U)["direction"]
+db.save_learning_path(U, "career change into ML", "tiny classifier",
+                      "trained & evaluated", source="analyze")
+check("path saved", db.get_current_path(U)["direction"]
       == "career change into ML")
 
-text = sms._process_onboarding_markers(U, 'x [PATH: "only two | parts"]')
-check("malformed PATH not saved",
-      db.get_current_path(U)["version"] == 1)
-
-text = sms._process_onboarding_markers(U, 'x [SCHEDULE: "20:00-22:00, 08:00-08:30"]')
-sched = db.get_user_schedule(U)
-check("[SCHEDULE:] parsed to windows",
-      json.loads(sched["windows_json"])[0] == {"start": "20:00", "end": "22:00"})
-
-sms._process_onboarding_markers(U, 'x [SCHEDULE: "8pm to 10"]')
-check("malformed SCHEDULE not saved",
-      db.get_user_schedule(U)["version"] == 1)
+check("schedule windows parse (shared with the analysis call)",
+      sms.parse_schedule_windows("20:00-22:00, 08:00-08:30")[0]
+      == {"start": "20:00", "end": "22:00"}
+      and sms.parse_schedule_windows("8pm to 10") == [])
+db.save_user_schedule(U, sms.parse_schedule_windows("20:00-22:00"),
+                      raw_text="20:00-22:00", source="analyze")
 
 db.set_agreed_goal(U, "become the ML-capable founder")
+db.set_agreed_offer(U, "daily question drills from your notes")
 check("not complete while ignition marker missing",
       not db.check_and_complete_onboarding(U)
       and db.get_onboarding_state(U)["missing"] == ["ignition_marker"])

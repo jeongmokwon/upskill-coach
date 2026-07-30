@@ -1,0 +1,178 @@
+"""
+Per-turn analysis call tests — brief §7 "Markers vs. the analysis
+call".
+
+Run: ./venv/bin/python test_analyze.py  (sqlite; anthropic mocked)
+
+Claims under test: extraction is recovered from the TRANSCRIPT (not
+from markers the speaker must remember to emit), speculation is
+refused by construction (omitted fields write nothing), writes are
+idempotent so history re-runs are safe, the step judgment rides the
+same call, and the generation path no longer acts on extraction
+markers (it only strips them so nothing leaks).
+"""
+
+import json
+import os
+import tempfile
+
+os.environ.pop("DATABASE_URL", None)
+os.environ["TUTOR_USER_ID"] = "u1"
+os.environ["TUTOR_USER_PHONE"] = "+15550009999"
+os.environ.pop("TWILIO_ACCOUNT_SID", None)
+os.environ.pop("TWILIO_FROM_NUMBER", None)
+os.environ["TZ_OFFSET_HOURS"] = "0"
+
+import db  # noqa: E402
+
+db.DB_PATH = os.path.join(tempfile.mkdtemp(), "test_analyze.db")
+db.init_db()
+
+import analyze_turn  # noqa: E402
+import sms  # noqa: E402
+
+U = "u1"
+PASS = []
+
+
+def check(name, cond):
+    print(f"  {'✅' if cond else '❌'} {name}")
+    PASS.append(bool(cond))
+
+
+def events_of(kind):
+    return [r for r in db.get_events(U, limit=300) if r["kind"] == kind]
+
+
+class ToolFake:
+    payload = None
+    seen = []
+
+    def __init__(self, *a, **kw):
+        pass
+
+    class messages:
+        @staticmethod
+        def create(**kwargs):
+            ToolFake.seen.append(kwargs)
+
+            class _B:
+                type = "tool_use"
+                input = ToolFake.payload
+
+            class _R:
+                content = [_B()]
+            return _R()
+
+
+analyze_turn.anthropic.Anthropic = ToolFake
+
+db.ensure_user_profile_row(U)
+db.save_sms_message(U, "assistant", "뭐 배우고 싶어서 왔어?", "out")
+db.save_sms_message(U, "user", "로펌에서 일하는데 업무 지식을 기억하고 싶어", "in")
+
+# ── 1. extraction from the transcript ────────────────────────────────
+print("1) extraction")
+ToolFake.payload = {
+    "goal": "업무에서 쌓은 법률 지식을 질문받으면 바로 답할 수 있게 유지하기",
+    "step_completed": "not_applicable", "step_reason": "no plan",
+}
+res = analyze_turn.analyze(U)
+check("goal written from the conversation, no marker involved",
+      res and "goal" in res["applied"]
+      and db.get_user_phase(U)["agreed_goal"].startswith("업무에서"))
+check("turn_analyzed event + flight-recorded call",
+      len(events_of("turn_analyzed")) == 1
+      and db.get_llm_call(res["llm_call_id"]) is not None)
+sys_prompt = ToolFake.seen[0]["system"]
+check("prompt states what's known and what's missing",
+      "Already known" in sys_prompt and "Still missing" in sys_prompt)
+check("forced tool call", ToolFake.seen[0]["tool_choice"]["name"]
+      == "submit_analysis")
+
+# ── 2. omission = silence; idempotent re-runs ────────────────────────
+print("2) omission & idempotency")
+before = db.get_onboarding_state(U)["filled"]
+ToolFake.payload = {"step_completed": "not_applicable", "step_reason": "-"}
+res = analyze_turn.analyze(U)
+check("empty analysis writes nothing",
+      res["applied"] == []
+      and db.get_onboarding_state(U)["filled"] == before)
+
+ToolFake.payload = {
+    "goal": db.get_user_phase(U)["agreed_goal"],
+    "step_completed": "not_applicable", "step_reason": "-",
+}
+res = analyze_turn.analyze(U)
+check("re-reporting an unchanged value is a no-op (history re-runs safe)",
+      res["applied"] == [])
+
+# ── 3. validated fields ──────────────────────────────────────────────
+print("3) validation")
+ToolFake.payload = {
+    "schedule": "저녁 여덟시쯤", "step_completed": "not_applicable",
+    "step_reason": "-",
+}
+res = analyze_turn.analyze(U)
+check("unparseable schedule refused",
+      "schedule" not in res["applied"] and db.get_user_schedule(U) is None)
+
+ToolFake.payload = {
+    "path_direction": "업무 전문성 유지",
+    "path_project": "정리 자료 3장까지 즉답",
+    "path_done_condition": "무작위 질문 90% 즉답",
+    "schedule": "21:00-22:30",
+    "ignition_marker": "워드 자료 열고 질문에 소리내서 답하기 시작",
+    "offer": "네 자료에서 질문을 뽑아 한가한 시간에 하나씩 던지고 피드백",
+    "first_bite": "자료 1장에서 질문 5개 뽑기",
+    "step_completed": "not_applicable", "step_reason": "-",
+}
+res = analyze_turn.analyze(U)
+check("all remaining fields written",
+      {"path", "schedule", "ignition_marker", "offer", "bite"}
+      <= set(res["applied"]))
+check("schedule parsed to windows",
+      json.loads(db.get_user_schedule(U)["windows_json"])[0]
+      == {"start": "21:00", "end": "22:30"})
+check("offer stored + evented",
+      (db.get_user_profile_by_id(U) or {}).get("agreed_offer", "")
+      .startswith("네 자료에서")
+      and len(events_of("offer_set")) == 1)
+check("six fields complete → onboarding completed by the server",
+      db.get_onboarding_state(U)["completed_at"] is not None
+      and db.get_user_phase(U)["phase"] == "first_bite")
+
+# ── 4. step judgment rides the same call ─────────────────────────────
+print("4) step judgment")
+db.save_sequence_plan(U, [
+    {"tag": "elicit_why", "intensity": 2, "intent": "why, his words"},
+    {"tag": "micro_ask", "intensity": 1, "intent": "one tiny thing"}],
+    rationale="t", source="operator")
+ToolFake.payload = {"step_completed": "yes", "step_reason": "he said why"}
+analyze_turn.analyze(U)
+check("yes advances the cursor",
+      db.get_current_plan(U)["cursor"] == 1
+      and len(events_of("step_judged")) == 1)
+ToolFake.payload = {"step_completed": "uncertain", "step_reason": "vague"}
+analyze_turn.analyze(U)
+check("uncertain does not advance",
+      db.get_current_plan(U)["cursor"] == 1)
+
+# ── 5. generation no longer acts on extraction markers ───────────────
+print("5) generation path")
+stale = ('좋아!\n[GOAL: "완전히 다른 목표"]\n'
+         '[IGNITION_DEF: "아무거나"]\n[SCHEDULE: "03:00-04:00"]')
+goal_before = db.get_user_phase(U)["agreed_goal"]
+out = sms._strip_extraction_markers(U, stale)
+check("stale markers stripped from the outbound text",
+      "[GOAL" not in out and "[IGNITION_DEF" not in out
+      and "[SCHEDULE" not in out and out.startswith("좋아!"))
+check("and they change NOTHING (analysis owns those fields)",
+      db.get_user_phase(U)["agreed_goal"] == goal_before
+      and json.loads(db.get_user_schedule(U)["windows_json"])[0]["start"]
+      == "21:00")
+check("stripping is recorded for prompt-hygiene monitoring",
+      len(events_of("stale_marker_stripped")) == 1)
+
+print(f"\n{sum(PASS)}/{len(PASS)} passed")
+raise SystemExit(0 if all(PASS) else 1)

@@ -168,29 +168,41 @@ db.ensure_user_profile_row(U2)
 db.set_agreed_goal(U2, "g")
 db.set_ignition_marker(U2, "m")
 db.save_learning_path(U2, "d", "p", "c")
-sms._process_commit_marker(U2, '[COMMIT: "tiny task"]')
+db.set_agreed_offer(U2, "o")
+db.set_agreed_bite(U2, "tiny task", source="analyze")
 
 called = []
 genplan.generate_async = lambda uid: called.append(uid)  # spy
 
 
-class FakeReply:
+class FakeTurn:
+    """sms and analyze_turn share the SAME anthropic module object, so
+    one fake serves both calls and dispatches on whether the call is a
+    forced tool call (analysis) or free text (generation)."""
     def __init__(self, *a, **kw):
         pass
 
     class messages:
         @staticmethod
         def create(**kwargs):
-            class _B:
-                text = ('좋아 그 시간으로 하자!\n[SCHEDULE: "20:00-21:00"]\n'
-                        "[STEP: secure_commit@1]\n[EXPECT: reply]")
+            if kwargs.get("tools"):
+                class _B:
+                    type = "tool_use"
+                    input = {"schedule": "20:00-21:00",
+                             "step_completed": "not_applicable",
+                             "step_reason": "-"}
+            else:
+                class _B:
+                    type = "text"
+                    text = ("좋아 그 시간으로 하자!\n"
+                            "[STEP: secure_commit@1]\n[EXPECT: reply]")
 
             class _R:
                 content = [_B()]
             return _R()
 
 
-sms.anthropic.Anthropic = FakeReply
+sms.anthropic.Anthropic = FakeTurn
 sms.handle_inbound("+15550003333", "저녁 8시가 좋아")
 time.sleep(0.1)
 check("last field fill → completion → generation hook fired",

@@ -48,23 +48,21 @@ text = sms._process_ignition_markers(U, "가보자!\n[IGNITION: 1]",
 check("tag stripped but nothing recorded",
       "[IGNITION" not in text and len(events_of("ignition_judgment")) == 0)
 
-# ── 1. definition marker ─────────────────────────────────────────────
-print("1) [IGNITION_DEF:]")
-text = sms._process_ignition_markers(
-    U, '좋아, 그걸로 하자!\n[IGNITION_DEF: "노트북 앞에 앉아 콜랩에 코드 타이핑"]',
-    trigger="cron_evening")
-check("marker stripped", "[IGNITION_DEF" not in text and text == "좋아, 그걸로 하자!")
-check("marker persisted to profile",
-      db.get_user_phase(U)["ignition_marker"] == "노트북 앞에 앉아 콜랩에 코드 타이핑")
-check("ignition_def_set event emitted",
-      len(events_of("ignition_def_set")) == 1)
+# ── 1. the DEFINITION is extraction — generation must not set it ─────
+print("1) [IGNITION_DEF:] is no longer a generation marker")
+text = sms._strip_extraction_markers(
+    U, '좋아, 그걸로 하자!\n[IGNITION_DEF: "노트북 앞에 앉아 콜랩에 코드 타이핑"]')
+check("stale marker stripped from outbound",
+      "[IGNITION_DEF" not in text and text == "좋아, 그걸로 하자!")
+check("and it does NOT set the field (analysis call owns it)",
+      db.get_user_phase(U)["ignition_marker"] == ""
+      and len(events_of("ignition_def_set")) == 0)
 
-# refinement overwrites
-sms._process_ignition_markers(
-    U, 'x [IGNITION_DEF: "콜랩에 코드 타이핑 시작"]', trigger="inbound_reply")
-check("redefinition refines the marker",
+# the analysis call is the only writer
+db.set_ignition_marker(U, "콜랩에 코드 타이핑 시작", source="analyze")
+check("analysis-written marker persists + events",
       db.get_user_phase(U)["ignition_marker"] == "콜랩에 코드 타이핑 시작"
-      and len(events_of("ignition_def_set")) == 2)
+      and len(events_of("ignition_def_set")) == 1)
 
 # ── 2. judgment marker ───────────────────────────────────────────────
 print("2) [IGNITION: n]")
@@ -111,7 +109,29 @@ class FakeAnthropicClient:
             return _Resp()
 
 
-sms.anthropic.Anthropic = FakeAnthropicClient
+class DispatchFake(FakeAnthropicClient):
+    """One fake for both calls (shared anthropic module): tool_use for
+    the analysis pass, text for generation."""
+    class messages:
+        @staticmethod
+        def create(**kwargs):
+            if kwargs.get("tools"):
+                class _B:
+                    type = "tool_use"
+                    input = {"step_completed": "not_applicable",
+                             "step_reason": "-"}
+            else:
+                class _B:
+                    type = "text"
+                    text = ("코드 돌아간 거야?? 좋아, 다음 줄 가자.\n"
+                            "[IGNITION: 5]\n[STEP: evoke_mastery@1, micro_ask@2]")
+
+            class _R:
+                content = [_B()]
+            return _R()
+
+
+sms.anthropic.Anthropic = DispatchFake
 reply = sms.handle_inbound("+15550001111", "콜랩 켰고 방금 첫 줄 돌렸어!")
 check("both markers stripped from outbound",
       reply is not None and "[IGNITION" not in reply and "[STEP" not in reply)

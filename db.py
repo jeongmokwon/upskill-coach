@@ -212,6 +212,11 @@ def init_db():
             # the LLM.
             ("onboarding_started_at", "TEXT"),
             ("onboarding_completed_at", "TEXT"),
+            # What the coach committed to doing for this user, as
+            # confirmed by them — onboarding deliverable #3 (brief §7
+            # onboarding arc). Missing it was why pilot user #1 gave
+            # ten turns of himself and got nothing back.
+            ("agreed_offer", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.cursor().execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {ddl}")
@@ -531,6 +536,7 @@ def init_db():
             ("plan_cursor", "INTEGER DEFAULT 0"),
             ("onboarding_started_at", "TEXT"),
             ("onboarding_completed_at", "TEXT"),
+            ("agreed_offer", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {default}")
@@ -1477,6 +1483,22 @@ def set_agreed_bite(user_id, bite_text, source="llm_marker",
               {"bite": bite_text, "decision_id": decision_id}, source=source)
 
 
+def set_agreed_offer(user_id, offer_text, source="analyze"):
+    """Persist what the coach committed to doing for this user, as
+    confirmed by them (brief §7 onboarding arc, deliverable 3).
+    Same column+event pattern as agreed_goal; refinable."""
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET agreed_offer = {_P} WHERE user_id = {_P}",
+        (offer_text, user_id))
+    conn.commit()
+    conn.close()
+    print(f"  [DB] Agreed offer saved for {user_id}: {offer_text!r}",
+          flush=True)
+    log_event(user_id, "offer_set", {"offer": offer_text}, source=source)
+
+
 def save_learning_path(user_id, direction, project="",
                        done_condition="", source="llm_marker"):
     """Append a learning-path version (T8; [PATH:] writes v1).
@@ -1569,7 +1591,13 @@ def mark_onboarding_started(user_id):
     return now
 
 
-ONBOARDING_FIELDS = ("goal", "path", "bite", "ignition_marker", "schedule")
+# Order IS the onboarding arc (brief §7): discover the goal, widen it
+# into a path, TELL THEM WHAT THE COACH WILL DO and get that
+# confirmed, agree when to message, agree what "started" looks like,
+# then land one concrete task. The prompt shows only the first
+# unsettled item as the current focus.
+ONBOARDING_FIELDS = ("goal", "path", "offer", "schedule",
+                     "ignition_marker", "bite")
 
 
 def get_onboarding_state(user_id):
@@ -1587,6 +1615,8 @@ def get_onboarding_state(user_id):
         filled.append("ignition_marker")
     if get_user_schedule(user_id):
         filled.append("schedule")
+    if (prof.get("agreed_offer") or "").strip():
+        filled.append("offer")
     return {
         "started_at": prof.get("onboarding_started_at"),
         "completed_at": prof.get("onboarding_completed_at"),
