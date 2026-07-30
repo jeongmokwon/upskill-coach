@@ -1711,91 +1711,284 @@ async def _observe_poll_handler(request):
 # single-owner personal learning experiment, no third-party sharing.
 
 _PAGE_CSS = """
-body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
-       max-width: 720px; margin: 24px auto 40px; padding: 0 24px;
-       color: #1a1a1a; line-height: 1.6; }
-h1 { font-size: 28px; margin-bottom: 8px; }
-h2 { font-size: 18px; margin-top: 28px; margin-bottom: 4px; }
-h3 { font-size: 16px; margin-top: 20px; margin-bottom: 2px; }
-.meta { color: #888; font-size: 13px; margin-bottom: 24px; }
-p { margin: 8px 0; }
+:root {
+  --pine: #123f2b;        /* deep brand green — headings, footer, dark UI   */
+  --green: #1b6e47;       /* primary actions, links                        */
+  --green-hover: #14563a;
+  --tint: #eef5f0;        /* soft green wash for bands and cards           */
+  --ink: #14201a;
+  --muted: #5a6b61;
+  --line: #e3eae5;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI',
+       sans-serif; margin: 0; color: var(--ink); line-height: 1.65;
+       font-size: 16.5px; -webkit-font-smoothing: antialiased;
+       background: #fff; }
+a { color: var(--green); }
+h1, h2, h3 { line-height: 1.22; letter-spacing: -0.015em; }
+p { margin: 10px 0; }
 ul { padding-left: 22px; }
-li { margin: 4px 0; }
-a { color: #2563eb; }
-.footer { margin-top: 48px; padding-top: 16px; border-top: 1px solid #eee;
-          font-size: 13px; color: #666; }
-.site-nav { display: flex; align-items: center; justify-content: space-between;
-            gap: 16px; padding-bottom: 16px; border-bottom: 1px solid #eee;
-            margin-bottom: 20px; flex-wrap: wrap; }
-.site-nav .brand { font-weight: 700; font-size: 18px; color: #1a1a1a;
-                   text-decoration: none; }
-.site-nav .links { display: flex; gap: 14px; align-items: center;
-                   flex-wrap: wrap; font-size: 14px; }
-.site-nav .links a { color: #444; text-decoration: none; }
-.site-nav .links a:hover { color: #2563eb; }
-.site-nav .nav-cta { padding: 7px 14px; border-radius: 8px;
-                     background: #2563eb; color: #fff !important;
-                     font-weight: 600; }
-.hero { margin-top: 24px; }
-.hero h1 { font-size: 40px; margin-bottom: 4px; }
-.tagline { font-size: 19px; color: #444; margin-bottom: 16px; }
-.cta { display: inline-block; margin: 20px 0; padding: 12px 28px;
-       font-size: 16px; font-weight: 600; color: #fff; background: #2563eb;
-       border-radius: 8px; text-decoration: none; }
-.steps { padding-left: 0; list-style: none; counter-reset: step; }
-.steps li { counter-increment: step; margin: 14px 0; padding-left: 40px;
-            position: relative; }
-.steps li::before { content: counter(step); position: absolute; left: 0;
-                    top: 0; width: 26px; height: 26px; border-radius: 50%;
-                    background: #2563eb; color: #fff; font-weight: 600;
-                    font-size: 14px; display: flex; align-items: center;
-                    justify-content: center; }
-.sms-box { margin-top: 28px; padding: 18px 20px; border: 1px solid #ddd;
-           border-radius: 10px; background: #f8f9fb; font-size: 15px; }
-.sms-box h2 { margin-top: 0; }
-.shot { margin: 28px 0; }
-.shot img { width: 100%; border: 1px solid #e3e3e3; border-radius: 12px;
-            box-shadow: 0 8px 30px rgba(0,0,0,.08); }
-.shot figcaption { font-size: 13px; color: #777; margin-top: 8px;
-                   text-align: center; }
+li { margin: 5px 0; }
+.meta { color: var(--muted); font-size: 13.5px; margin-bottom: 24px; }
+
+/* ── Header ─────────────────────────────────────────────────────── */
+.header { border-bottom: 1px solid var(--line); background: #fff; }
+.header-in { max-width: 1360px; margin: 0 auto; padding: 16px 28px;
+             display: flex; align-items: center;
+             justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+.logo { display: flex; align-items: center; gap: 10px;
+        text-decoration: none; color: var(--pine); font-weight: 800;
+        font-size: 21px; letter-spacing: -0.02em; }
+.logo svg { display: block; }
+.nav-links { display: flex; gap: 22px; align-items: center;
+             flex-wrap: wrap; font-size: 15px; }
+.nav-links a { color: #3c4a42; text-decoration: none; font-weight: 500; }
+.nav-links a:hover { color: var(--green); }
+.btn { display: inline-block; padding: 12px 24px; border-radius: 999px;
+       background: var(--green); color: #fff !important; font-weight: 600;
+       font-size: 15.5px; text-decoration: none; }
+.btn:hover { background: var(--green-hover); }
+.btn-ghost { background: transparent; color: var(--pine) !important;
+             border: 1.5px solid var(--pine); }
+.btn-ghost:hover { background: var(--tint); }
+.nav-links .btn { padding: 9px 18px; font-size: 14.5px; }
+
+/* ── Page containers ────────────────────────────────────────────── */
+main.doc { max-width: 780px; margin: 0 auto; padding: 34px 28px 60px; }
+main.doc h1 { font-size: 32px; margin: 6px 0 8px; }
+main.doc h2 { font-size: 20px; margin: 30px 0 4px; }
+main.doc h3 { font-size: 16.5px; margin: 22px 0 2px; }
+main.wide { max-width: 1360px; margin: 0 auto; padding: 0 28px 64px; }
+
+/* ── Hero ───────────────────────────────────────────────────────── */
+.hero { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 56px;
+        align-items: center; padding: 64px 0 44px; }
+.eyebrow { color: var(--green); font-weight: 700; font-size: 13.5px;
+           text-transform: uppercase; letter-spacing: 0.09em;
+           margin-bottom: 14px; }
+.hero h1 { font-size: clamp(34px, 4.6vw, 52px); font-weight: 800;
+           margin: 0 0 16px; color: var(--pine); }
+.hero .lead { font-size: 18.5px; color: #35443b; margin: 0 0 26px; }
+.hero-ctas { display: flex; gap: 12px; flex-wrap: wrap; }
+.hero-note { font-size: 13.5px; color: var(--muted); margin-top: 16px; }
+
+/* ── Phone mockup ───────────────────────────────────────────────── */
+.hero-visual { position: relative; padding: 12px 6px; }
+.phone { width: min(340px, 100%); margin: 0 auto; background: #fff;
+         border: 1px solid var(--line); border-radius: 34px;
+         box-shadow: 0 24px 60px rgba(18, 63, 43, 0.16);
+         padding: 18px 14px 22px; }
+.phone-top { text-align: center; padding-bottom: 10px;
+             border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+.phone-top .avatar { width: 34px; height: 34px; border-radius: 50%;
+                     background: var(--pine); color: #fff; font-weight: 700;
+                     font-size: 15px; display: inline-flex;
+                     align-items: center; justify-content: center; }
+.phone-top .name { font-size: 12.5px; color: var(--muted); margin-top: 4px; }
+.thread { display: flex; flex-direction: column; gap: 8px; }
+.tstamp { text-align: center; font-size: 11px; color: #9aa79f;
+          margin: 4px 0; }
+.msg { max-width: 86%; padding: 9px 13px; border-radius: 18px;
+       font-size: 13.5px; line-height: 1.45; }
+.msg.in { background: #f0f2f0; color: #1c2620; align-self: flex-start;
+          border-bottom-left-radius: 6px; }
+.msg.out { background: var(--green); color: #fff; align-self: flex-end;
+           border-bottom-right-radius: 6px; }
+.hero-photo { position: relative; }
+.hero-photo img { width: 100%; display: block; border-radius: 22px;
+                  box-shadow: 0 24px 60px rgba(18, 63, 43, 0.22); }
+.pthread { position: absolute; top: 8%; left: -5%; width: 48%;
+           display: flex; flex-direction: column; gap: 9px; }
+.pchip { background: rgba(255,255,255,0.92); color: var(--pine);
+         font-weight: 700; font-size: 11.5px; padding: 6px 12px;
+         border-radius: 999px; align-self: flex-start;
+         box-shadow: 0 8px 22px rgba(0,0,0,0.18); }
+.pbubble { border-radius: 16px; padding: 10px 13px; font-size: 12.8px;
+           line-height: 1.45; box-shadow: 0 10px 26px rgba(0,0,0,0.2); }
+.pbubble.in { background: rgba(255,255,255,0.97); color: #1c2620;
+              border-bottom-left-radius: 6px; align-self: flex-start; }
+.pbubble.out { background: var(--green); color: #fff;
+               border-bottom-right-radius: 6px; align-self: flex-end; }
+
+/* ── Sections ───────────────────────────────────────────────────── */
+.section { padding: 42px 0; }
+.section > h2 { font-size: clamp(26px, 3vw, 32px); font-weight: 800;
+                color: var(--pine); margin: 0 0 6px; }
+.section .sub { color: var(--muted); margin: 0 0 26px; font-size: 17px; }
+.section .centered { text-align: center; max-width: 640px;
+                     margin-left: auto; margin-right: auto; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit,
+         minmax(230px, 1fr)); gap: 18px; }
+.card { border: 1px solid var(--line); border-radius: 14px;
+        padding: 22px; background: #fff; }
+.card h3 { margin: 0 0 6px; font-size: 17px; color: var(--pine); }
+.card p { margin: 0; font-size: 14.5px; color: #425148; }
+.band { background: var(--tint); border-radius: 18px; padding: 30px 32px; }
+.band h2 { margin-top: 0; color: var(--pine); }
+
+/* ── How-it-works: large alternating numbered rows ──────────────── */
+.hiw-row { display: grid; grid-template-columns: 0.9fr 1.1fr; gap: 56px;
+           align-items: center; padding: 56px 0; }
+.hiw-row.flip { grid-template-columns: 1.1fr 0.9fr; }
+.hiw-row.flip .hiw-copy { order: 2; }
+.hiw-row.flip .hiw-visual { order: 1; }
+.hiw-num { width: 52px; height: 52px; border-radius: 50%;
+           background: var(--tint); color: var(--pine); font-weight: 700;
+           font-size: 22px; display: flex; align-items: center;
+           justify-content: center; margin-bottom: 22px; }
+.hiw-eyebrow { color: var(--green); font-weight: 700; font-size: 14px;
+               margin-bottom: 6px; }
+.hiw-copy h3 { font-size: clamp(28px, 3.4vw, 40px); font-weight: 800;
+               color: var(--pine); margin: 0 0 14px; }
+.hiw-copy p { color: #35443b; font-size: 16.5px; }
+.hiw-note { font-size: 13.5px; color: var(--muted); margin-top: 26px; }
+.hiw-visual { background: linear-gradient(160deg, #f2f7f3, #e7f0ea);
+              border-radius: 20px; padding: 34px 30px; }
+.mock { max-width: 400px; margin: 0 auto; background: #fff;
+        border: 1px solid var(--line); border-radius: 16px;
+        padding: 18px 18px 20px;
+        box-shadow: 0 18px 44px rgba(18, 63, 43, 0.14); }
+.mock .mhead { font-size: 12px; font-weight: 700; color: var(--muted);
+               text-transform: uppercase; letter-spacing: 0.07em;
+               margin-bottom: 12px; }
+.mock .row { display: flex; justify-content: space-between; gap: 12px;
+             padding: 10px 0; border-bottom: 1px solid var(--line);
+             font-size: 14px; }
+.mock .row:last-child { border-bottom: 0; }
+.mock .row .k { color: var(--muted); }
+.mock .row .v { font-weight: 600; color: var(--ink); text-align: right; }
+.mock .ok { color: var(--green); font-weight: 700; }
+.mock .thread { margin-top: 2px; }
+
+@media (max-width: 820px) {
+  .hiw-row, .hiw-row.flip { grid-template-columns: 1fr; gap: 26px;
+                            padding: 36px 0; }
+  .hiw-row.flip .hiw-copy { order: 1; }
+  .hiw-row.flip .hiw-visual { order: 2; }
+}
+
+/* ── Doc-page building blocks (legal, about, faq) ───────────────── */
+.sms-box { margin-top: 28px; padding: 20px 22px; border: 1px solid var(--line);
+           border-radius: 12px; background: var(--tint); font-size: 15px; }
+.sms-box h2 { margin-top: 0 !important; }
+
+/* ── Footer (near-black, Arist-style columns + bottom bar) ──────── */
+.footer { background: #0b100d; color: #b9c6be; margin-top: 72px; }
+.footer a { color: #e6ece8; text-decoration: none; }
+.footer a:hover { text-decoration: underline; }
+.footer-in { max-width: 1360px; margin: 0 auto; padding: 56px 28px 40px;
+             display: grid; gap: 36px;
+             grid-template-columns: 1.4fr 1fr 1fr 1.2fr;
+             font-size: 14.5px; }
+.footer h4 { margin: 0 0 12px; font-size: 16px; font-weight: 600;
+             color: #fff; }
+.footer ul { list-style: none; padding: 0; margin: 0; }
+.footer li { margin: 9px 0; }
+.footer .flogo { display: flex; align-items: center; gap: 9px;
+                 color: #fff; font-weight: 800; font-size: 20px;
+                 margin-bottom: 12px; }
+.footer .fdesc { font-size: 13.5px; color: #93a49a; max-width: 260px; }
+.footer-bar { border-top: 1px solid rgba(255,255,255,0.12); }
+.footer-bar-in { max-width: 1360px; margin: 0 auto; padding: 20px 28px;
+                 display: flex; justify-content: space-between;
+                 align-items: center; gap: 14px; flex-wrap: wrap;
+                 font-size: 13px; color: #93a49a; }
+.footer-bar-in .flinks { display: flex; gap: 22px; flex-wrap: wrap; }
+.footer-bar-in a { color: #b9c6be; }
+@media (max-width: 820px) {
+  .footer-in { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 820px) {
+  .hero { grid-template-columns: 1fr; padding-top: 36px; gap: 36px; }
+  .chip-1 { left: 0; } .chip-2 { right: 0; }
+}
 """
 
 _SITE_ORIGIN = "https://www.learningtheo.com"
 
-_SITE_DESC = ("Theo is a personal AI learning coach by Green Gables "
-              "Studio LLC — coaching check-ins and two-way learning "
-              "support for your own study goals. Invite-only pilot.")
+_SITE_DESC = ("Theo is a learning coach in your text messages — coaching "
+              "check-ins that get you to actually start studying, and "
+              "step-by-step help when you're stuck. By Green Gables "
+              "Studio LLC.")
 
-_SITE_NAV = """
-<nav class="site-nav">
-  <a class="brand" href="/">Theo</a>
-  <div class="links">
+# Inline SVG logo mark (matches site_assets/favicon.svg).
+_LOGO_SVG = """<svg width="30" height="30" viewBox="0 0 100 100"
+  xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <rect width="100" height="100" rx="24" fill="#123f2b"/>
+  <path d="M30 26h28a12 12 0 0 1 12 12v36H42a12 12 0 0 1-12-12V26z"
+        fill="none" stroke="#fff" stroke-width="7" stroke-linejoin="round"/>
+  <path d="M30 62h40" stroke="#fff" stroke-width="7" stroke-linecap="round"/>
+</svg>"""
+
+_SITE_NAV = f"""
+<header class="header"><div class="header-in">
+  <a class="logo" href="/">{_LOGO_SVG} Theo</a>
+  <nav class="nav-links">
     <a href="/#how-it-works">How it works</a>
     <a href="/faq">FAQ</a>
     <a href="/about">About</a>
     <a href="/contact">Contact</a>
-    <a class="nav-cta" href="/app">Open Theo</a>
-  </div>
-</nav>
+    <a class="btn" href="/sms-signup">Get started</a>
+  </nav>
+</div></header>
 """
 
-_SITE_FOOTER = """
+_SITE_FOOTER = f"""
 <footer class="footer">
-  <p><a href="/">Home</a> · <a href="/faq">FAQ</a> · <a href="/about">About</a> ·
-  <a href="/contact">Contact</a> · <a href="/sms-signup">Pilot Signup</a> ·
-  <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p>
-  <p>Green Gables Studio LLC · 2605 Miller Avenue, Unit 3401, Mountain View,
-  CA 94040 · <a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a></p>
-  <p>Theo is a product of Green Gables Studio LLC · © 2026 Green Gables Studio LLC</p>
+  <div class="footer-in">
+    <div>
+      <div class="flogo">{_LOGO_SVG} Theo</div>
+      <p class="fdesc">A learning coach in your text messages. Built and
+      operated by Green Gables Studio LLC, an independent software studio
+      in Mountain View, California.</p>
+    </div>
+    <div>
+      <h4>Product</h4>
+      <ul>
+        <li><a href="/#how-it-works">How it works</a></li>
+        <li><a href="/#why">Why it works</a></li>
+        <li><a href="/sms-signup">Sign up</a></li>
+        <li><a href="/faq">FAQ</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Company</h4>
+      <ul>
+        <li><a href="/about">About</a></li>
+        <li><a href="/contact">Contact</a></li>
+      </ul>
+    </div>
+    <div>
+      <h4>Contact</h4>
+      <ul>
+        <li>Green Gables Studio LLC</li>
+        <li>2605 Miller Avenue, Unit 3401<br>Mountain View, CA 94040</li>
+        <li><a href="tel:+16469063961">+1 (646) 906-3961</a></li>
+        <li><a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="footer-bar"><div class="footer-bar-in">
+    <div>© 2026 Green Gables Studio LLC. All rights reserved.</div>
+    <div class="flinks">
+      <a href="/privacy">Privacy Policy</a>
+      <a href="/terms">Terms of Service</a>
+      <a href="/sms-signup">SMS Consent</a>
+    </div>
+  </div></div>
 </footer>
 """
 
 
-def _site_page(title, body_html, desc=None, path="/"):
+def _site_page(title, body_html, desc=None, path="/", wide=False):
     """Shared page chrome for all public pages: nav header, meta/OG
     tags, favicon, footer with full business details. Static HTML,
     readable without JavaScript — carriers review these pages."""
     desc = desc or _SITE_DESC
+    main_class = "wide" if wide else "doc"
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -1806,13 +1999,15 @@ def _site_page(title, body_html, desc=None, path="/"):
 <meta property="og:description" content="{desc}">
 <meta property="og:type" content="website">
 <meta property="og:url" content="{_SITE_ORIGIN}{path}">
-<meta property="og:image" content="{_SITE_ORIGIN}/site_assets/theo-app.png">
+<meta property="og:image" content="{_SITE_ORIGIN}/site_assets/theo-og.png">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" type="image/svg+xml" href="/site_assets/favicon.svg">
 <style>{_PAGE_CSS}</style>
 </head><body>
 {_SITE_NAV}
+<main class="{main_class}">
 {body_html}
+</main>
 {_SITE_FOOTER}
 </body></html>"""
 
@@ -1850,6 +2045,7 @@ _BUSINESS_BLOCK = f"""
   <p><strong>Legal name:</strong> Green Gables Studio LLC</p>
   <p><strong>Product / DBA:</strong> Theo</p>
   <p><strong>Address:</strong> {_BUSINESS_ADDRESS}</p>
+  <p><strong>Phone:</strong> <a href="tel:+16469063961">+1 (646) 906-3961</a></p>
   <p><strong>Email:</strong>
   <a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a></p>
   <p><strong>Website:</strong> <a href="/">www.learningtheo.com</a></p>
@@ -1865,66 +2061,165 @@ async def _landing_handler(request):
         return await ws_handler(request)
 
     body = f"""
-<div class="hero">
-  <h1>Theo</h1>
-  <p class="tagline">Your AI learning coach</p>
-  <p>Theo is a personal learning companion built and operated by
-  Green Gables Studio LLC. Whatever you are using to learn — an online
-  course, YouTube tutorials, a textbook, your own project — Theo helps
-  you actually sit down, start, and keep going, with coaching
-  conversations that adapt to how you learn. Theo is currently an
-  invite-only pilot with a small group of 5&ndash;10 learners.</p>
-  <a class="cta" href="/app">Open Theo</a>
+<section class="hero">
+  <div>
+    <div class="eyebrow">Your AI learning coach</div>
+    <h1>A learning coach in your text messages</h1>
+    <p class="lead">You don't fail at learning because the material is
+    too hard. You fail because sitting down is hard. Theo texts you at
+    the moments you chose, gets you started with a step small enough to
+    actually take, and helps you through it — right in your Messages
+    app.</p>
+    <div class="hero-ctas">
+      <a class="btn" href="/sms-signup">Get started</a>
+      <a class="btn btn-ghost" href="#how-it-works">See how it works</a>
+    </div>
+    <p class="hero-note">US phone numbers · Free to join · Consent
+    required before any message is sent</p>
+  </div>
+  <div class="hero-visual">
+    <div class="hero-photo">
+      <img src="/site_assets/hero-home.jpg"
+           alt="A Theo member at home in the evening, starting a study
+           session from a text check-in">
+      <div class="pthread">
+        <div class="pchip">Evening check-in · 7:50 PM</div>
+        <div class="pbubble in">Hi, it's Theo — your evening study
+        check-in. Yesterday we agreed on a 15-minute session on your
+        Python course. Ready to start now, or reply LATER to push it
+        to tonight. Reply HELP for help or STOP to cancel.</div>
+        <div class="pbubble out">ok, starting now</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div id="how-it-works">
+<section class="hiw-row">
+  <div class="hiw-copy">
+    <div class="hiw-num">1</div>
+    <div class="hiw-eyebrow">Sign up</div>
+    <h3>Tell Theo what you're learning</h3>
+    <p>Sign up with your goal — an online course, YouTube tutorials, a
+    textbook, your own project — and agree on when Theo may text you.
+    Text coaching is strictly opt-in: each message type has its own
+    consent checkbox, and nothing is sent before you've said yes.</p>
+    <p class="hiw-note">Every member is personally onboarded and gets
+    hands-on attention from day one.</p>
+  </div>
+  <div class="hiw-visual">
+    <div class="mock">
+      <div class="mhead">Your coaching setup</div>
+      <div class="row"><span class="k">Learning</span>
+        <span class="v">Python for data analysis</span></div>
+      <div class="row"><span class="k">This week's goal</span>
+        <span class="v">Finish course section 3</span></div>
+      <div class="row"><span class="k">Check-in window</span>
+        <span class="v">Evenings, around 7:50 PM</span></div>
+      <div class="row"><span class="k">Coaching check-ins</span>
+        <span class="v ok">Consented ✓</span></div>
+      <div class="row"><span class="k">Study support</span>
+        <span class="v ok">Consented ✓</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="hiw-row flip">
+  <div class="hiw-copy">
+    <div class="hiw-num">2</div>
+    <div class="hiw-eyebrow">Coaching check-ins</div>
+    <h3>Theo texts. You start.</h3>
+    <p>At the times you agreed on, Theo checks in — while you're on the
+    couch, walking home, anywhere your phone is. Not a nagging
+    reminder: a conversation that ends with a first step small enough
+    to start right now. That moment of starting is the whole
+    point.</p>
+    <p class="hiw-note">Up to 4 messages per day total; the actual
+    rhythm follows your replies and your schedule.</p>
+  </div>
+  <div class="hiw-visual">
+    <div class="mock">
+      <div class="mhead">Theo · Messages</div>
+      <div class="thread">
+        <div class="tstamp">7:50 PM</div>
+        <div class="msg in">Hi, it's Theo — your evening study check-in.
+        Yesterday we agreed on a 15-minute session on your Python
+        course. Ready to start now, or reply LATER to push it to
+        tonight. Reply HELP for help or STOP to cancel.</div>
+        <div class="msg out">ok, starting now</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="hiw-row">
+  <div class="hiw-copy">
+    <div class="hiw-num">3</div>
+    <div class="hiw-eyebrow">Study support</div>
+    <h3>Stuck? Text back.</h3>
+    <p>While you study, Theo stays one text away. Hit an error, lose
+    the thread, don't know what a sentence means — text it to Theo and
+    get an answer that walks you through it step by step, using your
+    own materials rather than replacing them.</p>
+    <p class="hiw-note">Theo carries no course catalog — it coaches you
+    through whatever you're already learning with.</p>
+  </div>
+  <div class="hiw-visual">
+    <div class="mock">
+      <div class="mhead">Theo · Messages</div>
+      <div class="thread">
+        <div class="tstamp">8:14 PM</div>
+        <div class="msg out">getting a NameError in cell 2</div>
+        <div class="msg in">Hi, it's Theo. That NameError usually means
+        the variable isn't defined yet in this session. Try re-running
+        the first cell, then tell me what output you see. Reply HELP
+        for help or STOP to cancel.</div>
+      </div>
+    </div>
+  </div>
+</section>
 </div>
 
-<h2 id="how-it-works">How it works</h2>
-<ol class="steps">
-  <li><strong>Sign up for the pilot.</strong> Pilot members join through
-      our <a href="/sms-signup">web signup form</a>. Text-message
-      coaching is optional and requires your explicit opt-in consent,
-      collected on that form before any message is sent.</li>
-  <li><strong>Coaching by text message.</strong> Theo sends SMS coaching
-      check-ins and holds two-way conversations to help you start and
-      stay in your study sessions.</li>
-  <li><strong>Study with your own materials.</strong> Sessions use
-      whatever you are already learning with — Theo coaches alongside
-      your course, tutorial, or project rather than replacing it.</li>
-</ol>
+<section class="section" id="why">
+  <div class="centered">
+    <h2>Why a coach in your texts?</h2>
+    <p class="sub">Theo is built on a simple observation from months of
+    hands-on coaching experiments: adults don't need more content —
+    they need to start.</p>
+  </div>
+  <div class="cards">
+    <div class="card">
+      <h3>Starting is the real problem</h3>
+      <p>Courses, tutorials, and textbooks are everywhere. What's rare
+      is the nudge that turns "I should study tonight" into an open
+      laptop. Theo is built entirely around that moment.</p>
+    </div>
+    <div class="card">
+      <h3>No new app to open</h3>
+      <p>Opening yet another app is itself a hurdle. Texts arrive where
+      your attention already lives — no install, no login, no
+      streak guilt.</p>
+    </div>
+    <div class="card">
+      <h3>Grounded in behavioral science</h3>
+      <p>Theo's coaching draws on established research — implementation
+      intentions, self-determination theory, motivational
+      interviewing — not badges and leaderboards.</p>
+    </div>
+  </div>
+</section>
 
-<figure class="shot">
-  <img src="/site_assets/theo-app.png"
-       alt="Theo web app — the chat home screen where you ask your coach anything">
-  <figcaption>The Theo web app — ask anything, get coached step by step.</figcaption>
-</figure>
-
-<div class="sms-box">
-  <h2>Theo SMS program</h2>
-  <p><strong>Message frequency:</strong> up to 4 messages per day;
-  actual frequency varies with your replies.</p>
-  <p><strong>Standard rates:</strong> Message and data rates may apply
-  depending on your mobile phone service plan.</p>
-  <p><strong>Help &amp; stop:</strong> Reply <strong>HELP</strong> for
-  help or <strong>STOP</strong> to cancel at any time.</p>
-  <p>Participation is opt-in only, via the
-  <a href="/sms-signup">SMS signup form</a>. See our
-  <a href="/terms">Terms of Service</a> and
-  <a href="/privacy">Privacy Policy</a>.</p>
-</div>
-
-<h2>About Green Gables Studio LLC</h2>
-<p>Green Gables Studio LLC is an independent software studio based in
-Mountain View, California. The studio designs and operates Theo
-end-to-end: the coaching program, the web application at
-learningtheo.com, and the SMS coaching service described above.
-"Theo" is the product and brand name under which Green Gables Studio
-LLC provides this service. Read more about the studio and why we are
-building Theo on the <a href="/about">About page</a>, or see common
-questions in the <a href="/faq">FAQ</a>.</p>
-
-{_BUSINESS_BLOCK}
+<section class="section">
+  <div class="band" style="text-align:center;">
+    <h2>Ready to actually start?</h2>
+    <p style="max-width:520px; margin:8px auto 20px;">Tell Theo what
+    you're learning, and let the check-ins do the rest.</p>
+    <a class="btn" href="/sms-signup">Get started</a>
+  </div>
+</section>
 """
-    return web.Response(text=_site_page("Theo — AI learning coach", body,
-                                        path="/"),
+    return web.Response(text=_site_page("Theo — A learning coach in your text messages",
+                                        body, path="/", wide=True),
                         content_type="text/html")
 
 
@@ -1934,9 +2229,10 @@ async def _about_handler(request):
 <div class="meta">Green Gables Studio LLC · Mountain View, California</div>
 
 <p>Green Gables Studio LLC is an independent software studio that
-designs and operates <strong>Theo</strong>, an AI learning coach. The
-studio builds the whole service in-house: the coaching program, the
-web application at learningtheo.com, and the SMS coaching service.</p>
+designs and operates <strong>Theo</strong>, an AI learning coach
+delivered by text message. The studio builds the whole service
+in-house: the coaching program, the SMS service, and this
+website.</p>
 
 <h2>Why we are building Theo</h2>
 <p>Theo comes out of a simple observation from our founder's own
@@ -1971,14 +2267,13 @@ already using to learn, rather than another content library.</p>
       to how each learner actually starts, stalls, and recovers.</li>
 </ul>
 
-<h2>The pilot</h2>
-<p>Theo is currently an invite-only pilot with a small group of
-5&ndash;10 learners with US phone numbers. We keep it small on
-purpose: at this stage every participant gets hands-on attention, and
-every coaching decision is reviewed by a person. Participants join
-through our <a href="/sms-signup">signup form</a>; text-message
-coaching is optional and requires explicit per-purpose consent.
-There is no charge to participate in the pilot.</p>
+<h2>Joining Theo</h2>
+<p>Theo is deliberately high-touch: every member is personally
+onboarded, and coaching is reviewed by a person, not left to run on
+autopilot. Members join through our
+<a href="/sms-signup">signup form</a> (US phone numbers);
+text-message coaching is optional and requires explicit per-purpose
+consent. Theo is currently free to use.</p>
 
 {_BUSINESS_BLOCK}
 """
@@ -1999,9 +2294,9 @@ async def _faq_handler(request):
 <h2>About Theo</h2>
 
 <h3>What is Theo?</h3>
-<p>Theo is a personal AI learning coach. It helps you actually start
-and stay in study sessions — with coaching conversations in the web
-app and, if you opt in, by text message.</p>
+<p>Theo is a personal AI learning coach that lives in your text
+messages. It checks in at the times you agreed on to help you actually
+start studying, and answers by text when you're stuck mid-session.</p>
 
 <h3>Is Theo a course?</h3>
 <p>No. Theo has no content library and doesn't replace your
@@ -2010,32 +2305,31 @@ course, YouTube tutorials, a textbook, your own project — and Theo
 coaches you through it.</p>
 
 <h3>Who can join?</h3>
-<p>Theo is currently an invite-only pilot with 5&ndash;10
-participants. SMS coaching requires a US phone number. If you'd like
-to be considered, leave your details on the
-<a href="/sms-signup">signup form</a> and we'll reach out as spots
-open.</p>
+<p>Anyone with a US mobile number. Leave your details on the
+<a href="/sms-signup">signup form</a> and we'll reach out to get you
+set up — every member is personally onboarded.</p>
 
 <h3>How much does it cost?</h3>
-<p>Nothing during the pilot. Participation is free, and consent to
-text messages is not a condition of any purchase.</p>
+<p>Theo is currently free to use, and consent to text messages is not
+a condition of any purchase.</p>
 
 <h3>What do I need to use Theo?</h3>
-<p>A web browser for the Theo app. For SMS coaching, a US mobile
-number and your own opt-in on the signup form.</p>
+<p>A US mobile number that can receive text messages, and your own
+opt-in on the signup form. That's it — there is no app to install.</p>
 
 <h2>The SMS program</h2>
 
 <h3>How do I sign up for text messages?</h3>
 <p>On the <a href="/sms-signup">signup form</a>, each of the two
-message programs — coaching check-ins and two-way learning support —
-has its own separate, optional checkbox. You only receive the message
-types you checked, and only after you submit the form. No messages
-are ever sent without your explicit consent.</p>
+message programs — coaching check-ins and study support — has its own
+separate, optional checkbox. You only receive the message types you
+checked, and only after you submit the form. No messages are ever
+sent without your explicit consent.</p>
 
-<h3>Do I have to receive texts to use Theo?</h3>
-<p>No. Text-message consent is optional. You can join the pilot with
-just your email and use the web app without any SMS.</p>
+<h3>Do I have to check the consent boxes to sign up?</h3>
+<p>No. Both checkboxes are optional, and consent is not a condition
+of signing up or of any purchase. You can sign up without them —
+text coaching simply doesn't start until you've opted in.</p>
 
 <h3>How many messages will I get?</h3>
 <p>Up to 4 messages per day total across all Theo messages. The
@@ -2053,7 +2347,7 @@ information.</p>
 
 <h3>What happens to my information?</h3>
 <p>We collect only what the signup form asks for, use it only to run
-the pilot, and never sell, rent, or share mobile information with
+the service, and never sell, rent, or share mobile information with
 third parties for marketing. Details are in our
 <a href="/privacy">Privacy Policy</a> and
 <a href="/terms">Terms of Service</a>.</p>
@@ -2072,13 +2366,15 @@ async def _contact_handler(request):
 <h1>Contact</h1>
 <div class="meta">Green Gables Studio LLC</div>
 
-<p>Questions about Theo, the pilot, or the SMS program? We'd love to
-hear from you.</p>
+<p>Questions about Theo or the SMS program? We'd love to hear from
+you.</p>
 
 <ul>
   <li><strong>Email:</strong>
       <a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a>
       — we typically respond within 1&ndash;2 business days.</li>
+  <li><strong>Phone:</strong> <a href="tel:+16469063961">+1 (646)
+      906-3961</a></li>
   <li><strong>Mail:</strong> Green Gables Studio LLC,
       {_BUSINESS_ADDRESS}</li>
   <li><strong>SMS participants:</strong> reply <strong>HELP</strong>
@@ -2086,7 +2382,7 @@ hear from you.</p>
       at any time.</li>
 </ul>
 
-<p>Interested in joining the pilot? Leave your details on the
+<p>Interested in joining Theo? Leave your details on the
 <a href="/sms-signup">signup form</a>.</p>
 
 {_BUSINESS_BLOCK}
@@ -2112,21 +2408,21 @@ numbers and message content are handled.</p>
 <h2>What we collect</h2>
 <ul>
   <li>Contact details submitted through our
-      <a href="/sms-signup">pilot signup form</a>: name, email address,
-      and — if provided — mobile phone number, together with the
-      text-message consent choices made on that form.</li>
-  <li>SMS messages exchanged with pilot participants, stored for the
-      purpose of providing learning context to subsequent messages.</li>
-  <li>Web app usage data tied to the participant's account.</li>
+      <a href="/sms-signup">signup form</a>: name, email address,
+      and mobile phone number, together with the text-message consent
+      choices made on that form.</li>
+  <li>SMS messages exchanged with members, stored for the purpose of
+      providing learning context to subsequent messages.</li>
+  <li>Service usage data tied to the member's account.</li>
 </ul>
 
 <h2>How we use it</h2>
 <p>Contact details and message content are used solely to operate the
-pilot: delivering educational content, study check-ins, and coaching
-conversations to participants, and contacting participants about their
-pilot enrollment. They are not used for marketing or advertising of
-any kind. Text messages are sent only for the purposes a participant
-has separately consented to on the signup form.</p>
+service: delivering educational content, study check-ins, and coaching
+conversations to members, and contacting members about their
+enrollment. They are not used for marketing or advertising of any
+kind. Text messages are sent only for the purposes a member has
+separately consented to on the signup form.</p>
 
 <h2>Sharing</h2>
 <p><strong>We do not sell, rent, or share mobile information with third
@@ -2187,10 +2483,10 @@ by replying STOP.</p>
 <p>Consent to receive text messages is collected through our
 <a href="/sms-signup">web signup form</a>, which offers a separate,
 optional checkbox for each message type (coaching check-ins and
-two-way learning support). You will only receive the message types
+study support). You will only receive the message types
 you have checked. Providing your phone number alone does not
-constitute consent, and consent is not a condition of signing up
-for the pilot.</p>
+constitute consent, and consent is not a condition of signing
+up.</p>
 
 <h2>Opt-out and help</h2>
 <ul>
@@ -2241,11 +2537,12 @@ _FIELD_STYLE = ("margin-top:6px; padding:10px 12px; width:100%; "
 
 async def _sms_signup_page_handler(request):
     body = f"""
-<h1>Theo — Pilot Signup</h1>
-<div class="meta">Invite-only pilot · Green Gables Studio LLC</div>
+<h1>Sign up for Theo</h1>
+<div class="meta">Green Gables Studio LLC</div>
 
-<p>Join the Theo pilot. Text-message consent below is optional — you
-can sign up without it and we will contact you by email.</p>
+<p>Leave your details to sign up. The text-message consent boxes
+below are optional — you can sign up without checking either, and we
+will contact you by email to get you set up.</p>
 
 <form method="POST" action="/sms-signup" style="margin-top:20px">
   <label for="name" style="font-weight:600">Full Name</label><br>
@@ -2261,12 +2558,12 @@ can sign up without it and we will contact you by email.</p>
   </div>
 
   <div style="margin-top:14px">
-  <label for="phone" style="font-weight:600">Mobile Phone Number</label><br>
-  <input type="tel" id="phone" name="phone"
+  <label for="phone" style="font-weight:600">Mobile Phone Number *</label><br>
+  <input type="tel" id="phone" name="phone" required
          placeholder="(555) 123-4567" autocomplete="tel"
          style="{_FIELD_STYLE}">
-  <div style="font-size:13px; color:#666; margin-top:4px">Only needed
-  if you opt in to text messages below.</div>
+  <div style="font-size:13px; color:#666; margin-top:4px">US mobile
+  numbers only.</div>
   </div>
 
   <div style="margin-top:18px; display:flex; gap:10px; align-items:flex-start;">
@@ -2284,10 +2581,10 @@ can sign up without it and we will contact you by email.</p>
   <div style="margin-top:12px; display:flex; gap:10px; align-items:flex-start;">
     <input type="checkbox" id="consent_support" name="consent_support"
            value="yes" style="margin-top:4px; width:16px; height:16px;">
-    <label for="consent_support">I consent to receive <strong>two-way
-    learning support</strong> text messages from Theo (Green Gables
-    Studio LLC) at the phone number provided — conversational replies
-    that help me during my study sessions. Up to 4 messages per day
+    <label for="consent_support">I consent to receive <strong>study
+    support</strong> text messages from Theo (Green Gables Studio LLC)
+    at the phone number provided — replies that help me step by step
+    when I text Theo during a study session. Up to 4 messages per day
     total across all Theo messages; actual frequency varies with my
     replies. Message and data rates may apply. Reply HELP for help or
     STOP to cancel at any time.</label>
@@ -2303,7 +2600,7 @@ can sign up without it and we will contact you by email.</p>
 
   <button type="submit"
           style="margin-top:12px; padding:12px 28px; font-size:16px;
-                 border:none; border-radius:8px; background:#2563eb;
+                 border:none; border-radius:999px; background:#1b6e47;
                  color:#fff; cursor:pointer;">
     Sign me up</button>
 </form>
@@ -2343,22 +2640,18 @@ async def _sms_signup_submit_handler(request):
     consent_support = form.get("consent_support") == "yes"
     any_consent = consent_checkins or consent_support
 
-    # Email is the primary signup field — SMS consent is optional
-    # (TFV round-2: consent must not gate completing the signup).
+    # Email and phone are both required signup fields; the SMS consent
+    # checkboxes stay optional (TFV round-2: consent must not gate
+    # completing the signup — providing a phone number is contact info,
+    # not consent, and no message is sent without a checked box).
     if not email or "@" not in email:
         return _signup_error("Please enter a valid email address.")
 
     phone_raw = (form.get("phone") or "").strip()
     phone = _normalize_us_phone(phone_raw) if phone_raw else None
-    if any_consent and not phone:
+    if not phone:
         return _signup_error(
-            "To receive text messages, please enter a valid US mobile "
-            "number, e.g. (555) 123-4567 — or uncheck the text-message "
-            "consent boxes to sign up by email only.")
-    if phone_raw and not phone:
-        return _signup_error(
-            "That phone number didn't look right — please enter a valid "
-            "US mobile number, e.g. (555) 123-4567, or leave it blank.")
+            "Please enter a valid US mobile number, e.g. (555) 123-4567.")
 
     if any_consent:
         # A consent record row is written ONLY when a box was checked;
@@ -2375,20 +2668,19 @@ async def _sms_signup_submit_handler(request):
 
     if any_consent:
         body = """
-<h1>You're on the list 🎉</h1>
-<p>Thanks — your signup is recorded. Because this is a small
-invite-only pilot, we activate participants one at a time; you'll
-receive a welcome text from Theo when your spot opens.</p>
+<h1>You're all set 🎉</h1>
+<p>Thanks — your signup is recorded. Every member is personally
+onboarded, so you'll receive a welcome text from Theo shortly to get
+you set up.</p>
 <p>You can reply STOP at any time to cancel, or HELP for assistance.
 Message and data rates may apply.</p>
 <p><a href="/">← Home</a></p>
 """
     else:
         body = """
-<h1>You're on the list 🎉</h1>
-<p>Thanks — your signup is recorded. Because this is a small
-invite-only pilot, we activate participants one at a time; we'll
-reach out to you by email when your spot opens.</p>
+<h1>You're all set 🎉</h1>
+<p>Thanks — your signup is recorded. Every member is personally
+onboarded, so we'll reach out to you by email to get you set up.</p>
 <p><a href="/">← Home</a></p>
 """
     return web.Response(text=_legal_page("SMS Signup", body),
