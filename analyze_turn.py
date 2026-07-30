@@ -76,14 +76,32 @@ _TOOL = {
             },
             "ignition_marker": {
                 "type": "string",
-                "description": "THEIR observable definition of 'it "
-                               "STARTED' for one ordinary session — "
+                "description": "The observable first motion of one "
+                               "ordinary session for THIS user — "
                                "something a screenshot or a message "
-                               "could verify. NOT their goal's success "
-                               "criterion ('answers instantly when "
-                               "asked' is success months out, not the "
-                               "start of tonight). Counts only if they "
-                               "stated it or confirmed a proposal.",
+                               "could verify ('opens the Word file and "
+                               "starts working through it'). NOT their "
+                               "goal's success criterion ('answers "
+                               "instantly when asked' is success months "
+                               "out, not the start of tonight). Unlike "
+                               "the agreement fields, you SHOULD DERIVE "
+                               "this from what they told you about "
+                               "their material and how they work — it "
+                               "is a measuring instrument, not a "
+                               "promise they made.",
+            },
+            "ignition_marker_basis": {
+                "type": "string",
+                "enum": ["stated", "inferred"],
+                "description": "stated = they said or confirmed it in "
+                               "so many words. inferred = you derived "
+                               "it from their material/workflow.",
+            },
+            "ignition_marker_confidence": {
+                "type": "string",
+                "enum": ["high", "medium", "low"],
+                "description": "For an inferred marker: how sure are "
+                               "you? low = omit the marker instead.",
             },
             "schedule": {
                 "type": "string",
@@ -168,15 +186,27 @@ def _build_system(user_id):
 not talk to the user. You read the conversation and report what it
 now establishes, via the submit_analysis tool (you MUST call it).
 
-## Hard rule: report only what is IN the conversation
+## Hard rule: agreements come only from the user's own words
 
-Fill a field only when the user actually said it or explicitly
-agreed to it. Never infer, never complete a half-agreement, never
-carry over your own assumptions. If the user has not settled
-something, OMIT that field entirely — omission costs one more turn
-of conversation; a wrong fill corrupts their record. Re-report a
-field only if the conversation has REFINED it beyond what is
-already known below (identical restatements: omit).
+goal, path, first_bite, schedule, offer are AGREEMENTS. Fill them
+only when the user actually said or explicitly agreed to them.
+Never infer one, never complete a half-agreement. If it is not
+settled, OMIT the field — omission costs one more turn of
+conversation; a wrong fill corrupts their record. Re-report a field
+only if the conversation REFINED it beyond what is known below
+(identical restatements: omit).
+
+**ignition_marker is the exception, on purpose.** It is not a
+promise the user makes — it is the instrument the system judges
+their sessions with, so it should be DERIVED from what they have
+told you about their material and how they work. Once you know
+someone studies from a Word file of their own notes, "opens that
+file and starts working through it" is a sound inference, not an
+invention. Report it with basis=inferred and your confidence; use
+low only when you would be guessing, and then omit the marker
+entirely. An inferred marker is provisional — the coach will
+confirm it in passing later — so a reasonable inference beats an
+empty field.
 
 ## Already known (do not re-report unchanged)
 
@@ -269,8 +299,20 @@ def _apply(user_id, p, llm_call_id):
 
     marker = (p.get("ignition_marker") or "").strip()
     if marker and marker != (phase["ignition_marker"] or "").strip():
-        db.set_ignition_marker(user_id, marker, source="analyze")
-        applied.append("ignition_marker")
+        basis = (p.get("ignition_marker_basis") or "inferred").strip()
+        conf = (p.get("ignition_marker_confidence") or "medium").strip()
+        # A low-confidence inference is a guess; leave the field empty
+        # so the conversation keeps steering toward it. A STATED
+        # marker always lands regardless of the confidence field.
+        if basis == "inferred" and conf == "low":
+            print(f"[ANALYZE] low-confidence ignition inference — "
+                  f"not saved: {marker!r}", flush=True)
+        else:
+            status = "confirmed" if basis == "stated" else "provisional"
+            db.set_ignition_marker(user_id, marker, source="analyze",
+                                   status=status, basis=basis,
+                                   confidence=conf)
+            applied.append(f"ignition_marker({status})")
 
     offer = (p.get("offer") or "").strip()
     if offer and offer != (prof.get("agreed_offer") or "").strip():
