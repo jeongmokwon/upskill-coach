@@ -217,6 +217,9 @@ def init_db():
             # onboarding arc). Missing it was why pilot user #1 gave
             # ten turns of himself and got nothing back.
             ("agreed_offer", "TEXT DEFAULT ''"),
+            # 'provisional' (inferred by the analysis pass) vs
+            # 'confirmed' (the user said it). See set_ignition_marker.
+            ("ignition_marker_status", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.cursor().execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {ddl}")
@@ -599,6 +602,7 @@ def init_db():
             ("onboarding_started_at", "TEXT"),
             ("onboarding_completed_at", "TEXT"),
             ("agreed_offer", "TEXT DEFAULT ''"),
+            ("ignition_marker_status", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {default}")
@@ -2204,6 +2208,7 @@ def get_user_phase(user_id):
         "agreed_at": prof.get("agreed_at"),
         "agreed_goal": prof.get("agreed_goal") or "",
         "ignition_marker": prof.get("ignition_marker") or "",
+        "ignition_marker_status": prof.get("ignition_marker_status") or "",
     }
 
 
@@ -2257,22 +2262,32 @@ def set_agreed_goal(user_id, goal_text, source="llm_marker"):
     log_event(user_id, "goal_set", {"goal": goal_text}, source=source)
 
 
-def set_ignition_marker(user_id, marker_text, source="llm_marker"):
-    """Persist the user's own observable definition of ignition
-    ("what does 'it started' look like for YOU"). Elicited during
-    discovery; refinable any number of times. Event emitted here so
-    every caller path is covered once."""
+def set_ignition_marker(user_id, marker_text, source="llm_marker",
+                        status="confirmed", basis="stated",
+                        confidence="high"):
+    """Persist the observable definition of ignition for this user.
+
+    Unlike the agreement fields, this one may be DERIVED from what the
+    user said about their material and workflow (operator decision
+    2026-07-30): it is the instrument their sessions get judged with,
+    not a promise they made. `status` records which it is —
+    'provisional' (inferred, awaiting a passing confirmation) or
+    'confirmed' (stated or agreed). Refinable any number of times; a
+    later confirmation simply overwrites with status confirmed."""
     ensure_user_profile_row(user_id)
     conn = get_conn()
     _execute(conn,
-        f"UPDATE user_profiles SET ignition_marker = {_P} WHERE user_id = {_P}",
-        (marker_text, user_id)
+        f"UPDATE user_profiles SET ignition_marker = {_P}, "
+        f"ignition_marker_status = {_P} WHERE user_id = {_P}",
+        (marker_text, status, user_id)
     )
     conn.commit()
     conn.close()
-    print(f"  [DB] Ignition marker saved for {user_id}: {marker_text!r}", flush=True)
-    log_event(user_id, "ignition_def_set", {"marker": marker_text},
-              source=source)
+    print(f"  [DB] Ignition marker ({status}) saved for {user_id}: "
+          f"{marker_text!r}", flush=True)
+    log_event(user_id, "ignition_def_set",
+              {"marker": marker_text, "status": status, "basis": basis,
+               "confidence": confidence}, source=source)
 
 
 def ensure_phase_timer_started(user_id):

@@ -123,14 +123,18 @@ ToolFake.payload = {
     "path_done_condition": "무작위 질문 90% 즉답",
     "schedule": "21:00-22:30",
     "ignition_marker": "워드 자료 열고 질문에 소리내서 답하기 시작",
+    "ignition_marker_basis": "stated",
+    "ignition_marker_confidence": "high",
     "offer": "네 자료에서 질문을 뽑아 한가한 시간에 하나씩 던지고 피드백",
     "first_bite": "자료 1장에서 질문 5개 뽑기",
     "step_completed": "not_applicable", "step_reason": "-",
 }
 res = analyze_turn.analyze(U)
 check("all remaining fields written",
-      {"path", "schedule", "ignition_marker", "offer", "bite"}
-      <= set(res["applied"]))
+      {"path", "schedule", "offer", "bite"} <= set(res["applied"])
+      and any(a.startswith("ignition_marker") for a in res["applied"]))
+check("stated marker stored as confirmed",
+      db.get_user_phase(U)["ignition_marker_status"] == "confirmed")
 check("schedule parsed to windows",
       json.loads(db.get_user_schedule(U)["windows_json"])[0]
       == {"start": "21:00", "end": "22:30"})
@@ -141,6 +145,34 @@ check("offer stored + evented",
 check("six fields complete → onboarding completed by the server",
       db.get_onboarding_state(U)["completed_at"] is not None
       and db.get_user_phase(U)["phase"] == "first_bite")
+
+# ── 3b. the ignition marker MAY be inferred (it is an instrument,
+#        not an agreement) — but a low-confidence guess is refused ──
+print("3b) ignition inference")
+db.ensure_user_profile_row("u_inf")
+db.save_sms_message("u_inf", "user", "워드파일에 정리해둔 걸 외우려고", "in")
+ToolFake.payload = {
+    "ignition_marker": "그 워드파일 열어서 암기 시작",
+    "ignition_marker_basis": "inferred",
+    "ignition_marker_confidence": "high",
+    "step_completed": "not_applicable", "step_reason": "-",
+}
+res = analyze_turn.analyze("u_inf")
+check("confident inference is stored as PROVISIONAL",
+      db.get_user_phase("u_inf")["ignition_marker"] == "그 워드파일 열어서 암기 시작"
+      and db.get_user_phase("u_inf")["ignition_marker_status"] == "provisional")
+
+db.ensure_user_profile_row("u_low")
+db.save_sms_message("u_low", "user", "뭐 좀 배우고 싶어", "in")
+ToolFake.payload = {
+    "ignition_marker": "아마 노트북 켜는 거?",
+    "ignition_marker_basis": "inferred",
+    "ignition_marker_confidence": "low",
+    "step_completed": "not_applicable", "step_reason": "-",
+}
+analyze_turn.analyze("u_low")
+check("low-confidence guess is refused",
+      db.get_user_phase("u_low")["ignition_marker"] == "")
 
 # ── 4. step judgment rides the same call ─────────────────────────────
 print("4) step judgment")

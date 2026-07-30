@@ -395,7 +395,15 @@ def _build_placeholders(user_id):
         "phase": phase_state["phase"],
         "agreed_first_bite": phase_state["agreed_first_bite"] or "(not yet agreed)",
         "agreed_goal": phase_state["agreed_goal"] or "(not yet agreed)",
-        "ignition_marker": phase_state["ignition_marker"] or "(not yet defined)",
+        "ignition_marker": (
+            (phase_state["ignition_marker"]
+             + (" — PROVISIONAL: derived from what they told you, not "
+                "yet confirmed by them. If a natural, cheap moment "
+                "comes up, check it in passing ('그게 시작이지, 맞지?') "
+                "— never as an interrogation."
+                if phase_state.get("ignition_marker_status") == "provisional"
+                else ""))
+            if phase_state["ignition_marker"] else "(not yet defined)"),
         # 1-indexed day count for the LLM's "Day X of 3" awareness.
         "discovery_day": db.days_in_discovery(user_id) + 1,
         "recent_screen": _format_recent_screen(user_id),
@@ -618,8 +626,10 @@ def _build_onboarding_block(user_id):
              "path": "the big-steps picture: direction, a mid-horizon "
                      "target, and how they'll know it's reached",
              "bite": "one concrete task for the next day or two",
-             "ignition_marker": "their own observable definition of "
-                                "\"it started\"",
+             "ignition_marker": "what STARTING a session observably "
+                                "looks like for them (usually derived "
+                                "from their material — confirm it in "
+                                "passing rather than interrogating)",
              "schedule": "the times of day they want to hear from you",
              "offer": "what YOU will do for them — proposed concretely "
                       "and confirmed by them"}
