@@ -315,10 +315,18 @@ actually said. Specifically:
   user's answer must require producing their own words about why.
 
 Choosing silence: on a SCHEDULED send (not when replying to the
-user), you may decide tonight's best move is no message at all —
-respond with ONLY `[STEP: hold]` and nothing else; the server sends
-nothing and records the hold. Never hold when the user has just
-messaged you.
+user), you may decide the best move right now is no message at all
+— respond with ONLY the two markers and nothing else:
+
+    [HOLD: "왜 안 보내는지 한 줄"]
+    [STEP: hold]
+
+The server sends nothing and records your reason. Silence is a real
+intervention, so it needs a WHY in the log: without one, a
+considered hold is indistinguishable from a broken pipeline. Good
+reasons name the signal — "근무 시간대라 방해될 타이밍", "어젯밤
+질문이 아직 미응답 상태라 또 물으면 압박", "3일 연속 무응답 —
+채널 회복이 먼저". Never hold when the user has just messaged you.
 
 Tag rules:
 - List tags in utterance order. Multiple tags per message is normal.

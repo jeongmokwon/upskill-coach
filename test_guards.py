@@ -103,7 +103,7 @@ Scripted.queue = [
     "그 자료 워드 같은 데 정리해둔 거야?\n[STEP: elicit_why@1]",
 ]
 Scripted.seen = []
-text, steps, expect, call_id = sms.generate_message(
+text, steps, expect, call_id, _hold = sms.generate_message(
     U, "sys", [{"role": "user", "content": "hi"}], "test")
 check("violating draft triggers exactly one retry", len(Scripted.seen) == 2)
 check("retry carried the violation as feedback",
@@ -124,7 +124,7 @@ Scripted.queue = [
     "그래도 이거 어때? 저건 어때?\n[STEP: connect@1]",
 ]
 Scripted.seen = []
-text, steps, expect, call_id = sms.generate_message(
+text, steps, expect, call_id, _hold = sms.generate_message(
     U, "sys", [{"role": "user", "content": "hi"}], "test")
 check("stops after one retry (2 calls total)", len(Scripted.seen) == 2)
 check("message is still returned — silence is worse",
@@ -159,6 +159,24 @@ check("20min-old turn labeled in minutes",
       any(m["content"].startswith("[20분 전] ") for m in timed))
 check("content preserved after the label",
       any(m["content"].endswith("오늘 할게") for m in timed))
+
+# ── 5. holds carry a reason ──────────────────────────────────────────
+print("5) hold reason")
+Scripted.queue = ['[HOLD: "근무 시간대라 방해될 타이밍"]\n[STEP: hold]']
+text, steps, expect, call_id, hold_reason = sms.generate_message(
+    U, "sys", [{"role": "user", "content": "hi"}], "test")
+check("hold parsed: empty body, hold step, reason captured",
+      not text.strip()
+      and steps == [{"tag": "hold", "intensity": None}]
+      and hold_reason == "근무 시간대라 방해될 타이밍")
+check("guards do not fire on a hold (no body to judge)",
+      len(events_of("send_guard_violation")) == 1)   # still just the one from §3
+
+Scripted.queue = ["[STEP: hold]"]
+text, steps, expect, call_id, hold_reason = sms.generate_message(
+    U, "sys", [{"role": "user", "content": "hi"}], "test")
+check("a reasonless hold still holds (reason simply absent)",
+      not text.strip() and hold_reason is None)
 
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

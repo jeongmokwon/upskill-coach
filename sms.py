@@ -842,6 +842,19 @@ _EXPECT_MARKER_RE = re.compile(r'\[EXPECT:\s*([a-z_]+)\s*\]', re.IGNORECASE)
 MAX_QUESTIONS = 1
 _QUESTION_RE = re.compile(r"[?？]")
 
+# [HOLD: "reason"] — deliberate silence needs a recorded WHY. Sending
+# nothing is a real intervention; without a reason in the log the
+# operator cannot tell a considered hold from a broken pipeline.
+_HOLD_REASON_RE = re.compile(r'\[HOLD:\s*"([^"]{3,300})"\s*\]', re.DOTALL)
+
+
+def _process_hold_reason(text):
+    """→ (reason_or_None, text_without_the_marker)."""
+    m = _HOLD_REASON_RE.search(text)
+    if not m:
+        return None, text
+    return m.group(1).strip(), _HOLD_REASON_RE.sub("", text).strip()
+
 
 def check_send_guards(text, steps):
     """→ list of violation strings ([] = clean)."""
@@ -886,7 +899,7 @@ def generate_message(user_id, system_prompt, history, trigger,
             db.log_event(user_id, "llm_error",
                          {"where": trigger, "error": str(e)[:300]},
                          source="sms")
-            return None, [], None, None
+            return None, [], None, None, None
 
         # Flight-record BEFORE any stripping (T2b): the record shows
         # exactly what the model produced, markers included.
@@ -899,7 +912,13 @@ def generate_message(user_id, system_prompt, history, trigger,
         text = _process_ignition_markers(user_id, text, trigger=trigger)
         text = _process_plan_markers(user_id, text, trigger=trigger)
         expect, text = _process_expect_marker(text)
+        hold_reason, text = _process_hold_reason(text)
         steps, text = _process_step_marker(user_id, text)
+
+        # A hold is a complete answer: no message body, so the
+        # question/step guards do not apply to it.
+        if not text.strip() and any(s.get("tag") == "hold" for s in steps):
+            return text, steps, expect, llm_call_id, hold_reason
 
         violations = check_send_guards(text, steps)
         if not violations or attempt == 2:
@@ -920,7 +939,7 @@ def generate_message(user_id, system_prompt, history, trigger,
         db.log_event(user_id, "send_guard_violation",
                      {"violations": violations, "trigger": trigger,
                       "llm_call_id": llm_call_id}, source="sms")
-    return text, steps, expect, llm_call_id
+    return text, steps, expect, llm_call_id, hold_reason
 
 
 def _process_expect_marker(text):
@@ -1128,7 +1147,7 @@ def handle_inbound(from_number, body):
     # to a scheduled ping or texting spontaneously.
     system_prompt, prompt_versions = _build_system_prompt_for_reply(user_id)
 
-    reply_text, steps, expect, llm_call_id = generate_message(
+    reply_text, steps, expect, llm_call_id, _hold = generate_message(
         user_id, system_prompt, history, "inbound_reply",
         max_tokens=400, prompt_versions=prompt_versions)
     if reply_text is None:
@@ -1302,7 +1321,7 @@ def handle_cron_tick(slot, window=None):
         # system message; this is just a "go" signal.
         history.append({"role": "user", "content": f"(scheduled {slot} slot fired)"})
 
-    text, steps, expect, llm_call_id = generate_message(
+    text, steps, expect, llm_call_id, hold_reason = generate_message(
         user_id, system_prompt, history, f"cron_{slot}",
         max_tokens=500, prompt_versions=prompt_versions)
     if text is None:
@@ -1330,9 +1349,11 @@ def handle_cron_tick(slot, window=None):
     # Record it like a skip so the trace shows a hold token; send
     # nothing.
     if not text.strip() and any(s.get("tag") == "hold" for s in steps):
-        print(f"[SMS] {slot}: planner chose hold — nothing sent", flush=True)
+        print(f"[SMS] {slot}: planner chose hold — nothing sent "
+              f"({hold_reason or 'no reason given'})", flush=True)
         db.log_event(user_id, "cron_tick",
                      {"slot": slot, "action": "held_by_planner",
+                      "reason": hold_reason or "(none given)",
                       "decision_id": fire_decision_id,
                       "llm_call_id": llm_call_id,
                       "steps": steps, "expect": expect,
