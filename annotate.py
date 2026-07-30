@@ -355,6 +355,15 @@ def annotate_all(day=None, client=None):
             print(f"[P6] ⚠️ note proposals failed {user_id}: {e}",
                   flush=True)
         try:
+            import availability
+            r = availability.update(user_id)
+            if r["changed"]:
+                print(f"[P6] {user_id}: availability v{r['version']} — "
+                      f"{len(r['changed_cells'])} cells moved", flush=True)
+        except Exception as e:
+            print(f"[P6] ⚠️ availability update failed {user_id}: {e}",
+                  flush=True)
+        try:
             reasons = _pending_replan_reasons(user_id)
             if reasons:
                 import genplan

@@ -933,6 +933,34 @@ async def _schedule_debug_handler(request):
     return web.Response(text="\n".join(parts), content_type="text/plain")
 
 
+async def _availability_handler(request):
+    """GET /availability?secret=...[&user_id=X] — the derived day×hour
+    grid (brief §7), plus the self-report vs observed disagreement
+    line, which is the finding worth reading. Live recompute, so the
+    view never lags the events; the stored snapshot's version is
+    shown alongside.
+
+    Read-only: nothing here feeds send scheduling (see availability.py).
+    """
+    import availability
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = (request.query.get("user_id", "").strip()
+               or os.environ.get("TUTOR_USER_ID", "").strip())
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+
+    return web.Response(text=availability.render(user_id),
+                        content_type="text/plain")
+
+
 async def _sms_reset_and_fire_handler(request):
     """One-shot rescue endpoint: reset the tutor user's phase state
     (fresh Phase 0 with timer starting NOW, cutting off old SMS
@@ -2380,6 +2408,7 @@ def start_ws_server():
         app.router.add_post("/sms/cron-tick", _sms_cron_tick_handler)
         app.router.add_post("/sms/schedule-tick", _sms_schedule_tick_handler)
         app.router.add_get("/schedule", _schedule_debug_handler)
+        app.router.add_get("/availability", _availability_handler)
         app.router.add_post("/sms/reset-and-fire", _sms_reset_and_fire_handler)
         app.router.add_post("/sms/set-goal", _sms_set_goal_handler)
         app.router.add_post("/sms/set-ignition", _sms_set_ignition_handler)

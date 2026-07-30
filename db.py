@@ -449,6 +449,25 @@ def init_db():
         conn.cursor().execute(
             "CREATE INDEX IF NOT EXISTS idx_sched_user ON user_schedule (user_id, version)"
         )
+        # Availability grid snapshots (brief §7). A DERIVED projection
+        # of user_schedule + the event log (see availability.py), kept
+        # as append-only versions: the events stay the truth, any row
+        # here is rebuildable by re-running recompute(). A new version
+        # is written only when the grid actually changed.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS availability_snapshots (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                grid_json TEXT NOT NULL,
+                sources_json TEXT NOT NULL DEFAULT '{}',
+                method_version TEXT NOT NULL DEFAULT 'v1'
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_avail_user ON availability_snapshots (user_id, version)"
+        )
         conn.commit()
     else:
         conn.executescript("""
@@ -696,6 +715,18 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_sched_user ON user_schedule (user_id, version);
+
+            CREATE TABLE IF NOT EXISTS availability_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                version INTEGER NOT NULL,
+                ts TEXT NOT NULL,
+                grid_json TEXT NOT NULL,
+                sources_json TEXT NOT NULL DEFAULT '{}',
+                method_version TEXT NOT NULL DEFAULT 'v1'
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_avail_user ON availability_snapshots (user_id, version);
         """)
 
     conn.commit()
@@ -1571,6 +1602,66 @@ def get_user_schedule(user_id):
     row = _fetchone(cur)
     conn.close()
     return row
+
+
+# ─── Availability grid snapshots (brief §7) ──────────────────────
+#
+# DERIVED: written only by availability.py's recompute path, never
+# from a conversation and never by an LLM. Append-only versions —
+# the caller decides whether the grid changed enough to warrant one.
+
+def save_availability_snapshot(user_id, grid, sources, method_version,
+                               changed_cells=None):
+    """Append one availability snapshot. Returns the new version.
+    Emits availability_updated — a changed grid is a finding about
+    the user and must be joinable to what the coach did next."""
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT MAX(version) AS v FROM availability_snapshots "
+        f"WHERE user_id = {_P}", (user_id,))
+    row = _fetchone(cur)
+    version = (row["v"] or 0) + 1 if row else 1
+    _execute(conn,
+        f"INSERT INTO availability_snapshots (user_id, version, ts, "
+        f" grid_json, sources_json, method_version) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+        (user_id, version, datetime.now().isoformat(),
+         json.dumps(grid, ensure_ascii=False),
+         json.dumps(sources, ensure_ascii=False), method_version))
+    conn.commit()
+    conn.close()
+    cell_count = sum(len(hours) for hours in (grid or {}).values())
+    log_event(user_id, "availability_updated",
+              {"version": version, "method_version": method_version,
+               "cell_count": cell_count,
+               "changed_cells": changed_cells or []},
+              source="annotate")
+    print(f"  [AVAIL] v{version} for {user_id} ({cell_count} cells)",
+          flush=True)
+    return version
+
+
+def get_availability_snapshot(user_id):
+    """Latest snapshot row, or None."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM availability_snapshots WHERE user_id = {_P} "
+        f"ORDER BY version DESC LIMIT 1", (user_id,))
+    row = _fetchone(cur)
+    conn.close()
+    return row
+
+
+def get_availability_snapshots(user_id, limit=20):
+    """Snapshot history, newest version first."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM availability_snapshots WHERE user_id = {_P} "
+        f"ORDER BY version DESC LIMIT {_P}", (user_id, limit))
+    rows = _fetchall(cur)
+    conn.close()
+    return rows
 
 
 def mark_onboarding_started(user_id):
