@@ -73,16 +73,6 @@ user arrive at:
    their day ("애들 재우고 8시 이후", "출근길 8시 반"). Practical, low-stakes —
    fine to settle at the end of day 1.
 
-## If the goal is already agreed
-
-Check the AGREED GOAL field in the shared context. If it is set
-(not "(not yet agreed)"), do NOT re-open the goal question from
-scratch — that reads as amnesia and burns trust. Instead:
-
-- Acknowledge the goal in passing as established fact.
-- Spend tonight only on the remaining piece: the concrete 3-5 min
-  first bite. Propose one anchored to the goal, adjust with their
-  input, and land on one they agree to.
 
 ## Progress across days
 

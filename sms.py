@@ -440,12 +440,20 @@ def _clock_block():
             f"them right now, and is a message even welcome?")
 
 
-def _build_context_blocks(user_id):
+def _build_context_blocks(user_id, focus_block=None):
     """The exploration prediction call's three blocks (brief §7):
     A = policy prior, B = user notes, C = recent trajectory +
     computed features. Returns (text, versions). Never raises —
     a failed block renders as absent and the planner degrades
-    gracefully (empty notes ≈ global-prompt behavior)."""
+    gracefully (empty notes ≈ global-prompt behavior).
+
+    focus_block (the onboarding checklist, the plan assignment, or
+    the dormancy gate — whichever applies) rides in second, right
+    under the clock. It used to be appended last, behind ~25 other
+    sections; the coach read it as trivia and opened with small talk
+    while its focus was the offer. What time it is and what this
+    message is for are the two things that must not be buried.
+    """
     import features as features_mod
     import notes as notes_mod
     import trace as trace_mod
@@ -471,12 +479,17 @@ def _build_context_blocks(user_id):
         parts.append("## Recent trajectory (step-language; you are "
                      "choosing the NEXT token)\n\n"
                      f"Current state: {feats}\n\n{trace_block}")
-        # The clock goes FIRST, in words, and last in the assembled
-        # prompt order below — a key=value buried in a feature line
-        # got ignored: at 08:18 the coach asked "오늘 하루 어땠어?".
-        parts.insert(0, _clock_block())
     except Exception as e:
         print(f"[SMS] ⚠️ trace block failed: {e}", flush=True)
+    # The clock in words, then what this message is for. Both go at
+    # the very top: a key=value clock buried in a feature line got
+    # ignored (at 08:18 the coach asked "오늘 하루 어땠어?"), and a
+    # focus block appended last got ignored the same way. Inserted
+    # outside the try above so a failing trace cannot take them down
+    # with it.
+    if focus_block:
+        parts.insert(0, focus_block)
+    parts.insert(0, _clock_block())
     return "\n\n---\n\n".join(parts), versions
 
 
@@ -498,29 +511,30 @@ def _build_system_prompt(slot, user_id):
     fields = _build_placeholders(user_id)
     rendered_shared = shared.format_map(_SafeDict(**fields))
     rendered_slot = slot_prompt.format_map(_SafeDict(**fields))
-    context, ctx_versions = _build_context_blocks(user_id)
+    context, ctx_versions = _build_context_blocks(
+        user_id, focus_block=_build_focus_block(user_id))
     versions = {"sms_shared": h_shared, prompt_name: h_slot,
                 **ctx_versions}
     parts = [context, rendered_shared, rendered_slot]
-    # Last block wins on recency. Precedence: dormancy gate >
-    # onboarding checklist > sequence assignment. Dormancy overrides
-    # everything; an incomplete onboarding shows the checklist (there
-    # is no plan yet during onboarding); a completed user gets the
-    # plan assignment.
     cap_block = _hold_cap_block(user_id)
     if cap_block:
         parts.append(cap_block)
-    if _is_dormant(user_id):
-        parts.append(_build_dormant_block(user_id))
-    else:
-        ob_block = _build_onboarding_block(user_id)
-        if ob_block:
-            parts.append(ob_block)
-        else:
-            plan_block = _build_plan_block(user_id)
-            if plan_block:
-                parts.append(plan_block)
     return "\n\n---\n\n".join(parts), versions
+
+
+def _build_focus_block(user_id, dormancy=True):
+    """What THIS message is for — the one block that changes turn to
+    turn. Precedence: dormancy gate > onboarding checklist > sequence
+    assignment. Dormancy overrides everything; an incomplete
+    onboarding shows the checklist (there is no plan yet during
+    onboarding); a completed user gets the plan assignment.
+
+    dormancy=False on the reply path: the user just messaged us, so
+    by definition they are not dormant.
+    """
+    if dormancy and _is_dormant(user_id):
+        return _build_dormant_block(user_id)
+    return _build_onboarding_block(user_id) or _build_plan_block(user_id)
 
 
 # ─── Commit-marker protocol (Phase 0 → Phase 1) ──────────────────────
@@ -1360,19 +1374,16 @@ def _build_system_prompt_for_reply(user_id):
     fields = _build_placeholders(user_id)
     rendered_shared = shared.format_map(_SafeDict(**fields))
     rendered_mode = mode_prompt.format_map(_SafeDict(**fields))
-    context, ctx_versions = _build_context_blocks(user_id)
+    context, ctx_versions = _build_context_blocks(
+        user_id, focus_block=_build_focus_block(user_id, dormancy=False))
     versions = {"sms_shared": h_shared, mode_name: h_mode,
                 **ctx_versions}
     parts = [context, rendered_shared, rendered_mode]
-    # Same precedence as the scheduled path, minus dormancy (the
-    # user just messaged us — by definition not dormant).
-    ob_block = _build_onboarding_block(user_id)
-    if ob_block:
-        parts.append(ob_block)
-    else:
-        plan_block = _build_plan_block(user_id)
-        if plan_block:
-            parts.append(plan_block)
+    # Judging ignition is a question about an inbound reply, so it is
+    # asked only here — on a scheduled send there is nothing to judge.
+    judge, h_judge = _read_prompt_versioned("sms_ignition_judgment")
+    versions["sms_ignition_judgment"] = h_judge
+    parts.append(judge.format_map(_SafeDict(**fields)))
     return "\n\n---\n\n".join(parts), versions
 
 

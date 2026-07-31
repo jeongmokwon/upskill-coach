@@ -128,6 +128,21 @@ check("first coach send stamps onboarding_started_at",
       db.get_onboarding_state(U)["started_at"] is not None
       and len(events_of("onboarding_started")) == 1)
 
+# ── the focus block rides second, right under the clock ─────────────
+print("focus block placement")
+U3 = "placement"
+db.ensure_user_profile_row(U3)
+for label, p in (("scheduled", sms._build_system_prompt("evening", U3)[0]),
+                 ("reply", sms._build_system_prompt_for_reply(U3)[0])):
+    heads = [ln for ln in p.split("\n") if ln.startswith("## ")]
+    check(f"{label}: clock first, then what this message is for",
+          heads[0].startswith("## Right now")
+          and heads[1].startswith("## Onboarding"))
+
+check("ignition judgment is asked only about an inbound reply",
+      "## Ignition judgment" in sms._build_system_prompt_for_reply(U)[0]
+      and "## Ignition judgment" not in sms._build_system_prompt("evening", U)[0])
+
 U2 = "veteran"
 db.ensure_user_profile_row(U2)
 check("force completes an incomplete user (operator backfill)",
