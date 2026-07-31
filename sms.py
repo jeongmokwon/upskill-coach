@@ -507,6 +507,9 @@ def _build_system_prompt(slot, user_id):
     # everything; an incomplete onboarding shows the checklist (there
     # is no plan yet during onboarding); a completed user gets the
     # plan assignment.
+    cap_block = _hold_cap_block(user_id)
+    if cap_block:
+        parts.append(cap_block)
     if _is_dormant(user_id):
         parts.append(_build_dormant_block(user_id))
     else:
@@ -769,6 +772,65 @@ def whatsapp_window_closed(user_id):
     return hours is None or hours >= WHATSAPP_WINDOW_H
 
 
+# Planner-chosen silence is SUSPENDED (operator decision 2026-08-01).
+# The rationale it kept giving — "their last question is still
+# unanswered" — is true after essentially every conversation: people
+# answer what matters and go to bed without replying to the final
+# turn. Treated as a signal, that makes holding the permanent state
+# for every user after their first real exchange, which is what
+# began happening. Silence is still available where it belongs: the
+# SERVER decides it mechanically (dormancy gate, closed WhatsApp
+# window) before the planner is ever called. Re-enable with
+# PLANNER_HOLD=on once the planner can tell closure from avoidance.
+HOLD_ENABLED = os.environ.get("PLANNER_HOLD", "off").lower() == "on"
+
+# Kept for when holding returns: a hold is a pause, never a policy of
+# silence. The second of two consecutive holds cost us the WhatsApp
+# window entirely (past 24h of user silence we cannot reopen contact).
+MAX_HOLD_H = 23.98      # 23h59m
+
+
+def hold_forbidden(user_id):
+    """True when the planner may not choose silence: either holding is
+    suspended outright, or the coach has been silent ~24h already.
+    Never-contacted users are exempt from the ceiling."""
+    if not HOLD_ENABLED:
+        return True
+    last_out = db.get_last_event(user_id, "sms_out")
+    if not last_out:
+        return False
+    try:
+        hours = (datetime.now()
+                 - datetime.fromisoformat(last_out["ts"])).total_seconds() / 3600
+    except Exception:
+        return False
+    return hours >= MAX_HOLD_H
+
+
+def _hold_cap_block(user_id):
+    """Prompt block that revokes the hold option once the ceiling is
+    reached. Empty while holding is still allowed."""
+    if not hold_forbidden(user_id):
+        return ""
+    if not HOLD_ENABLED:
+        return ("## This send must produce a message\n\n"
+                "Choosing silence is not available to you. If the "
+                "moment feels wrong — they are at work, their last "
+                "question is still hanging — that shapes WHAT you "
+                "write (something small, warm, easy to leave "
+                "unanswered), not WHETHER you write. Genuine silence "
+                "is decided by the server before you are called.")
+    return ("## Silence ceiling reached — you may NOT hold this time\n\n"
+            "It has been about a day since you last said anything. "
+            "Holding is for a moment that is wrong, not for waiting "
+            "indefinitely: a day of nothing reads as abandonment, and "
+            "on WhatsApp it also ends your ability to reach them at "
+            "all until they write first. Send something — and if their "
+            "last question is still unanswered, that is exactly the "
+            "situation to acknowledge lightly and make easy to leave "
+            "(a zero-demand touch or a warm release), not to repeat.")
+
+
 def mark_whatsapp_window_open(user_id, note=""):
     """Operator override: record that the user has re-joined / messaged
     the sandbox, reopening their 24h free-form window. Stamped now, so
@@ -992,9 +1054,34 @@ def generate_message(user_id, system_prompt, history, trigger,
         steps, text = _process_step_marker(user_id, text)
 
         # A hold is a complete answer: no message body, so the
-        # question/step guards do not apply to it.
+        # question/step guards do not apply to it — unless the silence
+        # ceiling has been reached, in which case holding is itself the
+        # violation and gets one regeneration like any other.
         if not text.strip() and any(s.get("tag") == "hold" for s in steps):
-            return text, steps, expect, llm_call_id, hold_reason
+            if not hold_forbidden(user_id) or attempt == 2:
+                if hold_forbidden(user_id):
+                    print("[SMS] ⚠️ held past the silence ceiling anyway",
+                          flush=True)
+                    db.log_event(user_id,
+                                 "hold_cap_violated" if HOLD_ENABLED
+                                 else "hold_while_suspended",
+                                 {"reason": hold_reason or "(none)",
+                                  "llm_call_id": llm_call_id},
+                                 source="sms")
+                return text, steps, expect, llm_call_id, hold_reason
+            print("[SMS] hold refused — silence ceiling reached, "
+                  "regenerating", flush=True)
+            attempt_history = attempt_history + [
+                {"role": "assistant", "content": raw},
+                {"role": "user",
+                 "content": ("You may not choose silence — this send "
+                             "must produce a message."
+                             if not HOLD_ENABLED else
+                             "You may not hold: it has been about a "
+                             "day since your last message.")
+                            + " Send something small and easy to leave "
+                              "unanswered."}]
+            continue
 
         violations = check_send_guards(text, steps)
         if not violations or attempt == 2:

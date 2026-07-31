@@ -7,7 +7,7 @@ import os
 import time
 import json
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # ─── Connection setup ────────────────────────────────────────────────
 
@@ -1395,7 +1395,10 @@ def get_recent_sms_messages(user_id, limit=20, since=None,
     if not with_time:
         return [{"role": r["role"], "content": r["content"]} for r in rows]
 
+    import os as _os
+    tz = int(_os.environ.get("TZ_OFFSET_HOURS", "-8"))
     now = datetime.now()
+    days_kr = ["월", "화", "수", "목", "금", "토", "일"]
     out = []
     for r in rows:
         label = ""
@@ -1407,11 +1410,20 @@ def get_recent_sms_messages(user_id, limit=20, since=None,
                     datetime.fromisoformat(str(ts).replace("Z", ""))
                 mins = (now - when).total_seconds() / 60.0
                 if mins < 90:
-                    label = f"[{max(1, round(mins))}분 전] "
+                    rel = f"{max(1, round(mins))}분 전"
                 elif mins < 60 * 36:
-                    label = f"[{round(mins / 60)}시간 전] "
+                    rel = f"{round(mins / 60)}시간 전"
                 else:
-                    label = f"[{round(mins / 1440)}일 전] "
+                    rel = f"{round(mins / 1440)}일 전"
+                # Absolute stamp alongside the relative one: with only
+                # "35시간 전" the model had to do calendar arithmetic to
+                # place a turn, and got it wrong twice (calling a
+                # 4-hour-old message "어제", and a Wednesday-night
+                # exchange "어젯밤" on a Friday).
+                local = when + timedelta(hours=tz)
+                abs_kr = (f"{days_kr[local.weekday()]}요일 "
+                          f"{local.strftime('%H:%M')}")
+                label = f"[{abs_kr}, {rel}] "
             except Exception:
                 label = ""
         out.append({"role": r["role"], "content": label + r["content"]})
