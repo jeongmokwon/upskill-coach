@@ -507,6 +507,9 @@ def _build_system_prompt(slot, user_id):
     # everything; an incomplete onboarding shows the checklist (there
     # is no plan yet during onboarding); a completed user gets the
     # plan assignment.
+    cap_block = _hold_cap_block(user_id)
+    if cap_block:
+        parts.append(cap_block)
     if _is_dormant(user_id):
         parts.append(_build_dormant_block(user_id))
     else:
@@ -769,6 +772,45 @@ def whatsapp_window_closed(user_id):
     return hours is None or hours >= WHATSAPP_WINDOW_H
 
 
+# A hold is a pause, never a policy of silence. Without a ceiling the
+# planner will keep deferring for the same reason forever — observed:
+# it held two nights running on "their questions are still unanswered",
+# which was true but self-perpetuating, and the second hold cost us the
+# WhatsApp window entirely (after 24h of user silence we cannot reopen
+# contact at all). So: hold freely, but never past a day.
+MAX_HOLD_H = 23.98      # 23h59m
+
+
+def hold_forbidden(user_id):
+    """True when the coach has now been silent for ~24h and may not
+    hold again. Never-contacted users are exempt (nothing to extend)."""
+    last_out = db.get_last_event(user_id, "sms_out")
+    if not last_out:
+        return False
+    try:
+        hours = (datetime.now()
+                 - datetime.fromisoformat(last_out["ts"])).total_seconds() / 3600
+    except Exception:
+        return False
+    return hours >= MAX_HOLD_H
+
+
+def _hold_cap_block(user_id):
+    """Prompt block that revokes the hold option once the ceiling is
+    reached. Empty while holding is still allowed."""
+    if not hold_forbidden(user_id):
+        return ""
+    return ("## Silence ceiling reached — you may NOT hold this time\n\n"
+            "It has been about a day since you last said anything. "
+            "Holding is for a moment that is wrong, not for waiting "
+            "indefinitely: a day of nothing reads as abandonment, and "
+            "on WhatsApp it also ends your ability to reach them at "
+            "all until they write first. Send something — and if their "
+            "last question is still unanswered, that is exactly the "
+            "situation to acknowledge lightly and make easy to leave "
+            "(a zero-demand touch or a warm release), not to repeat.")
+
+
 def mark_whatsapp_window_open(user_id, note=""):
     """Operator override: record that the user has re-joined / messaged
     the sandbox, reopening their 24h free-form window. Stamped now, so
@@ -992,9 +1034,28 @@ def generate_message(user_id, system_prompt, history, trigger,
         steps, text = _process_step_marker(user_id, text)
 
         # A hold is a complete answer: no message body, so the
-        # question/step guards do not apply to it.
+        # question/step guards do not apply to it — unless the silence
+        # ceiling has been reached, in which case holding is itself the
+        # violation and gets one regeneration like any other.
         if not text.strip() and any(s.get("tag") == "hold" for s in steps):
-            return text, steps, expect, llm_call_id, hold_reason
+            if not hold_forbidden(user_id) or attempt == 2:
+                if hold_forbidden(user_id):
+                    print("[SMS] ⚠️ held past the silence ceiling anyway",
+                          flush=True)
+                    db.log_event(user_id, "hold_cap_violated",
+                                 {"reason": hold_reason or "(none)",
+                                  "llm_call_id": llm_call_id},
+                                 source="sms")
+                return text, steps, expect, llm_call_id, hold_reason
+            print("[SMS] hold refused — silence ceiling reached, "
+                  "regenerating", flush=True)
+            attempt_history = attempt_history + [
+                {"role": "assistant", "content": raw},
+                {"role": "user",
+                 "content": "You may not hold: it has been about a day "
+                            "since your last message. Send something "
+                            "small and easy to leave unanswered."}]
+            continue
 
         violations = check_send_guards(text, steps)
         if not violations or attempt == 2:
