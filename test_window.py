@@ -117,6 +117,30 @@ sent = sms.handle_cron_tick("evening")
 check("on SMS the same silence does not block",
       sent is not None and len(events_of("sms_out")) == 2)
 
+# ── 2b. operator override (Twilio swallows the sandbox `join`) ───────
+print("2b) operator override")
+os.environ["MESSAGING_CHANNEL"] = "whatsapp"
+backdate_last_inbound(40)
+check("closed before the override", sms.whatsapp_window_closed(U))
+
+sms.mark_whatsapp_window_open(U, note="husband re-joined the sandbox")
+check("override reopens the window without faking a user turn",
+      not sms.whatsapp_window_closed(U)
+      and len(events_of("whatsapp_window_opened")) == 1
+      and len([e for e in db.get_events(U, limit=300)
+               if e["kind"] == "sms_in"]) == 1)   # still just the real one
+
+sent = sms.handle_cron_tick("evening")
+check("and the send now goes through", sent is not None)
+
+conn = db.get_conn()
+conn.execute("UPDATE events SET ts=? WHERE kind='whatsapp_window_opened'",
+             ((datetime.now() - timedelta(hours=30)).isoformat(),))
+conn.commit()
+conn.close()
+check("an old override ages out like a real message would",
+      sms.whatsapp_window_closed(U))
+
 # ── 3. the clock block ───────────────────────────────────────────────
 print("3) clock")
 block = sms._clock_block()

@@ -1322,6 +1322,37 @@ async def _notes_handler(request):
     return web.Response(text="\n".join(parts), content_type="text/plain")
 
 
+async def _window_open_handler(request):
+    """Operator override for the WhatsApp free-form window.
+
+    Twilio's sandbox swallows the `join <code>` message, so a user can
+    reopen their 24h window without us ever seeing an inbound. This
+    records the reopening (timestamped now, so it ages out like a real
+    message) instead of faking a user turn in the conversation.
+
+    POST /sms/window-open?secret=...[&user_id=X][&note=...]
+    """
+    import sms
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = (request.query.get("user_id", "").strip()
+               or os.environ.get("TUTOR_USER_ID", "").strip())
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+
+    sms.mark_whatsapp_window_open(user_id, request.query.get("note", ""))
+    return web.json_response({"ok": True, "user_id": user_id,
+                              "window_closed_now":
+                                  sms.whatsapp_window_closed(user_id)})
+
+
 async def _analyze_turn_handler(request):
     """Run the per-turn analysis pass on demand — back-extraction over
     a conversation that predates the analysis call, or a re-run after
@@ -2750,6 +2781,7 @@ def start_ws_server():
         app.router.add_post("/onboarding", _onboarding_handler)
         app.router.add_post("/plan/generate", _plan_generate_handler)
         app.router.add_post("/analyze/turn", _analyze_turn_handler)
+        app.router.add_post("/sms/window-open", _window_open_handler)
         app.router.add_post("/annotate/run", _annotate_run_handler)
         app.router.add_post("/sms/set-bite", _sms_set_bite_handler)
         # Screen observer — local agent (observer.py) endpoints.
