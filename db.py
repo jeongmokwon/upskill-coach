@@ -1868,8 +1868,13 @@ def mark_onboarding_started(user_id):
 # confirmed, agree when to message, agree what "started" looks like,
 # then land one concrete task. The prompt shows only the first
 # unsettled item as the current focus.
+# The order IS the arc. `bite` is deliberately NOT here: the first
+# concrete task belongs to the first study session, which happens
+# AFTER onboarding completes and the sequence plan exists. What
+# onboarding needs in its place is the offer — what the coach will
+# do for them.
 ONBOARDING_FIELDS = ("goal", "path", "offer", "schedule",
-                     "ignition_marker", "bite")
+                     "ignition_marker")
 
 
 def get_onboarding_state(user_id):
@@ -1881,8 +1886,6 @@ def get_onboarding_state(user_id):
         filled.append("goal")
     if get_current_path(user_id):
         filled.append("path")
-    if (prof.get("agreed_first_bite") or "").strip():
-        filled.append("bite")
     if (prof.get("ignition_marker") or "").strip():
         filled.append("ignition_marker")
     if get_user_schedule(user_id):

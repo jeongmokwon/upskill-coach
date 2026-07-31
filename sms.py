@@ -669,11 +669,22 @@ def _build_onboarding_block(user_id):
     label = {"goal": "their goal, in their own words",
              "path": "the big-steps picture: direction, a mid-horizon "
                      "target, and how they'll know it's reached",
-             "bite": "one concrete task for the next day or two",
-             "ignition_marker": "what STARTING a session observably "
-                                "looks like for them (usually derived "
-                                "from their material — confirm it in "
-                                "passing rather than interrogating)",
+             "ignition_marker": "what STARTING one ordinary session "
+                                "observably looks like for them — NOT "
+                                "their goal's success criterion. "
+                                "Observed confusion: asked '이 지식이 "
+                                "머릿속에 들어왔다는 순간은 언제야?' the "
+                                "user said '누가 물어보면 바로 대답할 수 "
+                                "있어야지' — that is success months from "
+                                "now, not starting tonight. Usually you "
+                                "derive it from their material rather "
+                                "than ask (a Word file of their own "
+                                "notes → '그 파일 열어서 손대기 시작'); "
+                                "if your context already shows a derived "
+                                "version, just confirm it in passing at "
+                                "a cheap moment. Concrete and observable "
+                                "in THEIR craft, never a feeling "
+                                "('집중되면')",
              "schedule": "the times of day they want to hear from you",
              "offer": "what YOU will do for them. PROPOSE it — never "
                       "ask them what you could do. Name one concrete "
@@ -699,8 +710,9 @@ def _build_onboarding_block(user_id):
         "You do not record anything and you never announce that "
         "onboarding is done — a separate pass reads the conversation "
         "and the server decides. Just get REAL agreement on the focus "
-        "item, one at a time, at conversational pace (discovery runs "
-        "up to 3 days; a couple of items an evening is fine).",
+        "item, one at a time, at conversational pace. Take as long as "
+        "it takes: a long, wandering conversation is a good outcome "
+        "here, not a delay.",
     ]
     return "\n".join(lines)
 
