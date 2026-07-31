@@ -661,8 +661,14 @@ def _build_onboarding_block(user_id):
                                 "from their material — confirm it in "
                                 "passing rather than interrogating)",
              "schedule": "the times of day they want to hear from you",
-             "offer": "what YOU will do for them — proposed concretely "
-                      "and confirmed by them"}
+             "offer": "what YOU will do for them. PROPOSE it — never "
+                      "ask them what you could do. Name one concrete "
+                      "thing you will actually do, built from what you "
+                      "already know about them (their material, how "
+                      "they learn), and ask only for a yes/no on it. "
+                      "'내가 뭘 도와줄까?' is the failure mode: it "
+                      "hands your job back to them and costs a long "
+                      "answer they have no reason to write"}
     missing = state["missing"]
     lines = [
         "## Onboarding — what is still unsettled",
