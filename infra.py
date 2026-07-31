@@ -36,7 +36,9 @@ import db
 CAPTURE_GAP_MIN = 5
 CRON_STALE_H = 25
 EXPECTED_SLOTS = ("morning", "evening")
-WHATSAPP_SILENCE_H = 72     # sandbox rejoin window
+WHATSAPP_SILENCE_H = 24     # free-form window (NOT the 3-day
+                            # sandbox rejoin — this is the shorter,
+                            # sharper rule that actually blocks sends)
 SUSPICION_REPEAT_H = 24     # re-flag a persisting suspicion daily
 
 
