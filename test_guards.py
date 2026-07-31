@@ -153,10 +153,11 @@ plain = db.get_recent_sms_messages(U, limit=10)
 timed = db.get_recent_sms_messages(U, limit=10, with_time=True)
 check("default rendering unchanged (no labels)",
       all(not m["content"].startswith("[") for m in plain))
-check("4h-old turn labeled in hours",
-      any(m["content"].startswith("[4시간 전] ") for m in timed))
+check("4h-old turn labeled with weekday, clock AND relative",
+      any("4시간 전] " in m["content"] and "요일 " in m["content"]
+          for m in timed))
 check("20min-old turn labeled in minutes",
-      any(m["content"].startswith("[20분 전] ") for m in timed))
+      any("20분 전] " in m["content"] for m in timed))
 check("content preserved after the label",
       any(m["content"].endswith("오늘 할게") for m in timed))
 
@@ -177,6 +178,43 @@ text, steps, expect, call_id, hold_reason = sms.generate_message(
     U, "sys", [{"role": "user", "content": "hi"}], "test")
 check("a reasonless hold still holds (reason simply absent)",
       not text.strip() and hold_reason is None)
+
+# ── 6. the silence ceiling ───────────────────────────────────────────
+print("6) silence ceiling (23h59m)")
+db.log_event(U, "sms_out", {"text": "last one"}, source="cron")
+check("just sent → holding is allowed", not sms.hold_forbidden(U))
+check("no ceiling block while allowed", sms._hold_cap_block(U) == "")
+
+conn = db.get_conn()
+conn.execute("UPDATE events SET ts=? WHERE id=(SELECT MAX(id) FROM events "
+             "WHERE kind='sms_out')",
+             ((datetime.now() - timedelta(hours=24, minutes=5)).isoformat(),))
+conn.commit()
+conn.close()
+check("~24h of coach silence → holding is forbidden",
+      sms.hold_forbidden(U))
+check("prompt revokes the hold option with the reason",
+      "may NOT hold" in sms._hold_cap_block(U)
+      and "abandonment" in sms._hold_cap_block(U))
+
+Scripted.queue = ['[HOLD: "아직 미응답이라 기다림"]\n[STEP: hold]',
+                  "그 질문은 흘려보내도 돼. 편할 때 봐\n[STEP: release@1]\n[EXPECT: no_reply]"]
+Scripted.seen = []
+text, steps, expect, call_id, hold_reason = sms.generate_message(
+    U, "sys", [{"role": "user", "content": "hi"}], "test")
+check("a hold past the ceiling is refused and regenerated",
+      len(Scripted.seen) == 2 and text.strip()
+      and steps == [{"tag": "release", "intensity": 1}])
+check("the retry said why",
+      "may not hold" in Scripted.seen[1]["messages"][-1]["content"])
+
+Scripted.queue = ['[HOLD: "그래도 기다릴래"]\n[STEP: hold]',
+                  '[HOLD: "그래도 기다릴래"]\n[STEP: hold]']
+text, steps, expect, call_id, hold_reason = sms.generate_message(
+    U, "sys", [{"role": "user", "content": "hi"}], "test")
+check("a stubborn hold still holds, but is recorded",
+      not text.strip()
+      and len(events_of("hold_cap_violated")) == 1)
 
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
