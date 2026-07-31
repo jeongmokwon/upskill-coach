@@ -140,5 +140,20 @@ check("sms channel → check disabled",
       len(events_of("whatsapp_expiry_suspected")) == 1)
 
 # ── result ───────────────────────────────────────────────────────────
+# ── authoring comments never reach the model ─────────────────────────
+print("authoring comments")
+import glob
+import sms  # noqa: E402
+noisy = [f for f in glob.glob("prompts/*.md")
+         if "<!--" in open(f, encoding="utf-8").read()]
+check("some prompt files DO carry authoring notes (else this is vacuous)",
+      len(noisy) > 0)
+check("but not one survives _read_prompt",
+      all("<!--" not in sms._read_prompt(
+              f.split("/")[-1][:-3]) for f in noisy
+          if not f.startswith("prompts/parked/")))
+check("registered version text is what was actually sent",
+      "<!--" not in sms._read_prompt_versioned("sms_user_facts")[0])
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

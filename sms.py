@@ -208,7 +208,19 @@ def _read_prompt(name):
     """
     path = os.path.join(PROMPTS_DIR, f"{name}.md")
     with open(path, "r", encoding="utf-8") as f:
-        return f.read()
+        return _strip_authoring_comments(f.read())
+
+
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->\s*", re.DOTALL)
+
+
+def _strip_authoring_comments(text):
+    """Drop <!-- ... --> blocks. They are notes to whoever edits the
+    file — why a section was moved, when it is loaded — and the model
+    has no use for them. Observed: the note explaining why the user's
+    facts moved next to the profile brief was being shipped to the
+    coach, directly above the block it described."""
+    return _HTML_COMMENT_RE.sub("", text).strip() + "\n"
 
 
 def _read_prompt_versioned(name):
