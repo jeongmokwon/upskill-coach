@@ -440,6 +440,42 @@ def _clock_block():
             f"them right now, and is a message even welcome?")
 
 
+def _server_turn(text):
+    """A turn the SERVER puts in the messages array — the scheduled-send
+    signal, or feedback on a draft that broke a rule.
+
+    The Anthropic messages array has only `user` and `assistant` roles,
+    so anything we inject wears the user's role. Left bare, it is
+    indistinguishable from something the user actually typed: the coach
+    was reading "(scheduled evening slot fired)" and "Your message broke
+    a hard rule" as conversation, and writing its next message in that
+    context. The envelope + the contract block below make the boundary
+    explicit.
+    """
+    return {"role": "user",
+            "content": f"<server_instruction>\n{text}\n</server_instruction>"}
+
+
+def _conversation_contract_block():
+    """The LAST block of the system prompt — it sits immediately before
+    the messages array, so "everything above is instruction, everything
+    below is what happened" is true physically, not just as a claim."""
+    return (
+        "## Everything below this line is the conversation itself\n\n"
+        "The turns that follow are the real exchange with this user, "
+        "verbatim, oldest first. The `[수요일 22:48, 2일 전]` prefixes "
+        "are the server's annotation of when each turn happened — the "
+        "user did not type those.\n\n"
+        "Turns wrapped in `<server_instruction>` are NOT from the user. "
+        "That is this system talking to you: why you are being asked to "
+        "write right now, or what your previous draft got wrong. The "
+        "user never saw them and never wrote them. Never quote one, "
+        "never reply to one as though the user had spoken, and never "
+        "let its wording leak into what you send.\n\n"
+        "Everything ABOVE this line is instruction. Everything BELOW is "
+        "what actually happened between you and this person.")
+
+
 def _build_context_blocks(user_id, focus_block=None):
     """The exploration prediction call's three blocks (brief §7):
     A = policy prior, B = user notes, C = recent trajectory +
@@ -519,6 +555,7 @@ def _build_system_prompt(slot, user_id):
     cap_block = _hold_cap_block(user_id)
     if cap_block:
         parts.append(cap_block)
+    parts.append(_conversation_contract_block())
     return "\n\n---\n\n".join(parts), versions
 
 
@@ -1105,14 +1142,13 @@ def generate_message(user_id, system_prompt, history, trigger,
                   "regenerating", flush=True)
             attempt_history = attempt_history + [
                 {"role": "assistant", "content": raw},
-                {"role": "user",
-                 "content": ("You may not choose silence — this send "
-                             "must produce a message."
-                             if not HOLD_ENABLED else
-                             "You may not hold: it has been about a "
-                             "day since your last message.")
-                            + " Send something small and easy to leave "
-                              "unanswered."}]
+                _server_turn(("You may not choose silence — this send "
+                              "must produce a message."
+                              if not HOLD_ENABLED else
+                              "You may not hold: it has been about a "
+                              "day since your last message.")
+                             + " Send something small and easy to leave "
+                               "unanswered.")]
             continue
 
         violations = check_send_guards(text, steps)
@@ -1122,11 +1158,10 @@ def generate_message(user_id, system_prompt, history, trigger,
               flush=True)
         attempt_history = attempt_history + [
             {"role": "assistant", "content": raw},
-            {"role": "user",
-             "content": "Your message broke a hard rule:\n- "
-                        + "\n- ".join(violations)
-                        + "\nRewrite it. Same intent, same warmth, "
-                          "rule respected."}]
+            _server_turn("Your draft broke a hard rule:\n- "
+                         + "\n- ".join(violations)
+                         + "\nRewrite it. Same intent, same warmth, "
+                           "rule respected.")]
 
     if violations:
         print(f"[SMS] ⚠️ sending despite violations: {violations}",
@@ -1396,6 +1431,7 @@ def _build_system_prompt_for_reply(user_id):
     judge, h_judge = _read_prompt_versioned("sms_ignition_judgment")
     versions["sms_ignition_judgment"] = h_judge
     parts.append(judge.format_map(_SafeDict(**fields)))
+    parts.append(_conversation_contract_block())
     return "\n\n---\n\n".join(parts), versions
 
 
@@ -1519,12 +1555,17 @@ def handle_cron_tick(slot, window=None):
     # placeholder. Anthropic requires the messages array to start with
     # a user role and to be non-empty.
     if not history:
-        history = [{"role": "user", "content": f"(scheduled {slot} slot — no prior thread)"}]
+        history = [_server_turn(
+            f"The scheduled {slot} send is firing and there is no prior "
+            f"thread with this user — this is your first message to "
+            f"them. Write it.")]
     elif history[-1]["role"] == "assistant":
-        # Last turn was us. Add a synthetic user-turn so Claude has
-        # something to respond to. The slot prompt itself is in the
-        # system message; this is just a "go" signal.
-        history.append({"role": "user", "content": f"(scheduled {slot} slot fired)"})
+        # Anthropic needs a trailing user turn to answer. Ours says, in
+        # the open, that it is the clock and not the person.
+        history.append(_server_turn(
+            f"The scheduled {slot} send is firing. The user has not "
+            f"written since the last turn above. Write the next "
+            f"message."))
 
     text, steps, expect, llm_call_id, hold_reason = generate_message(
         user_id, system_prompt, history, f"cron_{slot}",
