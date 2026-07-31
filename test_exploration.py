@@ -115,14 +115,23 @@ check("empty-notes user renders empty block",
 # ── P5: assembly + EXPECT + planner hold ─────────────────────────────
 print("P5) planner")
 prompt, versions = sms._build_system_prompt("evening", U)
-check("prior block present + versioned",
-      "Policy prior" in prompt and "prior" in versions)
+check("during onboarding the prior stays out — nothing to run yet",
+      "Policy prior" not in prompt and "prior" not in versions)
 check("notes block present",
       "validate@2, micro_ask@1" in prompt)
 check("trajectory block present with step-language",
       "Recent trajectory" in prompt and "coach: micro_ask@2" in prompt)
-check("choose-then-write protocol present",
-      "Choose the move FIRST" in prompt and "[EXPECT:" in prompt)
+check("tagging continues on the compact list, anchors held back",
+      "[EXPECT:" in prompt and "[STEP:" in prompt
+      and "Choose the move FIRST" not in prompt
+      and "### Vocabulary" not in prompt)
+
+db.check_and_complete_onboarding(U, force=True)
+done, done_versions = sms._build_system_prompt("evening", U)
+check("completion brings back the prior, the anchors and rules 2-8",
+      "Policy prior" in done and "prior" in done_versions
+      and "Choose the move FIRST" in done and "### Vocabulary" in done
+      and "One cognitive altitude at a time" in done)
 
 expect, text = sms._process_expect_marker("안녕\n[EXPECT: advance]")
 check("EXPECT parsed and stripped",

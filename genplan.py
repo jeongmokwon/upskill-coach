@@ -190,12 +190,17 @@ _TOOL = {
 
 def _vocab_section():
     """The step-vocabulary definitions + intensity anchors from
-    sms_shared (single source of truth). Falls back to the bare tag
-    list if the section can't be located."""
+    sms_step_vocabulary (single source of truth). Falls back to the
+    bare tag list if the section can't be located.
+
+    Plan generation always gets the full vocabulary, even though the
+    coach only carries it after onboarding completes: writing a
+    sequence of tagged steps is exactly the job that needs the
+    anchors."""
     try:
-        shared = sms._read_prompt("sms_shared")
-        start = shared.index("### Vocabulary")
-        rest = shared[start:]
+        vocab = sms._read_prompt("sms_step_vocabulary")
+        start = vocab.index("### Vocabulary")
+        rest = vocab[start:]
         end = rest.find("\n## ")
         return rest[:end] if end > 0 else rest
     except Exception:

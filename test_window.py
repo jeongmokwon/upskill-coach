@@ -147,8 +147,9 @@ block = sms._clock_block()
 now_local = datetime.now() + timedelta(hours=sms.TZ_OFFSET_H)
 check("states the user's wall clock in words",
       now_local.strftime("%H:%M") in block and "요일" in block)
-check("names the obligation, not just the time",
-      "must make sense at this hour" in block)
+check("states the hour and stops — no standing order to greet",
+      "must make sense at this hour" not in block
+      and len(block) < 200)
 
 prompt, _ = sms._build_system_prompt("evening", U)
 check("clock rides at the TOP of the assembled prompt",
