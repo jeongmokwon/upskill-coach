@@ -149,8 +149,8 @@ check("ignition judgment is asked only about an inbound reply",
       "## Ignition judgment" in sms._build_system_prompt_for_reply(U)[0]
       and "## Ignition judgment" not in sms._build_system_prompt("evening", U)[0])
 
-U2 = "veteran"
-db.ensure_user_profile_row(U2)
+U2 = "veteran"   # deliberately NO ensure_user_profile_row: a forced
+                 # completion used to log success and write nothing
 check("force completes an incomplete user (operator backfill)",
       db.check_and_complete_onboarding(U2, force=True) is True
       and db.get_onboarding_state(U2)["completed_at"] is not None)

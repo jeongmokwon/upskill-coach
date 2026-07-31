@@ -421,7 +421,12 @@ def _clock_block():
     """A human-readable clock line. Prepended to the context because
     a machine-shaped `local_time=08:18` inside the features line was
     observably skimmed past — the coach asked how the user's day had
-    gone at 8:18 in the morning."""
+    gone at 8:18 in the morning.
+
+    It states the hour and stops. An earlier version told the coach to
+    "match the hour", which read as a standing order to open with an
+    hour-appropriate greeting — small talk aimed at a user whose brief
+    says no social warm-up is needed."""
     now_local = datetime.now() + timedelta(hours=TZ_OFFSET_H)
     hour = now_local.hour
     part = ("한밤중" if hour < 5 else "이른 아침" if hour < 8
@@ -431,13 +436,7 @@ def _clock_block():
     weekday = ["월", "화", "수", "목", "금", "토", "일"][now_local.weekday()]
     return (f"## Right now, for this user\n\n"
             f"It is **{now_local.strftime('%H:%M')} on {weekday}요일 "
-            f"({part})** where they are.\n\n"
-            f"Everything you write must make sense at this hour — not "
-            f"just avoid naming it. Asking how their day went in the "
-            f"morning, or proposing a study session in the middle of "
-            f"their workday, reads as a machine that cannot see the "
-            f"clock. Match the hour: what is plausibly happening for "
-            f"them right now, and is a message even welcome?")
+            f"({part})** where they are.")
 
 
 def _server_turn(text):
@@ -476,6 +475,59 @@ def _conversation_contract_block():
         "what actually happened between you and this person.")
 
 
+def _onboarding_done(user_id):
+    """True once the server has stamped onboarding complete. Several
+    prompt blocks are gated on this: during onboarding the coach is
+    having a conversation, not running a plan, and doctrine about
+    material that does not exist yet is noise between it and the one
+    thing this message is for."""
+    try:
+        return bool(db.get_onboarding_state(user_id)["completed_at"])
+    except Exception as e:
+        print(f"[SMS] ⚠️ onboarding state unreadable: {e}", flush=True)
+        return True   # fail toward the fuller prompt, never the emptier
+
+
+def _step_compact_block():
+    """The step vocabulary during onboarding: the tags and nothing
+    else. Tagging must not stop while onboarding runs — those turns
+    are the freshest exploration data we get, and the trajectory block
+    is built from them — but the anchors, the intensity calibration and
+    the sequence discipline are about executing a plan that does not
+    exist yet. Full version returns as prompts/sms_step_vocabulary.md
+    once onboarding completes."""
+    return (
+        "## Tag your move (required on EVERY response)\n\n"
+        "Decide which 1-3 coaching moves this moment calls for, at what "
+        "intensity, THEN write a message that executes exactly those. "
+        "Append at the very end (the server strips both; the user never "
+        "sees them):\n\n"
+        "    [STEP: validate@2, elicit_why@1]\n"
+        "    [EXPECT: reply]\n\n"
+        "Intensity: 1 = light touch, 3 = direct/deep; when unsure, 2. "
+        "[EXPECT:] is your honest prediction of their next reaction — "
+        "one of `no_reply` | `reply` | `advance` | `withdraw` | "
+        "`ignition`.\n\n"
+        "접촉: `connect` (demand-free contact) · `validate` (name and "
+        "accept their state)\n"
+        "동기: `elicit_why` (they articulate why — must be an OPEN "
+        "question, and the LAST move of the message) · `identity_frame` "
+        "· `spark_curiosity`\n"
+        "구조: `map` (lay out the path) · `secure_commit` (lock explicit "
+        "agreement)\n"
+        "효능감: `evoke_mastery` · `vicarious_model` · `affirm_ability` "
+        "(cite real evidence, never empty praise) · `reframe_state`\n"
+        "점화: `micro_ask` · `choice_offer` · `implementation_cue` · "
+        "`handoff`\n"
+        "페이싱: `release` (end warmly, no extraction) · `hold` "
+        "(server-only — you will not use it)\n"
+        "drain: `none` (nothing above fits; no intensity)\n\n"
+        "Do not invent tags. If the same move already went unanswered "
+        "in your last 2 sends, play a different family instead — a move "
+        "that keeps failing with this user is wrong for them, not "
+        "insufficiently repeated.")
+
+
 def _build_context_blocks(user_id, focus_block=None):
     """The exploration prediction call's three blocks (brief §7):
     A = policy prior, B = user notes, C = recent trajectory +
@@ -496,14 +548,30 @@ def _build_context_blocks(user_id, focus_block=None):
 
     versions = {}
     parts = []
+    if _onboarding_done(user_id):
+        # The policy prior is about running an intervention. During
+        # onboarding there is nothing to intervene on yet — the job is
+        # to find out who this person is.
+        try:
+            prior, h_prior = _read_prompt_versioned("prior")
+            versions["prior"] = h_prior
+            parts.append(prior)
+        except Exception as e:
+            print(f"[SMS] ⚠️ prior block failed: {e}", flush=True)
     try:
-        prior, h_prior = _read_prompt_versioned("prior")
-        versions["prior"] = h_prior
-        parts.append(prior)
+        profile = notes_mod.render_profile_block(user_id)
+        if profile:
+            parts.append(profile)
     except Exception as e:
-        print(f"[SMS] ⚠️ prior block failed: {e}", flush=True)
+        print(f"[SMS] ⚠️ profile block failed: {e}", flush=True)
     try:
-        notes_block = notes_mod.render_notes_block(user_id)
+        facts, h_facts = _read_prompt_versioned("sms_user_facts")
+        versions["sms_user_facts"] = h_facts
+        parts.append(facts.format_map(_SafeDict(**_build_placeholders(user_id))))
+    except Exception as e:
+        print(f"[SMS] ⚠️ user facts block failed: {e}", flush=True)
+    try:
+        notes_block = notes_mod.render_notes_block(user_id, profile=False)
         if notes_block:
             parts.append(notes_block)
     except Exception as e:
@@ -551,12 +619,32 @@ def _build_system_prompt(slot, user_id):
         user_id, focus_block=_build_focus_block(user_id))
     versions = {"sms_shared": h_shared, prompt_name: h_slot,
                 **ctx_versions}
-    parts = [context, rendered_shared, rendered_slot]
+    parts = [context, rendered_shared]
+    parts += _phase_gated_blocks(user_id, versions)
+    parts.append(rendered_slot)
     cap_block = _hold_cap_block(user_id)
     if cap_block:
         parts.append(cap_block)
     parts.append(_conversation_contract_block())
     return "\n\n---\n\n".join(parts), versions
+
+
+def _phase_gated_blocks(user_id, versions):
+    """The blocks that only make sense once there is material and a
+    plan: hard rules 2-8 and the full step vocabulary. During
+    onboarding they are replaced by rule 1 (already in sms_shared)
+    and the compact tag list."""
+    if not _onboarding_done(user_id):
+        return [_step_compact_block()]
+    out = []
+    for name in ("sms_hard_rules_full", "sms_step_vocabulary"):
+        try:
+            text, h = _read_prompt_versioned(name)
+            versions[name] = h
+            out.append(text)
+        except Exception as e:
+            print(f"[SMS] ⚠️ {name} block failed: {e}", flush=True)
+    return out
 
 
 def _build_focus_block(user_id, dormancy=True):
@@ -727,7 +815,7 @@ def _build_onboarding_block(user_id):
                       "ask them what you could do. Name one concrete "
                       "thing you will actually do, built from what you "
                       "already know about them (their material, how "
-                      "they learn), and ask only for a yes/no on it. "
+                      "they learn). "
                       "'내가 뭘 도와줄까?' is the failure mode: it "
                       "hands your job back to them and costs a long "
                       "answer they have no reason to write"}
@@ -744,12 +832,9 @@ def _build_onboarding_block(user_id):
             lines.append(f"- {label[f]}")
     lines += [
         "",
-        "You do not record anything and you never announce that "
-        "onboarding is done — a separate pass reads the conversation "
-        "and the server decides. Just get REAL agreement on the focus "
-        "item, one at a time, at conversational pace. Take as long as "
-        "it takes: a long, wandering conversation is a good outcome "
-        "here, not a delay.",
+        "Get REAL agreement on the focus item, one at a time, at "
+        "conversational pace. Take as long as it takes: a long, "
+        "wandering conversation is a good outcome here, not a delay.",
     ]
     return "\n".join(lines)
 
@@ -1425,7 +1510,9 @@ def _build_system_prompt_for_reply(user_id):
         user_id, focus_block=_build_focus_block(user_id, dormancy=False))
     versions = {"sms_shared": h_shared, mode_name: h_mode,
                 **ctx_versions}
-    parts = [context, rendered_shared, rendered_mode]
+    parts = [context, rendered_shared]
+    parts += _phase_gated_blocks(user_id, versions)
+    parts.append(rendered_mode)
     # Judging ignition is a question about an inbound reply, so it is
     # asked only here — on a scheduled send there is nothing to judge.
     judge, h_judge = _read_prompt_versioned("sms_ignition_judgment")

@@ -1905,6 +1905,10 @@ def check_and_complete_onboarding(user_id, force=False):
     override/backfill) and not yet completed: stamp completed_at,
     transition discovery→first_bite, emit events. Returns True if
     completion happened on THIS call."""
+    # Without a row the UPDATE below matches nothing, and we would log
+    # a completion that never happened — the operator-backfill path hit
+    # exactly that.
+    ensure_user_profile_row(user_id)
     state = get_onboarding_state(user_id)
     if state["completed_at"]:
         return False

@@ -61,11 +61,15 @@ def render_profile_block(user_id):
     return "\n".join(lines)
 
 
-def render_notes_block(user_id):
+def render_notes_block(user_id, profile=True):
     """→ prompt block B for the planner: the profile brief followed by
     the scored notes ('' if the user has neither — an empty block
-    degrades the planner gracefully to prior+trace)."""
-    profile = render_profile_block(user_id)
+    degrades the planner gracefully to prior+trace).
+
+    profile=False returns the scored notes alone, for callers that
+    render the brief themselves (the SMS assembler puts the user's
+    facts between the two)."""
+    profile = render_profile_block(user_id) if profile else ""
     notes = db.get_user_notes(user_id)
     if not notes:
         return profile
