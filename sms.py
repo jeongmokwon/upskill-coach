@@ -417,6 +417,29 @@ class _SafeDict(dict):
         return "{" + k + "}"
 
 
+def _clock_block():
+    """A human-readable clock line. Prepended to the context because
+    a machine-shaped `local_time=08:18` inside the features line was
+    observably skimmed past — the coach asked how the user's day had
+    gone at 8:18 in the morning."""
+    now_local = datetime.now() + timedelta(hours=TZ_OFFSET_H)
+    hour = now_local.hour
+    part = ("한밤중" if hour < 5 else "이른 아침" if hour < 8
+            else "아침" if hour < 11 else "한낮" if hour < 14
+            else "오후" if hour < 17 else "초저녁" if hour < 20
+            else "밤" if hour < 23 else "늦은 밤")
+    weekday = ["월", "화", "수", "목", "금", "토", "일"][now_local.weekday()]
+    return (f"## Right now, for this user\n\n"
+            f"It is **{now_local.strftime('%H:%M')} on {weekday}요일 "
+            f"({part})** where they are.\n\n"
+            f"Everything you write must make sense at this hour — not "
+            f"just avoid naming it. Asking how their day went in the "
+            f"morning, or proposing a study session in the middle of "
+            f"their workday, reads as a machine that cannot see the "
+            f"clock. Match the hour: what is plausibly happening for "
+            f"them right now, and is a message even welcome?")
+
+
 def _build_context_blocks(user_id):
     """The exploration prediction call's three blocks (brief §7):
     A = policy prior, B = user notes, C = recent trajectory +
@@ -448,6 +471,10 @@ def _build_context_blocks(user_id):
         parts.append("## Recent trajectory (step-language; you are "
                      "choosing the NEXT token)\n\n"
                      f"Current state: {feats}\n\n{trace_block}")
+        # The clock goes FIRST, in words, and last in the assembled
+        # prompt order below — a key=value buried in a feature line
+        # got ignored: at 08:18 the coach asked "오늘 하루 어땠어?".
+        parts.insert(0, _clock_block())
     except Exception as e:
         print(f"[SMS] ⚠️ trace block failed: {e}", flush=True)
     return "\n\n---\n\n".join(parts), versions
@@ -704,6 +731,27 @@ _DORMANT_FORBIDDEN_TAGS = frozenset({
     "micro_ask", "choice_offer", "implementation_cue", "handoff",
     "secure_commit", "map",
 })
+
+
+# WhatsApp's 24-hour customer-service window: outside it, a
+# business-initiated free-form message is refused by WhatsApp — but
+# Twilio ACCEPTS the API call, so our code sees success and logs a
+# send that nobody received. Observed with pilot user #1: a send 33h
+# after his last message was recorded as delivered on our side and
+# never reached him. Ghost sends poison the data twice (a phantom
+# outbound, and a "no reply" that was never possible), so we refuse
+# them at the source. This whole class of problem disappears on SMS.
+WHATSAPP_WINDOW_H = 24
+
+
+def whatsapp_window_closed(user_id):
+    """True when the channel is WhatsApp and the user has been silent
+    longer than the free-form window allows. A user who has never
+    written is also outside it (their first inbound opens it)."""
+    if os.environ.get("MESSAGING_CHANNEL", "sms").lower() != "whatsapp":
+        return False
+    hours = _dormancy_hours(user_id)
+    return hours is None or hours >= WHATSAPP_WINDOW_H
 
 
 def _dormancy_hours(user_id):
@@ -1284,6 +1332,19 @@ def handle_cron_tick(slot, window=None):
         )
         if not recent:
             return _skip("no_thread_this_phase")
+
+    if whatsapp_window_closed(user_id):
+        hours = _dormancy_hours(user_id)
+        print(f"[SMS] {slot}: WhatsApp 24h window closed "
+              f"({'never wrote' if hours is None else f'{hours:.0f}h silent'})"
+              f" — not sending", flush=True)
+        db.log_event(user_id, "whatsapp_window_closed",
+                     {"slot": slot,
+                      "silent_hours": None if hours is None else round(hours, 1),
+                      "note": "free-form send refused; the user must "
+                              "message first to reopen the window"},
+                     source="cron")
+        return None
 
     if slot == "evening":
         # Start the Phase 0 timer on the first evening tick (idempotent).
