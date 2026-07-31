@@ -135,6 +135,36 @@ check("violation recorded with its trigger + call id",
       and json.loads(v[0]["payload"])["trigger"] == "test"
       and json.loads(v[0]["payload"])["llm_call_id"] == call_id)
 
+# ── 3b. server turns wear an envelope, the contract sits last ────────
+print("3b) server turns vs the user's words")
+sent = Scripted.seen[1]["messages"][-1]["content"]
+check("retry feedback is wrapped, not disguised as the user",
+      sent.startswith("<server_instruction>")
+      and sent.endswith("</server_instruction>")
+      and "broke a hard rule" in sent)
+
+Scripted.queue = ["좋아 오늘은 여기까지\n[STEP: release@1]"]
+Scripted.seen = []
+sms.handle_cron_tick("evening")
+msgs = Scripted.seen[0]["messages"]
+check("the scheduled 'go' signal is a server turn, never a user line",
+      msgs[-1]["role"] == "user"
+      and msgs[-1]["content"].startswith("<server_instruction>")
+      and "slot fired" not in msgs[-1]["content"])
+check("no bare synthetic turn survives anywhere in the array",
+      all(m["role"] != "user" or "<server_instruction>" in m["content"]
+          or not m["content"].startswith("(")
+          for m in msgs))
+
+sysp = Scripted.seen[0]["system"]
+check("the contract is the LAST thing before the conversation",
+      sysp.rstrip().endswith("what actually happened between you and "
+                             "this person."))
+check("it names both sides of the line",
+      "Everything ABOVE this line is instruction" in sysp
+      and "Turns wrapped in `<server_instruction>` are NOT from the "
+          "user" in sysp)
+
 # ── 4. relative time labels on history ───────────────────────────────
 print("4) time labels")
 db.save_sms_message(U, "assistant", "어제 얘기한 거 어때", "out")
