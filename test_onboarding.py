@@ -47,6 +47,9 @@ db.ensure_user_profile_row(U)
 s = db.get_onboarding_state(U)
 check("all five fields missing", s["missing"] == list(db.ONBOARDING_FIELDS)
       and s["started_at"] is None and s["completed_at"] is None)
+check("the first concrete task is NOT an onboarding field — it "
+      "belongs to the first session, after a plan exists",
+      "bite" not in db.ONBOARDING_FIELDS and "offer" in db.ONBOARDING_FIELDS)
 
 prompt, _ = sms._build_system_prompt("evening", U)
 check("checklist block injected, focused on the first missing field",
@@ -61,6 +64,9 @@ check("early bite saves WITHOUT phase flip",
       db.get_user_phase(U)["phase"] == "discovery"
       and db.get_user_phase(U)["agreed_first_bite"] != ""
       and len(events_of("bite_committed")) == 1)
+check("and it moves no onboarding field either way",
+      "bite" not in db.get_onboarding_state(U)["filled"]
+      and "bite" not in db.get_onboarding_state(U)["missing"])
 
 db.save_learning_path(U, "career change into ML", "tiny classifier",
                       "trained & evaluated", source="analyze")
