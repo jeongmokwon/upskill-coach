@@ -747,11 +747,39 @@ WHATSAPP_WINDOW_H = 24
 def whatsapp_window_closed(user_id):
     """True when the channel is WhatsApp and the user has been silent
     longer than the free-form window allows. A user who has never
-    written is also outside it (their first inbound opens it)."""
+    written is also outside it (their first inbound opens it).
+
+    An operator-recorded reopening counts as a user message, because
+    it stands for one we cannot see: Twilio's sandbox consumes the
+    `join <code>` text itself and never forwards it to our webhook,
+    so a user can legitimately reopen their window while our record
+    still shows silence. See mark_whatsapp_window_open."""
     if os.environ.get("MESSAGING_CHANNEL", "sms").lower() != "whatsapp":
         return False
     hours = _dormancy_hours(user_id)
+    override = db.get_last_event(user_id, "whatsapp_window_opened")
+    if override:
+        try:
+            override_h = (datetime.now()
+                          - datetime.fromisoformat(override["ts"])
+                          ).total_seconds() / 3600
+            hours = override_h if hours is None else min(hours, override_h)
+        except Exception:
+            pass
     return hours is None or hours >= WHATSAPP_WINDOW_H
+
+
+def mark_whatsapp_window_open(user_id, note=""):
+    """Operator override: record that the user has re-joined / messaged
+    the sandbox, reopening their 24h free-form window. Stamped now, so
+    it expires on its own like a real inbound would — this cannot
+    permanently disable the gate."""
+    db.log_event(user_id, "whatsapp_window_opened",
+                 {"note": note[:300] or "operator confirmed the user "
+                                        "re-joined the sandbox"},
+                 source="admin")
+    print(f"[SMS] WhatsApp window manually reopened for {user_id}",
+          flush=True)
 
 
 def _dormancy_hours(user_id):
