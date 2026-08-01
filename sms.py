@@ -583,7 +583,8 @@ def _build_context_blocks(user_id, focus_block=None):
     except Exception as e:
         print(f"[SMS] ⚠️ user facts block failed: {e}", flush=True)
     try:
-        notes_block = notes_mod.render_notes_block(user_id, profile=False)
+        notes_block = notes_mod.render_notes_block(
+            user_id, profile=False, moves=_onboarding_done(user_id))
         if notes_block:
             parts.append(notes_block)
     except Exception as e:
@@ -838,7 +839,16 @@ def _build_onboarding_block(user_id):
         "Settled so far: " + (", ".join(state["filled"]) or "(nothing yet)"),
     ]
     if missing:
-        lines += ["", f"**This message's focus: {label[missing[0]]}.**",
+        lines += ["",
+                  "This block outranks everything below it. While "
+                  "onboarding is incomplete, the focus item is what "
+                  "this message must be spent on — the notes, the "
+                  "trajectory and the persona all describe HOW to say "
+                  "it, and none of them replaces WHAT it is for. If "
+                  "something further down suggests a different move, "
+                  "that move is for a later turn.",
+                  "",
+                  f"**This message's focus: {label[missing[0]]}.**",
                   "Work only that one. The rest are for later turns:"]
         for f in missing[1:]:
             lines.append(f"- {label[f]}")

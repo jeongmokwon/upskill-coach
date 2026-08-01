@@ -134,6 +134,27 @@ check("first coach send stamps onboarding_started_at",
       db.get_onboarding_state(U)["started_at"] is not None
       and len(events_of("onboarding_started")) == 1)
 
+# ── the focus outranks the notes while onboarding runs ──────────────
+print("focus outranks notes")
+U4 = "outrank"
+db.ensure_user_profile_row(U4)
+db.save_user_note(U4, "Tiny first action will land better than a review ask",
+                  given={}, when=["micro_ask@2"], expect="advance")
+p_on, _ = sms._build_system_prompt("evening", U4)
+check("the note's claim still informs HOW to speak",
+      "Tiny first action will land better" in p_on)
+check("but its move prescription is withheld — it read as an order",
+      "micro_ask@2" not in p_on and "expect advance" not in p_on)
+check("and the focus block says so out loud",
+      "This block outranks everything below it" in p_on
+      and "never WHAT this message has to settle" in p_on)
+
+db.check_and_complete_onboarding(U4, force=True)
+p_off, _ = sms._build_system_prompt("evening", U4)
+check("completion hands the moves back",
+      "micro_ask@2" in p_off and "expect advance" in p_off
+      and "This block outranks" not in p_off)
+
 # ── the focus block rides second, right under the clock ─────────────
 print("focus block placement")
 U3 = "placement"
