@@ -61,14 +61,23 @@ def render_profile_block(user_id):
     return "\n".join(lines)
 
 
-def render_notes_block(user_id, profile=True):
+def render_notes_block(user_id, profile=True, moves=True):
     """→ prompt block B for the planner: the profile brief followed by
     the scored notes ('' if the user has neither — an empty block
     degrades the planner gracefully to prior+trace).
 
     profile=False returns the scored notes alone, for callers that
     render the brief themselves (the SMS assembler puts the user's
-    facts between the two)."""
+    facts between the two).
+
+    moves=False drops the `(if state · move X@n → expect Y)` line from
+    each note, leaving the claim. Used while onboarding is incomplete.
+    A move prescription is an instruction about what to DO, written in
+    the user's own vocabulary and marked with an expected payoff — the
+    most executable thing in the prompt. Observed: the checklist asked
+    for the offer, and the coach played a note's `micro_ask@2` almost
+    verbatim instead. During onboarding the claims still shape HOW to
+    say things; the moves come back once there is a plan to run."""
     profile = render_profile_block(user_id) if profile else ""
     notes = db.get_user_notes(user_id)
     if not notes:
@@ -77,16 +86,21 @@ def render_notes_block(user_id, profile=True):
     lines += ["## What is KNOWN about this user (scored notes — trust "
               "confirmed > hypothesis; never contradict a confirmed note "
               "without new evidence)",
-              "",
-              "Move chains below are multi-TURN protocols: play the "
-              "first move, wait for the user's response, then advance. "
-              "Never collapse a chain into one message.",
               ""]
+    lines += (["Move chains below are multi-TURN protocols: play the "
+               "first move, wait for the user's response, then advance. "
+               "Never collapse a chain into one message.", ""]
+              if moves else
+              ["These describe how this person tends to respond. They "
+               "shape HOW you say what you say — never WHAT this "
+               "message has to settle. That is the onboarding focus "
+               "block, and nothing here outranks it.", ""])
     for n in notes:
         given = _fmt_given(json.loads(n["given_json"]))
         when = ", ".join(json.loads(n["when_json"])) or "?"
         tag = n["confidence"]
-        line = (f"- [{tag}] {n['claim']}\n"
-                f"  (if {given} · move {when} → expect {n['expect'] or '?'})")
+        line = (f"- [{tag}] {n['claim']}"
+                + (f"\n  (if {given} · move {when} → "
+                   f"expect {n['expect'] or '?'})" if moves else ""))
         lines.append(line)
     return "\n".join(lines)

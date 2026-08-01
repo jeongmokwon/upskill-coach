@@ -117,8 +117,9 @@ print("P5) planner")
 prompt, versions = sms._build_system_prompt("evening", U)
 check("during onboarding the prior stays out — nothing to run yet",
       "Policy prior" not in prompt and "prior" not in versions)
-check("notes block present",
-      "validate@2, micro_ask@1" in prompt)
+check("notes block present, claims only while onboarding runs",
+      "What is KNOWN about this user" in prompt
+      and "validate@2, micro_ask@1" not in prompt)
 check("trajectory block present with step-language",
       "Recent trajectory" in prompt and "coach: micro_ask@2" in prompt)
 check("tagging continues on the compact list, anchors held back",
@@ -128,6 +129,8 @@ check("tagging continues on the compact list, anchors held back",
 
 db.check_and_complete_onboarding(U, force=True)
 done, done_versions = sms._build_system_prompt("evening", U)
+check("completion brings back the moves on the notes",
+      "validate@2, micro_ask@1" in done)
 check("completion brings back the prior, the anchors and rules 2-8",
       "Policy prior" in done and "prior" in done_versions
       and "Choose the move FIRST" in done and "### Vocabulary" in done
