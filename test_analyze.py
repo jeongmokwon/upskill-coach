@@ -174,6 +174,54 @@ analyze_turn.analyze("u_low")
 check("low-confidence guess is refused",
       db.get_user_phase("u_low")["ignition_marker"] == "")
 
+# ── 3c. the walkthrough lands through analysis ───────────────────────
+print("3c) walkthrough extraction")
+W = "u_walk"
+db.ensure_user_profile_row(W)
+_wm = db.add_user_material(W, "file", title="정리본.docx",
+                           extracted_text="...")
+db.save_sms_message(W, "user", "그 파일은 내가 업무하면서 정리한 거야", "in")
+ToolFake.payload = {
+    "material_description": "업무하면서 직접 정리한 법률지식 파일",
+    "material_wants": [{"quote": "클라이언트가 물으면 바로 대답해야 해",
+                        "meaning": "instant recall"}],
+    "step_completed": "not_applicable", "step_reason": "-",
+}
+analyze_turn.analyze(W)
+_m = db.get_material(_wm)
+check("description + verbatim wants land, status → in_progress",
+      _m["user_description"].startswith("업무하면서")
+      and _m["wants"][0]["quote"].startswith("클라이언트")
+      and _m["walkthrough_status"] == "in_progress")
+check("the analysis prompt showed the material's state",
+      "newest material: 정리본.docx"
+      in ToolFake.seen[-1]["system"])
+
+ToolFake.payload = {
+    "walkthrough_sample_validated": False,
+    "step_completed": "not_applicable", "step_reason": "-",
+}
+analyze_turn.analyze(W)
+check("a coach proposal without the user's yes does NOT validate",
+      db.get_material(_wm)["walkthrough_status"] == "in_progress")
+
+ToolFake.payload = {
+    "walkthrough_sample_validated": True,
+    "walkthrough_sample_evidence":
+        'COACH: "조기상환 트리거 발동 시 정산 기준은?" USER: "어 맞아 딱 그런 거"',
+    "step_completed": "not_applicable", "step_reason": "-",
+}
+analyze_turn.analyze(W)
+check("sample + user affirmation → validated, gate opens, evidence logged",
+      db.get_material(_wm)["walkthrough_status"] == "validated"
+      and db.has_validated_material(W)
+      and len([r for r in db.get_events(W, limit=50)
+               if r["kind"] == "walkthrough_validated"]) == 1)
+check("idempotent — re-running the same payload writes nothing new",
+      analyze_turn.analyze(W) is not None
+      and len([r for r in db.get_events(W, limit=50)
+               if r["kind"] == "walkthrough_validated"]) == 1)
+
 # ── 4. step judgment rides the same call ─────────────────────────────
 print("4) step judgment")
 db.save_sequence_plan(U, [
