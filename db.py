@@ -435,6 +435,47 @@ def init_db():
         conn.cursor().execute(
             "CREATE INDEX IF NOT EXISTS idx_paths_user ON learning_paths (user_id, version)"
         )
+        # Learning materials (offer-loop arc). One row per thing the
+        # user studies from — an uploaded file, a shared link, or a
+        # source they only named in conversation. The LLM digest is
+        # the coach's reading; user_description/wants_json are the
+        # user's OWN account from the Theo-led walkthrough, and the
+        # user's words always outrank the digest. walkthrough_status
+        # reaches 'validated' only when the coach produced a sample of
+        # its offer (e.g. an insider-plausible question) and the user
+        # confirmed it rings true — that validation is what the
+        # material_walkthrough onboarding field will key on.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS user_materials (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                source_url TEXT NOT NULL DEFAULT '',
+                orig_filename TEXT NOT NULL DEFAULT '',
+                extracted_text TEXT NOT NULL DEFAULT '',
+                digest TEXT NOT NULL DEFAULT '',
+                user_description TEXT NOT NULL DEFAULT '',
+                wants_json TEXT NOT NULL DEFAULT '[]',
+                walkthrough_status TEXT NOT NULL DEFAULT 'none',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_materials_user ON user_materials (user_id)"
+        )
+        # Magic-link tokens: possession of the link IS the login for
+        # /my (uploads, later the screen session). One row per user;
+        # regenerating replaces the token, which invalidates any
+        # leaked link.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS user_tokens (
+                user_id TEXT PRIMARY KEY,
+                token TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
         # Migrate: learning_paths.path_kind (brief §7 "Learning
         # types"). The direction/project+done-condition/bite middle
         # layer is project-shaped and does not fit every learner;
@@ -750,6 +791,30 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_paths_user ON learning_paths (user_id, version);
+
+            CREATE TABLE IF NOT EXISTS user_materials (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                source_url TEXT NOT NULL DEFAULT '',
+                orig_filename TEXT NOT NULL DEFAULT '',
+                extracted_text TEXT NOT NULL DEFAULT '',
+                digest TEXT NOT NULL DEFAULT '',
+                user_description TEXT NOT NULL DEFAULT '',
+                wants_json TEXT NOT NULL DEFAULT '[]',
+                walkthrough_status TEXT NOT NULL DEFAULT 'none',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_materials_user ON user_materials (user_id);
+
+            CREATE TABLE IF NOT EXISTS user_tokens (
+                user_id TEXT PRIMARY KEY,
+                token TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
 
             CREATE TABLE IF NOT EXISTS user_schedule (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1704,6 +1769,200 @@ def set_agreed_offer(user_id, offer_text, source="analyze"):
     print(f"  [DB] Agreed offer saved for {user_id}: {offer_text!r}",
           flush=True)
     log_event(user_id, "offer_set", {"offer": offer_text}, source=source)
+
+
+# ─── Learning materials + magic-link tokens (offer-loop arc) ────────
+
+MATERIAL_KINDS = ("file", "link", "named")
+WALKTHROUGH_STATUSES = ("none", "in_progress", "validated")
+
+
+def add_user_material(user_id, kind, title="", source_url="",
+                      orig_filename="", extracted_text="", digest="",
+                      source="my_page"):
+    """Register one thing the user studies from. kind: 'file'
+    (uploaded, extracted_text/digest to follow), 'link' (source_url;
+    latent knowledge stands in for the digest), 'named' (only spoken
+    of in conversation). Returns the material id. Emits
+    material_added — a new material is the anchor of the walkthrough
+    arc and must be joinable to what the coach did next."""
+    if kind not in MATERIAL_KINDS:
+        raise ValueError(f"unknown material kind: {kind!r}")
+    ensure_user_profile_row(user_id)
+    now = datetime.now().isoformat()
+    conn = get_conn()
+    cur = _execute(conn,
+        f"INSERT INTO user_materials (user_id, kind, title, source_url, "
+        f" orig_filename, extracted_text, digest, created_at, updated_at) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})"
+        + (" RETURNING id" if DB_TYPE == "postgres" else ""),
+        (user_id, kind, title, source_url, orig_filename,
+         extracted_text, digest, now, now))
+    if DB_TYPE == "postgres":
+        material_id = _fetchone(cur)["id"]
+    else:
+        material_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+    log_event(user_id, "material_added",
+              {"material_id": material_id, "kind": kind, "title": title,
+               "source_url": source_url},
+              source=source)
+    return material_id
+
+
+def get_user_materials(user_id):
+    """All materials for a user, newest first. wants_json is decoded
+    into 'wants'."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM user_materials WHERE user_id = {_P} "
+        f"ORDER BY id DESC", (user_id,))
+    rows = _fetchall(cur)
+    conn.close()
+    for r in rows:
+        try:
+            r["wants"] = json.loads(r.get("wants_json") or "[]")
+        except Exception:
+            r["wants"] = []
+    return rows
+
+
+def get_material(material_id):
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM user_materials WHERE id = {_P}", (material_id,))
+    row = _fetchone(cur)
+    conn.close()
+    if row:
+        try:
+            row["wants"] = json.loads(row.get("wants_json") or "[]")
+        except Exception:
+            row["wants"] = []
+    return row
+
+
+def set_material_digest(material_id, digest, extracted_text=None):
+    """Store the one-time LLM reading (and optionally the extracted
+    text it was made from)."""
+    conn = get_conn()
+    if extracted_text is None:
+        _execute(conn,
+            f"UPDATE user_materials SET digest = {_P}, updated_at = {_P} "
+            f"WHERE id = {_P}",
+            (digest, datetime.now().isoformat(), material_id))
+    else:
+        _execute(conn,
+            f"UPDATE user_materials SET digest = {_P}, "
+            f" extracted_text = {_P}, updated_at = {_P} WHERE id = {_P}",
+            (digest, extracted_text, datetime.now().isoformat(),
+             material_id))
+    conn.commit()
+    conn.close()
+
+
+def update_material_walkthrough(material_id, user_description=None,
+                                wants=None, status=None,
+                                source="analyze"):
+    """Record what the Theo-led walkthrough produced: the user's own
+    description, their (quote, meaning) wants, and the status. Partial
+    updates are normal — the walkthrough lands across turns. 'wants'
+    REPLACES the stored list (the analysis pass re-reads the whole
+    conversation each time, so its extraction is already cumulative).
+    status='validated' is reserved for coach-sample-confirmed-by-user;
+    the checklist keys on it. Emits material_walkthrough_updated."""
+    if status is not None and status not in WALKTHROUGH_STATUSES:
+        raise ValueError(f"unknown walkthrough status: {status!r}")
+    row = get_material(material_id)
+    if not row:
+        raise ValueError(f"no material {material_id}")
+    sets, vals = ["updated_at = " + _P], [datetime.now().isoformat()]
+    payload = {"material_id": material_id}
+    if user_description is not None:
+        sets.append("user_description = " + _P)
+        vals.append(user_description)
+        payload["user_description"] = user_description
+    if wants is not None:
+        sets.append("wants_json = " + _P)
+        vals.append(json.dumps(wants, ensure_ascii=False))
+        payload["wants"] = wants
+    if status is not None:
+        sets.append("walkthrough_status = " + _P)
+        vals.append(status)
+        payload["status"] = status
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_materials SET {', '.join(sets)} WHERE id = {_P}",
+        (*vals, material_id))
+    conn.commit()
+    conn.close()
+    log_event(row["user_id"], "material_walkthrough_updated", payload,
+              source=source)
+
+
+def has_validated_material(user_id):
+    """True once any material's walkthrough reached 'validated' — the
+    mechanical fill condition for the material_walkthrough onboarding
+    field."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT COUNT(*) AS n FROM user_materials "
+        f"WHERE user_id = {_P} AND walkthrough_status = {_P}",
+        (user_id, "validated"))
+    row = _fetchone(cur)
+    conn.close()
+    return bool(row and row["n"])
+
+
+def ensure_user_token(user_id):
+    """The user's magic-link token for /my, created on first ask.
+    Possession of the link is the login; no accounts, no passwords."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT token FROM user_tokens WHERE user_id = {_P}", (user_id,))
+    row = _fetchone(cur)
+    if row:
+        conn.close()
+        return row["token"]
+    token = uuid.uuid4().hex + uuid.uuid4().hex[:8]
+    _execute(conn,
+        f"INSERT INTO user_tokens (user_id, token, created_at) "
+        f"VALUES ({_P}, {_P}, {_P})",
+        (user_id, token, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    return token
+
+
+def get_user_id_by_token(token):
+    """→ user_id or None. The /my page's whole auth check."""
+    if not token:
+        return None
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT user_id FROM user_tokens WHERE token = {_P}", (token,))
+    row = _fetchone(cur)
+    conn.close()
+    return row["user_id"] if row else None
+
+
+def regenerate_user_token(user_id):
+    """Replace the token — invalidates any leaked link. Returns the
+    new token."""
+    token = uuid.uuid4().hex + uuid.uuid4().hex[:8]
+    now = datetime.now().isoformat()
+    conn = get_conn()
+    cur = _execute(conn,
+        f"UPDATE user_tokens SET token = {_P}, created_at = {_P} "
+        f"WHERE user_id = {_P}", (token, now, user_id))
+    if cur.rowcount == 0:
+        _execute(conn,
+            f"INSERT INTO user_tokens (user_id, token, created_at) "
+            f"VALUES ({_P}, {_P}, {_P})", (user_id, token, now))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "token_regenerated", {}, source="admin")
+    return token
 
 
 def save_learning_path(user_id, direction, project="",
