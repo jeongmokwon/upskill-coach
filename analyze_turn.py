@@ -114,6 +114,47 @@ _TOOL = {
                 "description": "What the coach committed to doing for "
                                "them, that they confirmed.",
             },
+            "material_description": {
+                "type": "string",
+                "description": "The user's OWN account of the newest "
+                               "material — what it is, in their words "
+                               "(compressed is fine; invented is not). "
+                               "Omit if they have not described it.",
+            },
+            "material_wants": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "quote": {"type": "string"},
+                        "meaning": {"type": "string"},
+                    },
+                    "required": ["quote"],
+                },
+                "description": "What the user wants from this "
+                               "material, as VERBATIM quotes from the "
+                               "conversation plus your one-line "
+                               "reading. Report the full cumulative "
+                               "list each time (it replaces the "
+                               "stored one).",
+            },
+            "walkthrough_sample_validated": {
+                "type": "boolean",
+                "description": "True ONLY if BOTH happened in the "
+                               "transcript: the coach produced a "
+                               "concrete sample of its offer (a "
+                               "question it would ask, a piece it "
+                               "would cut) AND the user affirmed it "
+                               "rings true. A proposal without the "
+                               "user's yes is false. When true, quote "
+                               "both sides in "
+                               "walkthrough_sample_evidence.",
+            },
+            "walkthrough_sample_evidence": {
+                "type": "string",
+                "description": "The coach's sample and the user's "
+                               "affirmation, quoted.",
+            },
             "step_completed": {
                 "type": "string",
                 "enum": ["yes", "no", "uncertain", "not_applicable"],
@@ -168,6 +209,15 @@ def _build_system(user_id):
         f"- offer (what the coach committed to): "
         f"{prof.get('agreed_offer') or '(unknown)'}",
     ]
+    mats = db.get_user_materials(user_id)
+    if mats:
+        m = mats[0]
+        known.append(
+            f"- newest material: {m.get('title') or m.get('source_url')} "
+            f"({m['kind']}, walkthrough: {m['walkthrough_status']}) | "
+            f"their description so far: "
+            f"{m.get('user_description') or '(none)'} | "
+            f"wants recorded: {len(m.get('wants') or [])}")
 
     step_block = "No active plan step — report step_completed as not_applicable."
     plan = db.get_current_plan(user_id)
@@ -228,7 +278,17 @@ Still missing: {', '.join(state['missing']) or '(nothing)'}
   done-condition, a coverage target ("자료 3장까지 즉답"), or a
   duration of practice. Report whichever they agreed to.
 - offer only counts once the user has confirmed it, not when the
-  coach merely proposed it."""
+  coach merely proposed it.
+- material_description / material_wants belong to the newest
+  material shown above and follow the agreements rule: the user's
+  words only. material_wants REPLACES the stored list — report the
+  full cumulative set every time.
+- walkthrough_sample_validated is the arc's gate: it flips the
+  material to walked-through and unlocks the offer, so hold it to
+  the letter — the coach demonstrated a sample AND the user
+  affirmed it. "그런 건 안 물어봐" is a false; it is also exactly
+  the walkthrough working, so record what they DID say in
+  material_wants."""
 
 
 def analyze(user_id, trigger="inbound", client=None):
@@ -313,6 +373,41 @@ def _apply(user_id, p, llm_call_id):
                                    status=status, basis=basis,
                                    confidence=conf)
             applied.append(f"ignition_marker({status})")
+
+    mats = db.get_user_materials(user_id)
+    if mats:
+        m = mats[0]
+        desc = (p.get("material_description") or "").strip()
+        wants = p.get("material_wants") or None
+        if wants is not None:
+            wants = [{"quote": (w.get("quote") or "").strip(),
+                      "meaning": (w.get("meaning") or "").strip()}
+                     for w in wants if (w.get("quote") or "").strip()]
+        validated = bool(p.get("walkthrough_sample_validated"))
+        status = None
+        if validated and m["walkthrough_status"] != "validated":
+            status = "validated"
+        elif (desc or wants) and m["walkthrough_status"] == "none":
+            status = "in_progress"
+        changed = ((desc and desc != (m.get("user_description") or ""))
+                   or (wants is not None and wants != (m.get("wants") or []))
+                   or status is not None)
+        if changed:
+            db.update_material_walkthrough(
+                m["id"],
+                user_description=desc or None,
+                wants=wants,
+                status=status,
+                source="analyze")
+            applied.append("walkthrough"
+                           + (f"({status})" if status else ""))
+            if validated and (p.get("walkthrough_sample_evidence")
+                              or "").strip():
+                db.log_event(user_id, "walkthrough_validated",
+                             {"material_id": m["id"],
+                              "evidence": p["walkthrough_sample_evidence"],
+                              "llm_call_id": llm_call_id},
+                             source="analyze")
 
     offer = (p.get("offer") or "").strip()
     if offer and offer != (prof.get("agreed_offer") or "").strip():
