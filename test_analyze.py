@@ -142,6 +142,10 @@ check("offer stored + evented",
       (db.get_user_profile_by_id(U) or {}).get("agreed_offer", "")
       .startswith("네 자료에서")
       and len(events_of("offer_set")) == 1)
+_mid = db.add_user_material(U, "file", title="정리본.docx",
+                            extracted_text="...")
+db.update_material_walkthrough(_mid, status="validated")
+db.check_and_complete_onboarding(U)
 check("six fields complete → onboarding completed by the server",
       db.get_onboarding_state(U)["completed_at"] is not None
       and db.get_user_phase(U)["phase"] == "first_bite")

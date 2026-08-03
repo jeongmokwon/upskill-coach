@@ -82,14 +82,20 @@ db.save_user_schedule(U, sms.parse_schedule_windows("20:00-22:00"),
 
 db.set_agreed_goal(U, "become the ML-capable founder")
 db.set_agreed_offer(U, "daily question drills from your notes")
-check("not complete while ignition marker missing",
+db.set_ignition_marker(U, "opens the notebook and types")
+check("everything agreed but no validated walkthrough → NOT complete",
       not db.check_and_complete_onboarding(U)
-      and db.get_onboarding_state(U)["missing"] == ["ignition_marker"])
+      and db.get_onboarding_state(U)["missing"] == ["material_walkthrough"])
+_mid = db.add_user_material(U, "link", title="karpathy",
+                            source_url="https://yt.be/x")
+db.update_material_walkthrough(_mid, status="in_progress")
+check("a material alone is not enough — the sample must be validated",
+      db.get_onboarding_state(U)["missing"] == ["material_walkthrough"])
 
 # ── 3. last field → completion flips, phase transitions ──────────────
 print("3) completion")
-db.set_ignition_marker(U, "opens the notebook and types")
-check("last fill completes onboarding",
+db.update_material_walkthrough(_mid, status="validated")
+check("user-confirmed sample is the last fill → completes onboarding",
       db.check_and_complete_onboarding(U) is True)
 s = db.get_onboarding_state(U)
 check("completed_at stamped, event emitted",
@@ -169,6 +175,41 @@ for label, p in (("scheduled", sms._build_system_prompt("evening", U3)[0]),
 check("ignition judgment is asked only about an inbound reply",
       "## Ignition judgment" in sms._build_system_prompt_for_reply(U)[0]
       and "## Ignition judgment" not in sms._build_system_prompt("evening", U)[0])
+
+# ── the walkthrough arc drives the prompt ───────────────────────────
+print("walkthrough arc in the prompt")
+U6 = "walker"
+db.ensure_user_profile_row(U6)
+db.set_agreed_goal(U6, "g"); db.save_learning_path(U6, "d", "p", "c")
+db.set_ignition_marker(U6, "m")
+p_show, _ = sms._build_system_prompt("evening", U6)
+check("no material yet → focus is getting them to SHOW the thing",
+      "SHOW you the thing they actually study from" in p_show
+      and "Do NOT send the /my link over SMS" in p_show)
+_wm = db.add_user_material(U6, "file", title="정리본.docx",
+                           extracted_text="...")
+db.set_material_digest(_wm, "two sections, ~40 recall items")
+db.update_material_walkthrough(
+    _wm, user_description="업무에서 쌓은 걸 정리한 파일",
+    wants=[{"quote": "클라이언트가 물으면 바로", "meaning": "recall"}],
+    status="in_progress")
+p_walk, _ = sms._build_system_prompt("evening", U6)
+check("material exists → focus is the walkthrough to a validated sample",
+      "lead a walkthrough of 정리본.docx" in p_walk
+      and "SAMPLE" in p_walk and "rings true" in p_walk)
+check("materials block carries both readings, user's words on top",
+      "Their materials — what they study from" in p_walk
+      and "~40 recall items" in p_walk
+      and "클라이언트가 물으면 바로" in p_walk
+      and "THEIR words win" in p_walk)
+check("capability stock is in the prompt (offers draw only on it)",
+      "the only stock your promises draw on" in p_walk
+      and "can NOT (today): see their screen" in p_walk)
+db.update_material_walkthrough(_wm, status="validated")
+p_offer, _ = sms._build_system_prompt("evening", U6)
+check("validated → focus moves to the offer, built FROM the walkthrough",
+      "This message's focus: what YOU will do for them, ongoing"
+      in p_offer and "the sample they already confirmed" in p_offer)
 
 # ── the agreed offer is a standing promise the coach can SEE ────────
 print("offer persistence")

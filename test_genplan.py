@@ -182,6 +182,9 @@ db.set_ignition_marker(U2, "m")
 db.save_learning_path(U2, "d", "p", "c")
 db.set_agreed_offer(U2, "o")
 db.set_agreed_bite(U2, "tiny task", source="analyze")
+_m2 = db.add_user_material(U2, "link", title="course",
+                           source_url="https://x.co/c")
+db.update_material_walkthrough(_m2, status="validated")
 
 called = []
 genplan.generate_async = lambda uid: called.append(uid)  # spy
