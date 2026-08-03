@@ -118,5 +118,77 @@ check("regeneration invalidates the leaked link",
 check("regenerating a tokenless user still yields a working token",
       db.get_user_id_by_token(db.regenerate_user_token("fresh")) == "fresh")
 
+# ── 6. upload path (materials.py) ────────────────────────────────────
+print("6) upload handling")
+import io  # noqa: E402
+
+import materials  # noqa: E402
+from docx import Document  # noqa: E402
+
+buf = io.BytesIO()
+_doc = Document()
+_doc.add_paragraph("제1장 스왑 — 총수익스왑의 구조")
+_doc.add_paragraph("조기상환 트리거: 발동 시 정산 기준일은...")
+_doc.save(buf)
+DOCX = buf.getvalue()
+
+mid, err = materials.register_upload("m2", "정리본.docx", DOCX)
+check("docx upload extracts real text and registers",
+      err == "" and mid is not None
+      and "조기상환" in db.get_material(mid)["extracted_text"])
+check("original bytes are not kept anywhere",
+      "orig_blob" not in db.get_material(mid))
+
+_bad = [materials.register_upload("m2", "notes.txt", b"x")[1],
+        materials.register_upload("m2", "big.pdf",
+                                  b"x" * (materials.MAX_FILE_BYTES + 1))[1],
+        materials.register_upload("m2", "img.pdf", b"%PDF-1.4 broken")[1],
+        materials.register_upload("m2", "empty.docx", b"")[1]]
+check("txt/oversize/corrupt/empty all refused with reasons",
+      all(_bad) and "20MB" in _bad[1])
+
+_lid, err = materials.register_link("m2", "https://youtube.com/watch?v=x",
+                                    "Karpathy zero-to-hero")
+check("link registered; junk link refused",
+      err == "" and db.get_material(_lid)["kind"] == "link"
+      and materials.register_link("m2", "not a url")[1] != "")
+
+# ── 7. the one-time read ─────────────────────────────────────────────
+print("7) digest")
+
+
+class FakeAnthropic:
+    seen = []
+
+    def __init__(self, *a, **kw):
+        pass
+
+    class messages:
+        @staticmethod
+        def create(**kwargs):
+            FakeAnthropic.seen.append(kwargs)
+
+            class _B:
+                type = "text"
+                text = "Working notes: 2 sections, ~2 recall items."
+
+            class _R:
+                content = [_B()]
+            return _R()
+
+
+materials.anthropic.Anthropic = FakeAnthropic
+digest = materials.digest_material(mid)
+check("digest stored, event + flight record emitted",
+      "recall items" in (digest or "")
+      and "recall items" in db.get_material(mid)["digest"]
+      and len(events_of("material_digested", "m2")) == 1)
+check("the read saw the document text under the coach-notes prompt",
+      "조기상환" in FakeAnthropic.seen[0]["messages"][0]["content"]
+      and "coach's working notes"
+      in FakeAnthropic.seen[0]["system"])
+check("digesting a link (no text) is a quiet no-op",
+      materials.digest_material(_lid) is None)
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

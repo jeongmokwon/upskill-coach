@@ -2661,6 +2661,157 @@ def _signup_error(msg):
                         content_type="text/html")
 
 
+
+# ─── /my — the user's private space (magic-link auth) ────────────────
+#
+# Possession of the link IS the login: /my?k=<token> (PR 2 of the
+# walkthrough arc). Here the user shows Theo what they study from —
+# a file upload or a link — so the Theo-led walkthrough has something
+# real to anchor on. The conversation itself stays on SMS.
+
+def _my_auth(request):
+    """→ (user_id, token) or (None, None)."""
+    import db
+    token = (request.query.get("k") or "").strip()
+    return db.get_user_id_by_token(token), token
+
+
+_MY_STATUS_LABEL = {"none": "shared — walkthrough not started",
+                    "in_progress": "walkthrough in progress",
+                    "validated": "walked through ✓"}
+
+
+async def _my_token_handler(request):
+    """Operator-only: mint/fetch a user's magic link (CRON_SECRET
+    auth, same convention as the other debug endpoints). This is how
+    the husband's link gets generated after deploy.
+
+    GET /debug/my-link?secret=...&user_id=chrisyu2
+    """
+    import db
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret", "").strip()
+                or request.query.get("secret", "").strip())
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+    user_id = (request.query.get("user_id") or "").strip()
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+    token = db.ensure_user_token(user_id)
+    return web.Response(
+        text=f"https://www.learningtheo.com/my?k={token}\n",
+        content_type="text/plain")
+
+
+async def _my_page_handler(request):
+    import db
+    user_id, token = _my_auth(request)
+    if not user_id:
+        return web.Response(status=404, text="Not found")
+    rows = db.get_user_materials(user_id)
+    items = ""
+    for m in rows:
+        what = (f'<a href="{m["source_url"]}" rel="noopener">{m["title"]}</a>'
+                if m["kind"] == "link" else m["title"])
+        state = _MY_STATUS_LABEL.get(m["walkthrough_status"],
+                                     m["walkthrough_status"])
+        note = ("" if m["kind"] != "file" else
+                (" · Theo has read it" if m["digest"]
+                 else " · Theo is reading it…"))
+        items += f"<li>{what} <span class='meta'>— {state}{note}</span></li>\n"
+    saved = ""
+    if request.query.get("ok"):
+        saved = ("<p style='color:#2a7d2a; font-weight:600'>Got it — "
+                 "Theo will bring it up in your next conversation.</p>")
+    err = ""
+    if request.query.get("err"):
+        err = (f"<p style='color:#b00020; font-weight:600'>"
+               f"{request.query.get('err')}</p>")
+    body = f"""
+<h1>Your learning space</h1>
+<div class="meta">Private page — anyone with this link can see it,
+so don't share the address.</div>
+{saved}{err}
+<h2 style="margin-top:26px">What you're learning from</h2>
+<p>Show Theo the thing you actually study from — the file you made,
+or the link you keep coming back to. Theo reads it once, then talks
+it through with you over text.</p>
+<ul>{items or "<li class='meta'>(nothing shared yet)</li>"}</ul>
+
+<h3 style="margin-top:22px">Share a file</h3>
+<form method="POST" action="/my/upload?k={token}"
+      enctype="multipart/form-data">
+  <input type="file" name="file" accept=".pdf,.docx" required>
+  <div style="font-size:13px; color:#666; margin-top:4px">PDF or
+  DOCX, up to 20MB. We keep the text, not the file itself.</div>
+  <button class="btn" type="submit" style="margin-top:10px">Upload</button>
+</form>
+
+<h3 style="margin-top:22px">Or share a link</h3>
+<form method="POST" action="/my/link?k={token}">
+  <input type="url" name="url" required placeholder="https://…"
+         style="{_FIELD_STYLE}">
+  <input type="text" name="title" placeholder="What is it? (optional)"
+         style="{_FIELD_STYLE}">
+  <button class="btn" type="submit" style="margin-top:10px">Add link</button>
+</form>
+"""
+    return web.Response(text=_site_page("Your learning space", body,
+                                        path="/my"),
+                        content_type="text/html")
+
+
+def _my_redirect(token, ok=False, err=""):
+    from urllib.parse import quote
+    loc = f"/my?k={token}" + ("&ok=1" if ok else "")
+    if err:
+        loc += f"&err={quote(err)}"
+    raise web.HTTPFound(loc)
+
+
+async def _my_upload_handler(request):
+    import asyncio
+
+    import materials
+    user_id, token = _my_auth(request)
+    if not user_id:
+        return web.Response(status=404, text="Not found")
+    reader = await request.multipart()
+    field = await reader.next()
+    if field is None or field.name != "file":
+        _my_redirect(token, err="No file arrived — try again?")
+    filename = field.filename or ""
+    data = b""
+    while True:
+        chunk = await field.read_chunk()
+        if not chunk:
+            break
+        data += chunk
+        if len(data) > materials.MAX_FILE_BYTES:
+            _my_redirect(token, err="File is larger than 20MB.")
+    material_id, err = materials.register_upload(user_id, filename, data)
+    if err:
+        _my_redirect(token, err=err)
+    # The one-time read runs in the background so the page answers
+    # instantly; the list shows "Theo is reading it…" until it lands.
+    asyncio.get_event_loop().run_in_executor(
+        None, materials.digest_material, material_id)
+    _my_redirect(token, ok=True)
+
+
+async def _my_link_handler(request):
+    import materials
+    user_id, token = _my_auth(request)
+    if not user_id:
+        return web.Response(status=404, text="Not found")
+    form = await request.post()
+    _mid, err = materials.register_link(user_id, form.get("url"),
+                                        form.get("title") or "")
+    if err:
+        _my_redirect(token, err=err)
+    _my_redirect(token, ok=True)
+
+
 async def _sms_signup_submit_handler(request):
     import db
 
@@ -2773,6 +2924,10 @@ def start_ws_server():
         app.router.add_get("/debug/llm-call", _debug_llm_call_handler)
         app.router.add_get("/debug/learner-state", _debug_learner_state_handler)
         app.router.add_get("/debug/trace", _debug_trace_handler)
+        app.router.add_get("/my", _my_page_handler)
+        app.router.add_get("/debug/my-link", _my_token_handler)
+        app.router.add_post("/my/upload", _my_upload_handler)
+        app.router.add_post("/my/link", _my_link_handler)
         app.router.add_get("/notes", _notes_handler)
         app.router.add_post("/notes", _notes_handler)
         app.router.add_get("/plan", _plan_handler)
