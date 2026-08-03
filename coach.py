@@ -2681,6 +2681,28 @@ _MY_STATUS_LABEL = {"none": "shared — walkthrough not started",
                     "validated": "walked through ✓"}
 
 
+async def _my_token_handler(request):
+    """Operator-only: mint/fetch a user's magic link (CRON_SECRET
+    auth, same convention as the other debug endpoints). This is how
+    the husband's link gets generated after deploy.
+
+    GET /debug/my-link?secret=...&user_id=chrisyu2
+    """
+    import db
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret", "").strip()
+                or request.query.get("secret", "").strip())
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+    user_id = (request.query.get("user_id") or "").strip()
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+    token = db.ensure_user_token(user_id)
+    return web.Response(
+        text=f"https://www.learningtheo.com/my?k={token}\n",
+        content_type="text/plain")
+
+
 async def _my_page_handler(request):
     import db
     user_id, token = _my_auth(request)
@@ -2903,6 +2925,7 @@ def start_ws_server():
         app.router.add_get("/debug/learner-state", _debug_learner_state_handler)
         app.router.add_get("/debug/trace", _debug_trace_handler)
         app.router.add_get("/my", _my_page_handler)
+        app.router.add_get("/debug/my-link", _my_token_handler)
         app.router.add_post("/my/upload", _my_upload_handler)
         app.router.add_post("/my/link", _my_link_handler)
         app.router.add_get("/notes", _notes_handler)
