@@ -476,6 +476,14 @@ def init_db():
                 created_at TEXT NOT NULL
             )
         """)
+        # Commit BEFORE the ALTER-with-rollback migrations below.
+        # Those loops rollback when a column already exists (which is
+        # every boot after the first), and an uncommitted CREATE TABLE
+        # above would be rolled back with them — observed in
+        # production: user_materials/user_tokens silently vanished on
+        # every boot and /debug/my-link 500ed. CREATE TABLE IF NOT
+        # EXISTS makes the commit idempotent.
+        conn.commit()
         # Migrate: learning_paths.path_kind (brief §7 "Learning
         # types"). The direction/project+done-condition/bite middle
         # layer is project-shaped and does not fit every learner;
