@@ -419,6 +419,12 @@ def _build_placeholders(user_id):
         # 1-indexed day count for the LLM's "Day X of 3" awareness.
         "discovery_day": db.days_in_discovery(user_id) + 1,
         "recent_screen": _format_recent_screen(user_id),
+        # The standing promise. Write-only until now: analyze_turn
+        # extracted it, db stored it, the completion gate read it —
+        # and the coach never saw it again, so an agreed offer was
+        # made once and forgotten forever.
+        "agreed_offer": (profile.get("agreed_offer") or "").strip()
+                        or "(not yet agreed)",
     }
 
 

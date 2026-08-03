@@ -170,6 +170,23 @@ check("ignition judgment is asked only about an inbound reply",
       "## Ignition judgment" in sms._build_system_prompt_for_reply(U)[0]
       and "## Ignition judgment" not in sms._build_system_prompt("evening", U)[0])
 
+# ── the agreed offer is a standing promise the coach can SEE ────────
+print("offer persistence")
+U5 = "promiser"
+db.ensure_user_profile_row(U5)
+p_before, _ = sms._build_system_prompt("evening", U5)
+check("before agreement the promise slot says so",
+      "YOUR STANDING PROMISE" in p_before
+      and "(not yet agreed)" in p_before)
+db.set_agreed_offer(U5, "매주 워드파일에서 질문 뽑아 불시에 던져주기")
+p_after, _ = sms._build_system_prompt("evening", U5)
+check("once agreed, every later prompt carries the promise verbatim",
+      "매주 워드파일에서 질문 뽑아 불시에 던져주기" in p_after
+      and "debt you are actively paying" in p_after)
+r_after, _ = sms._build_system_prompt_for_reply(U5)
+check("the reply path carries it too",
+      "매주 워드파일에서 질문 뽑아 불시에 던져주기" in r_after)
+
 U2 = "veteran"   # deliberately NO ensure_user_profile_row: a forced
                  # completion used to log success and write nothing
 check("force completes an incomplete user (operator backfill)",
