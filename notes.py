@@ -46,7 +46,15 @@ def render_profile_block(user_id):
         lines.append(f"- Learning types: {', '.join(types)}"
                      + (f" (path framing: {path.get('path_kind')})"
                         if path.get("path_kind") else ""))
-    if materials:
+    # user_materials is the source of truth once anything is
+    # registered there; the brief's own materials list (extracted
+    # from conversation at brief-generation time) is the fallback.
+    registered = [m.get("title") or m.get("source_url") or m["kind"]
+                  for m in db.get_user_materials(user_id)]
+    if registered:
+        lines.append(f"- Learns from: {', '.join(registered)} "
+                     f"(see 'Their materials' below)")
+    elif materials:
         lines.append(f"- Learns from: {', '.join(materials)}")
     if wants:
         lines.append("- What they asked for, THEIR words (quote them "

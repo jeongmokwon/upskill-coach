@@ -2129,11 +2129,18 @@ def mark_onboarding_started(user_id):
 # unsettled item as the current focus.
 # The order IS the arc. `bite` is deliberately NOT here: the first
 # concrete task belongs to the first study session, which happens
-# AFTER onboarding completes and the sequence plan exists. What
-# onboarding needs in its place is the offer — what the coach will
-# do for them.
-ONBOARDING_FIELDS = ("goal", "path", "offer", "schedule",
-                     "ignition_marker")
+# AFTER onboarding completes and the sequence plan exists.
+#
+# material_walkthrough sits BEFORE offer on purpose: the offer is
+# built FROM the walkthrough. The user shows Theo what they study
+# from (/my upload, a link, or just naming it), Theo leads a
+# walkthrough until it can produce a sample of its offer (an
+# insider-plausible question, a next-piece cut), and the user
+# confirming that sample is what fills the field. Onboarding
+# completion thus means: Theo understands its job for this user —
+# not merely that five values got collected.
+ONBOARDING_FIELDS = ("goal", "path", "ignition_marker",
+                     "material_walkthrough", "offer", "schedule")
 
 
 def get_onboarding_state(user_id):
@@ -2147,6 +2154,8 @@ def get_onboarding_state(user_id):
         filled.append("path")
     if (prof.get("ignition_marker") or "").strip():
         filled.append("ignition_marker")
+    if has_validated_material(user_id):
+        filled.append("material_walkthrough")
     if get_user_schedule(user_id):
         filled.append("schedule")
     if (prof.get("agreed_offer") or "").strip():

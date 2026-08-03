@@ -589,6 +589,12 @@ def _build_context_blocks(user_id, focus_block=None):
     except Exception as e:
         print(f"[SMS] ⚠️ user facts block failed: {e}", flush=True)
     try:
+        mat_block = _build_materials_block(user_id)
+        if mat_block:
+            parts.append(mat_block)
+    except Exception as e:
+        print(f"[SMS] ⚠️ materials block failed: {e}", flush=True)
+    try:
         notes_block = notes_mod.render_notes_block(
             user_id, profile=False, moves=_onboarding_done(user_id))
         if notes_block:
@@ -664,6 +670,46 @@ def _phase_gated_blocks(user_id, versions):
         except Exception as e:
             print(f"[SMS] ⚠️ {name} block failed: {e}", flush=True)
     return out
+
+
+def _build_materials_block(user_id):
+    """## Their materials — Theo's read AND the user's own account,
+    side by side. '' when nothing is registered. The user's words
+    always outrank the digest: the digest knows what the file
+    contains, only the user knows why it exists."""
+    mats = db.get_user_materials(user_id)
+    if not mats:
+        return ""
+    lines = ["## Their materials — what they study from",
+             "",
+             "Two readings live here: your one-time digest (what the "
+             "material contains) and their own walkthrough account "
+             "(what it is FOR). Where they differ, THEIR words win — "
+             "and the gap itself is worth a conversation.",
+             ""]
+    label = {"none": "not walked through yet",
+             "in_progress": "walkthrough in progress",
+             "validated": "walked through — sample confirmed by them"}
+    for m in mats:
+        head = m.get("title") or m.get("source_url") or "(unnamed)"
+        lines.append(f"### {head} ({m['kind']}) — "
+                     f"{label.get(m['walkthrough_status'], '?')}")
+        if m.get("source_url") and m["kind"] == "link":
+            lines.append(f"- Link: {m['source_url']} (you have not "
+                         "fetched it; rely on what you know of it and "
+                         "on their account)")
+        if m.get("digest"):
+            lines.append(f"- Your read: {m['digest']}")
+        if m.get("user_description"):
+            lines.append(f"- Their description: {m['user_description']}")
+        for w in (m.get("wants") or []):
+            q = (w.get("quote") or "").strip()
+            mn = (w.get("meaning") or "").strip()
+            if q:
+                lines.append(f"- They said: \"{q}\""
+                             + (f" → {mn}" if mn else ""))
+        lines.append("")
+    return "\n".join(lines).rstrip()
 
 
 def _build_focus_block(user_id, dormancy=True):
@@ -803,6 +849,43 @@ def _strip_extraction_markers(user_id, text):
     return text
 
 
+def _walkthrough_label(user_id):
+    """The material_walkthrough focus, phased by what exists. Before
+    any material: get them to show the thing. After: lead the
+    walkthrough to a validated sample."""
+    mats = db.get_user_materials(user_id)
+    if not mats:
+        return (
+            "get them to SHOW you the thing they actually study from. "
+            "Bridge from what they already told you, and give the "
+            "honest reason — seeing it makes you precise: '네가 얘기한 "
+            "그 자료, 직접 보면 내가 훨씬 정확해질 것 같은데' (their "
+            "/my page takes a file or a link; if they study from "
+            "something they can't share — a book, a course — just have "
+            "them name it and tell you what it covers). Do NOT send "
+            "the /my link over SMS; they already have it")
+    m = mats[0]
+    named = m.get("title") or "their material"
+    return (
+        f"lead a walkthrough of {named} — in THEIR words, not yours. "
+        "One goal: their own account of what they want from it, "
+        "precise enough that you could build your standing offer from "
+        "it. What that is varies completely by person — a moment they "
+        "must perform in, a piece they keep avoiding with a deadline, "
+        "a situation they want to survive. Do NOT arrive with a "
+        "question template; follow what they show you, one question a "
+        "turn, and remember your digest of the material is YOUR "
+        "reading — theirs outranks it. You are done only when you can "
+        "produce a SAMPLE of what you would do for them (an "
+        "insider-plausible question, a concrete next-piece cut — "
+        "something an expert in their world would nod at, never trivia "
+        "an outsider would ask) and they confirm it rings true. Name "
+        "the trade honestly: '이렇게 물을 거라고 생각했는데, 맞는지 "
+        "봐줘. 네가 검증해주면 내가 빨리 네가 원하는 역할을 해줄 수 "
+        "있어.' If they say that is not how it works, that is the "
+        "walkthrough WORKING — keep walking")
+
+
 def _build_onboarding_block(user_id):
     """The checklist block (P0-A): injected into every call while
     onboarding is incomplete, so the conversation keeps steering
@@ -830,13 +913,16 @@ def _build_onboarding_block(user_id):
                                 "in THEIR craft, never a feeling "
                                 "('집중되면')",
              "schedule": "the times of day they want to hear from you",
-             "offer": "what YOU will do for them. PROPOSE it — never "
-                      "ask them what you could do. Name one concrete "
-                      "thing you will actually do, built from what you "
-                      "already know about them (their material, how "
-                      "they learn). "
-                      "'내가 뭘 도와줄까?' is the failure mode: it "
-                      "hands your job back to them and costs a long "
+             "material_walkthrough": _walkthrough_label(user_id),
+             "offer": "what YOU will do for them, ongoing. PROPOSE it "
+                      "— never ask them what you could do. Build it "
+                      "directly from the walkthrough: their own words "
+                      "about what they want, and the sample they "
+                      "already confirmed. Usually the honest shape is "
+                      "'that thing I just did that you said rings true "
+                      "— I will keep doing it, like this, at your "
+                      "times.' '내가 뭘 도와줄까?' is the failure mode: "
+                      "it hands your job back to them and costs a long "
                       "answer they have no reason to write"}
     missing = state["missing"]
     lines = [
