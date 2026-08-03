@@ -185,7 +185,12 @@ db.set_ignition_marker(U6, "m")
 p_show, _ = sms._build_system_prompt("evening", U6)
 check("no material yet → focus is getting them to SHOW the thing",
       "SHOW you the thing they actually study from" in p_show
-      and "Do NOT send the /my link over SMS" in p_show)
+      and "do NOT send that link over SMS" in p_show)
+db.log_event(U6, "my_link_emailed", {"to": "x@y.z"}, source="emailer")
+p_mail, _ = sms._build_system_prompt("evening", U6)
+check("once the link email went out, the focus points at the inbox",
+      "point them at their INBOX" in p_mail
+      and "메일함 봐봐" in p_mail)
 _wm = db.add_user_material(U6, "file", title="정리본.docx",
                            extracted_text="...")
 db.set_material_digest(_wm, "two sections, ~40 recall items")

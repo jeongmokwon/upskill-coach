@@ -105,6 +105,9 @@ check("refusal recorded with the silence measured",
       and json.loads(w[0]["payload"])["silent_hours"] >= 32)
 check("no phantom sms_out was written",
       len(events_of("sms_out")) == 0)
+check("but the tick itself IS recorded — a gated slot is not a dead cron",
+      any(json.loads(e["payload"]).get("action") == "refused_window_closed"
+          for e in events_of("cron_tick")))
 
 backdate_last_inbound(2)
 sent = sms.handle_cron_tick("evening")

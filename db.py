@@ -217,6 +217,7 @@ def init_db():
             # onboarding arc). Missing it was why pilot user #1 gave
             # ten turns of himself and got nothing back.
             ("agreed_offer", "TEXT DEFAULT ''"),
+            ("email", "TEXT DEFAULT ''"),
             # 'provisional' (inferred by the analysis pass) vs
             # 'confirmed' (the user said it). See set_ignition_marker.
             ("ignition_marker_status", "TEXT DEFAULT ''"),
@@ -651,6 +652,7 @@ def init_db():
             ("onboarding_started_at", "TEXT"),
             ("onboarding_completed_at", "TEXT"),
             ("agreed_offer", "TEXT DEFAULT ''"),
+            ("email", "TEXT DEFAULT ''"),
             ("ignition_marker_status", "TEXT DEFAULT ''"),
         ]:
             try:
@@ -1761,6 +1763,16 @@ def set_agreed_bite(user_id, bite_text, source="llm_marker",
     print(f"  [DB] First bite saved for {user_id}: {bite_text!r}", flush=True)
     log_event(user_id, "bite_committed",
               {"bite": bite_text, "decision_id": decision_id}, source=source)
+
+
+def set_user_email(user_id, email, source="operator"):
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET email = {_P} WHERE user_id = {_P}",
+        (email, user_id))
+    conn.commit()
+    conn.close()
 
 
 def set_agreed_offer(user_id, offer_text, source="analyze"):

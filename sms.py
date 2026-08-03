@@ -855,15 +855,24 @@ def _walkthrough_label(user_id):
     walkthrough to a validated sample."""
     mats = db.get_user_materials(user_id)
     if not mats:
+        emailed = any(e["kind"] == "my_link_emailed"
+                      for e in db.get_events(user_id, limit=300))
+        where = ("You already emailed them their private page link — "
+                 "point them at their INBOX ('메일함 봐봐, 내가 링크 "
+                 "하나 보내놨어'), never paste the link itself into a "
+                 "text"
+                 if emailed else
+                 "their /my page takes a file or a link, but do NOT "
+                 "send that link over SMS — it reaches them by email")
         return (
             "get them to SHOW you the thing they actually study from. "
             "Bridge from what they already told you, and give the "
             "honest reason — seeing it makes you precise: '네가 얘기한 "
-            "그 자료, 직접 보면 내가 훨씬 정확해질 것 같은데' (their "
-            "/my page takes a file or a link; if they study from "
-            "something they can't share — a book, a course — just have "
-            "them name it and tell you what it covers). Do NOT send "
-            "the /my link over SMS; they already have it")
+            "그 자료, 직접 보면 내가 훨씬 정확해질 것 같은데'. "
+            + where +
+            " (if they study from something they can't share — a "
+            "book, a course — just have them name it and tell you "
+            "what it covers)")
     m = mats[0]
     named = m.get("title") or "their material"
     return (
@@ -1724,6 +1733,13 @@ def handle_cron_tick(slot, window=None):
                       "silent_hours": None if hours is None else round(hours, 1),
                       "note": "free-form send refused; the user must "
                               "message first to reopen the window"},
+                     source="cron")
+        # The tick DID happen — record it, or the cron watchdog reads
+        # a healthy-but-gated slot as a dead cron. Observed: two
+        # window-refused evenings produced two false cron_missed
+        # alarms while Render showed the job succeeding.
+        db.log_event(user_id, "cron_tick",
+                     {"slot": slot, "action": "refused_window_closed"},
                      source="cron")
         return None
 

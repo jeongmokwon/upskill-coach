@@ -2703,6 +2703,38 @@ async def _my_token_handler(request):
         content_type="text/plain")
 
 
+async def _email_my_link_handler(request):
+    """Operator-only: have Theo email the user their /my link — the
+    real product flow (signup → email → coach points at it), being
+    validated on pilot #1 instead of hand-delivering the URL.
+
+    POST /debug/email-my-link?secret=...&user_id=chrisyu2&email=a@b.c
+    (email optional once stored on the profile)
+    """
+    import db
+    import emailer
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret", "").strip()
+                or request.query.get("secret", "").strip())
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+    user_id = (request.query.get("user_id") or "").strip()
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+    email = (request.query.get("email") or "").strip()
+    if not email:
+        prof = db.get_user_profile_by_id(user_id) or {}
+        email = (prof.get("email") or "").strip()
+    if "@" not in email:
+        return web.Response(status=400,
+                            text="email required (none on profile)")
+    ok, detail = emailer.send_my_link(user_id, email)
+    return web.Response(
+        status=200 if ok else 502,
+        text=(f"sent to {email} (resend id {detail})\n" if ok
+              else f"FAILED: {detail}\n"))
+
+
 async def _my_page_handler(request):
     import db
     user_id, token = _my_auth(request)
@@ -2926,6 +2958,7 @@ def start_ws_server():
         app.router.add_get("/debug/trace", _debug_trace_handler)
         app.router.add_get("/my", _my_page_handler)
         app.router.add_get("/debug/my-link", _my_token_handler)
+        app.router.add_post("/debug/email-my-link", _email_my_link_handler)
         app.router.add_post("/my/upload", _my_upload_handler)
         app.router.add_post("/my/link", _my_link_handler)
         app.router.add_get("/notes", _notes_handler)
