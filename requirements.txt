@@ -3,3 +3,5 @@ aiohttp
 psycopg2-binary
 manim
 twilio
+pypdf
+python-docx
