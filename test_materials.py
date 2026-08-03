@@ -190,5 +190,46 @@ check("the read saw the document text under the coach-notes prompt",
 check("digesting a link (no text) is a quiet no-op",
       materials.digest_material(_lid) is None)
 
+# ── 8. Theo emails the /my link (the real delivery path) ─────────────
+print("8) link email")
+import emailer  # noqa: E402
+
+
+class FakeHTTP:
+    sent = []
+
+    def __init__(self, req, timeout=None):
+        FakeHTTP.sent.append(req)
+
+    def __enter__(self):
+        class R:
+            @staticmethod
+            def read():
+                return b'{"id": "re_123"}'
+        return R()
+
+    def __exit__(self, *a):
+        return False
+
+
+emailer.urllib.request.urlopen = FakeHTTP
+os.environ.pop("RESEND_API_KEY", None)
+ok, detail = emailer.send_my_link("m3", "spouse@example.com")
+check("without an API key the send fails loudly, with the failure evented",
+      not ok and "RESEND_API_KEY" in detail
+      and len(events_of("my_link_email_failed", "m3")) == 1)
+
+os.environ["RESEND_API_KEY"] = "re_test"
+ok, detail = emailer.send_my_link("m3", "spouse@example.com")
+sent_body = json.loads(FakeHTTP.sent[-1].data.decode())
+check("the email carries the magic link, nothing else exotic",
+      ok and detail == "re_123"
+      and db.ensure_user_token("m3") in sent_body["text"]
+      and sent_body["to"] == ["spouse@example.com"])
+check("success records the event + stores the address on the profile",
+      len(events_of("my_link_emailed", "m3")) == 1
+      and (db.get_user_profile_by_id("m3") or {}).get("email")
+      == "spouse@example.com")
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
