@@ -2829,6 +2829,117 @@ async def _session_message_handler(request):
     return web.json_response({"reply": reply})
 
 
+async def _session_stream_handler(request):
+    """Streaming web-chat turn. First tokens reach the client in
+    ~1-2s; the full turn still takes what it takes, but arrives at
+    reading speed instead of as an 8-second silence.
+
+    Markers ([STEP:]/[EXPECT:]/[IGNITION:]) stream at the END of the
+    model's output and must never reach the user's eyes: a sliding
+    HOLDBACK of 160 chars is kept unflushed, so trailing markers stay
+    server-side; finish_web_turn then strips them from the stored
+    text and the final SSE event carries the clean full text (the
+    client swaps its accumulated text for it).
+    """
+    import asyncio
+    import queue as queue_mod
+
+    import db
+    import sms as sms_mod
+    user_id, _tok = _my_auth(request)
+    if not user_id:
+        return web.Response(status=404, text="Not found")
+    body = await request.json()
+    ssn = db.get_screen_session((body.get("session_id") or "").strip())
+    if not ssn or ssn["user_id"] != user_id or ssn["ended_at"]:
+        return web.Response(status=404, text="no session")
+    text = (str(body.get("text") or "")).strip()[:2000]
+    if not text:
+        return web.Response(status=400, text="empty message")
+    jpeg = None
+    if body.get("jpeg_b64"):
+        try:
+            jpeg = _b64.b64decode(body["jpeg_b64"])
+            if len(jpeg) > 4 * 1024 * 1024:
+                jpeg = None
+        except Exception:
+            jpeg = None
+    db.touch_screen_session(ssn["session_id"])
+
+    resp = web.StreamResponse(headers={
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache"})
+    await resp.prepare(request)
+    loop = asyncio.get_event_loop()
+    q = queue_mod.Queue()
+    HOLDBACK = 160
+
+    def produce():
+        try:
+            system_prompt, history, versions = sms_mod.build_web_turn(
+                user_id, ssn["session_id"], text, jpeg)
+            client = anthropic.Anthropic()
+            full, flushed = "", 0
+            with client.messages.stream(
+                    model=sms_mod.MODEL, max_tokens=600,
+                    system=system_prompt, messages=history) as stream:
+                for delta in stream.text_stream:
+                    full += delta
+                    safe = len(full) - HOLDBACK
+                    if safe > flushed:
+                        q.put(("delta", full[flushed:safe]))
+                        flushed = safe
+            final = sms_mod.finish_web_turn(
+                user_id, ssn["session_id"], full, system_prompt,
+                history, versions)
+            q.put(("done", final or "(빈 응답)"))
+        except Exception as e:
+            print(f"[SESSION] ⚠️ stream turn failed: {e}", flush=True)
+            q.put(("done", "…잠깐 말이 엉켰다. 다시 한 번만 보내줄래?"))
+
+    fut = loop.run_in_executor(None, produce)
+    try:
+        while True:
+            kind, payload = await loop.run_in_executor(None, q.get)
+            await resp.write(
+                f"event: {kind}\ndata: {json.dumps(payload)}\n\n"
+                .encode())
+            if kind == "done":
+                break
+    finally:
+        await fut
+    await resp.write_eof()
+    return resp
+
+
+async def _material_admin_handler(request):
+    """Operator-only material correction (CRON_SECRET). First use:
+    a live chat test's banter was mis-extracted into walkthrough
+    wants on the founder's own account — pipeline noise must be
+    erasable without SQL access.
+
+    POST /debug/material?secret=..&id=1&action=clear_walkthrough
+    """
+    import db
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret", "").strip()
+                or request.query.get("secret", "").strip())
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+    mid = request.query.get("id", "").strip()
+    action = request.query.get("action", "").strip()
+    m = db.get_material(int(mid)) if mid.isdigit() else None
+    if not m:
+        return web.Response(status=404, text="no material")
+    if action == "clear_walkthrough":
+        db.update_material_walkthrough(
+            int(mid), user_description="", wants=[], status="none",
+            source="admin")
+        return web.Response(text=f"cleared walkthrough on material {mid} "
+                                 f"({m.get('title')})\n")
+    return web.Response(status=400, text="unknown action")
+
+
 async def _session_stop_handler(request):
     import db
     user_id, _tok = _my_auth(request)
@@ -3073,14 +3184,39 @@ the image immediately</b>. Only the written observation is kept.</p>
       setBusy(false);
     }}, 75000);
     currentFrameB64(function (b64) {{
-      post("/session/message",
-           {{session_id: sid, text: t, jpeg_b64: b64}})
-      .then(function (r) {{ return r.json(); }})
-      .then(function (j) {{
-        clearTimeout(timer);
-        thinking.textContent = j.reply || "(빈 응답)";
-        setBusy(false);
-        thinking.scrollIntoView({{block: "end"}});
+      fetch("/session/message/stream?k=" + K, {{method: "POST",
+        headers: {{"Content-Type": "application/json"}},
+        body: JSON.stringify({{session_id: sid, text: t, jpeg_b64: b64}})}})
+      .then(function (r) {{
+        if (!r.ok || !r.body) throw new Error("stream " + r.status);
+        var reader = r.body.getReader();
+        var dec = new TextDecoder();
+        var buf = "", acc = "";
+        function pump() {{
+          return reader.read().then(function (x) {{
+            if (x.done) return;
+            buf += dec.decode(x.value, {{stream: true}});
+            var events = buf.split("\n\n");
+            buf = events.pop();
+            events.forEach(function (ev) {{
+              var kind = (ev.match(/^event: (.+)$/m) || [])[1];
+              var data = (ev.match(/^data: (.+)$/m) || [])[1];
+              if (!kind || data === undefined) return;
+              var payload = JSON.parse(data);
+              if (kind === "delta") {{
+                acc += payload;
+                thinking.textContent = acc;
+              }} else if (kind === "done") {{
+                thinking.textContent = payload;
+                clearTimeout(timer);
+                setBusy(false);
+              }}
+              thinking.scrollIntoView({{block: "end"}});
+            }});
+            return pump();
+          }});
+        }}
+        return pump();
       }})
       .catch(function () {{
         clearTimeout(timer);
@@ -3282,6 +3418,8 @@ def start_ws_server():
         app.router.add_post("/session/frame", _session_frame_handler)
         app.router.add_post("/session/stop", _session_stop_handler)
         app.router.add_post("/session/message", _session_message_handler)
+        app.router.add_post("/session/message/stream", _session_stream_handler)
+        app.router.add_post("/debug/material", _material_admin_handler)
         app.router.add_get("/notes", _notes_handler)
         app.router.add_post("/notes", _notes_handler)
         app.router.add_get("/plan", _plan_handler)

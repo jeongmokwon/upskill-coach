@@ -1663,12 +1663,11 @@ def _session_journey_block(user_id, session_id):
     return "\n".join(lines)
 
 
-def generate_web_reply(user_id, session_id, text, jpeg_bytes=None):
-    """One turn of the in-session web chat. The user's message may
-    carry the CURRENT frame — the coach's reply is grounded in what
-    is on screen right now (the freshness SMS could never have).
-    Returns the reply text ('' on failure). The frame bytes are
-    ephemeral, same rule as every frame."""
+def build_web_turn(user_id, session_id, text, jpeg_bytes=None):
+    """Everything a web-chat turn needs BEFORE the model call:
+    stores the inbound message, kicks the background frame
+    observation, and returns (system_prompt, history,
+    prompt_versions) ready for a (streaming or not) create call."""
     db.save_sms_message(user_id, "user", text, "in", channel="web")
 
     # Latency budget: chat dies past ~10s, and the first live test
@@ -1714,16 +1713,38 @@ def generate_web_reply(user_id, session_id, text, jpeg_bytes=None):
                             "media_type": "image/jpeg",
                             "data": b64mod.b64encode(jpeg_bytes).decode()}},
                 {"type": "text", "text": history[-1]["content"]}]}]
-    reply_text, steps, expect, llm_call_id, _hold = generate_message(
-        user_id, system_prompt, history, "web_session_reply",
-        max_tokens=600, prompt_versions=prompt_versions)
-    if not reply_text or not reply_text.strip():
+    return system_prompt, history, prompt_versions
+
+
+def finish_web_turn(user_id, session_id, raw_text, system_prompt,
+                    history, prompt_versions):
+    """Everything AFTER the model produced the full turn text (the
+    streaming path accumulates it chunk by chunk first): markers
+    parsed and stripped, guards checked (log-only — a streamed turn
+    cannot be retried, the user already read it), records written,
+    analysis kicked. Returns the clean display text."""
+    llm_call_id = db.save_llm_call(
+        user_id, "web_session_reply", MODEL, system_prompt,
+        [m if isinstance(m.get("content"), str)
+         else {"role": m["role"], "content": "[frame+text]"}
+         for m in history],
+        prompt_versions=prompt_versions, response_text=raw_text)
+    expect, text = _process_expect_marker(raw_text)
+    steps, text = _process_step_marker(user_id, text)
+    text = _process_ignition_markers(user_id, text, "web_session_reply")
+    text = _strip_extraction_markers(user_id, text)
+    if not text.strip():
         return ""
-    reply_text = _strip_extraction_markers(user_id, reply_text)
-    db.save_sms_message(user_id, "assistant", reply_text, "out",
+    violations = check_send_guards(text, steps)
+    if violations:
+        db.log_event(user_id, "send_guard_violation",
+                     {"violations": violations,
+                      "trigger": "web_session_reply",
+                      "llm_call_id": llm_call_id}, source="web")
+    db.save_sms_message(user_id, "assistant", text, "out",
                         channel="web")
     db.log_event(user_id, "web_out",
-                 {"text": reply_text, "session_id": session_id,
+                 {"text": text, "session_id": session_id,
                   "steps": steps, "expect": expect,
                   "llm_call_id": llm_call_id}, source="web")
     import threading
@@ -1731,7 +1752,21 @@ def generate_web_reply(user_id, session_id, text, jpeg_bytes=None):
     import analyze_turn
     threading.Thread(target=analyze_turn.analyze, args=(user_id,),
                      kwargs={"trigger": "web_reply"}, daemon=True).start()
-    return reply_text
+    return text
+
+
+def generate_web_reply(user_id, session_id, text, jpeg_bytes=None):
+    """Non-streaming web turn (kept for tests and as fallback)."""
+    system_prompt, history, versions = build_web_turn(
+        user_id, session_id, text, jpeg_bytes)
+    client = anthropic.Anthropic()
+    resp = client.messages.create(
+        model=MODEL, max_tokens=600, system=system_prompt,
+        messages=history)
+    raw = "".join(b.text for b in resp.content
+                  if getattr(b, "type", "") == "text")
+    return finish_web_turn(user_id, session_id, raw, system_prompt,
+                           history, versions)
 
 
 def handle_cron_tick(slot, window=None):
