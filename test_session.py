@@ -164,5 +164,93 @@ r = hit(coach._session_frame_handler, f"/session/frame?k={tok}",
         {"session_id": sid2, "event": "dwell", "jpeg_b64": "eA=="})
 check("frames to an ended session are refused", r.status == 404)
 
+# ── 4. the web chat (PR B) ───────────────────────────────────────────
+print("4) web chat")
+import sms  # noqa: E402
+
+
+class FakeCoach:
+    seen = []
+
+    def __init__(self, *a, **kw):
+        pass
+
+    class messages:
+        @staticmethod
+        def create(**kwargs):
+            FakeCoach.seen.append(kwargs)
+            if kwargs.get("tools"):
+                class _B:
+                    type = "tool_use"
+                    input = {"step_completed": "not_applicable",
+                             "step_reason": "-"}
+            elif "eyes of Theo" in kwargs.get("system", ""):
+                class _B:
+                    type = "text"
+                    text = ("화면: Medium — ML 기사\n내용: \"Evolution of "
+                            "Machine Learning\" 타임라인\n정렬: 자료 밖\n"
+                            "확신: high")
+            else:
+                class _B:
+                    type = "text"
+                    text = ("타임라인 섹션 보고 있구나 — 1805년부터 쭉. "
+                            "지금 어디쯤이 제일 흥미로워?\n"
+                            "[STEP: connect@1, spark_curiosity@1]\n"
+                            "[EXPECT: reply]")
+
+            class _R:
+                content = [_B()]
+            return _R()
+
+
+sms.anthropic.Anthropic = FakeCoach
+import analyze_turn  # noqa: E402
+analyze_turn.anthropic.Anthropic = FakeCoach
+import eyes as eyes_mod  # noqa: E402
+eyes_mod.anthropic.Anthropic = FakeCoach
+
+sid3 = db.start_screen_session(U, declared_source="ML 기사")
+reply = sms.generate_web_reply(U, sid3, "지금 내 화면 뭐 보여?",
+                               jpeg_bytes=b"\xff\xd8frame")
+check("reply produced, markers stripped",
+      "타임라인 섹션" in reply and "[STEP" not in reply)
+check("both sides stored on the ONE thread, channel-tagged web",
+      [m for m in db.get_recent_sms_messages(U, limit=4)][-1]["content"]
+      == reply)
+conn = db.get_conn()
+rows = conn.execute("SELECT channel, direction FROM messages "
+                    "WHERE user_id=? ORDER BY id DESC LIMIT 2",
+                    (U,)).fetchall()
+conn.close()
+check("channel tags: web/in + web/out",
+      {(r[0], r[1]) for r in rows} == {("web", "in"), ("web", "out")})
+
+coach_call = [c for c in FakeCoach.seen
+              if "SITTING WITH them" in c.get("system", "")]
+check("web block + session journey rode the system prompt",
+      coach_call
+      and "This session's journey" in coach_call[-1]["system"]
+      and "Declared source: ML 기사" in coach_call[-1]["system"])
+check("the fresh frame became a [chat] observation BEFORE the reply",
+      "[chat]" in coach_call[-1]["system"]
+      and "Evolution of Machine" in coach_call[-1]["system"])
+check("web_out event with steps + session id",
+      any(json.loads(e["payload"]).get("session_id") == sid3
+          for e in events_of("web_out")))
+
+# endpoint level
+r = hit(coach._session_message_handler, f"/session/message?k={tok}",
+        {"session_id": sid3, "text": "그 다음은 뭐 볼까?",
+         "jpeg_b64": base64.b64encode(b"f2").decode()})
+check("message endpoint returns the reply",
+      r.status == 200 and "타임라인" in json.loads(r.text)["reply"])
+r = hit(coach._session_message_handler, f"/session/message?k={tok}",
+        {"session_id": sid3, "text": ""})
+check("empty message refused", r.status == 400)
+db.end_screen_session(sid3)
+r = hit(coach._session_message_handler, f"/session/message?k={tok}",
+        {"session_id": sid3, "text": "hi"})
+check("chat to an ended session refused", r.status == 404)
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
