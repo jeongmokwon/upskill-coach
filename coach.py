@@ -2994,7 +2994,8 @@ async def _my_page_handler(request):
     saved = ""
     if request.query.get("ok"):
         saved = ("<p style='color:#2a7d2a; font-weight:600'>Got it — "
-                 "Theo will bring it up in your next conversation.</p>")
+                 "Theo is reading it now and will text you when "
+                 "it's done.</p>")
     err = ""
     if request.query.get("err"):
         err = (f"<p style='color:#b00020; font-weight:600'>"

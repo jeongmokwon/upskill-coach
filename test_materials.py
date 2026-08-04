@@ -231,5 +231,103 @@ check("success records the event + stores the address on the profile",
       and (db.get_user_profile_by_id("m3") or {}).get("email")
       == "spouse@example.com")
 
+# ── 9. the upload follow-up: the coach reaches out NOW ───────────────
+print("9) material-ready follow-up")
+import sms  # noqa: E402
+
+os.environ["MESSAGING_CHANNEL"] = "sms"       # no window gate in the way
+os.environ["TUTOR_USER_ID"] = "m4"
+os.environ["TUTOR_USER_PHONE"] = "+15550009999"
+os.environ.pop("TWILIO_ACCOUNT_SID", None)    # send becomes a logged no-op
+
+
+class FakeAll:
+    """sms/materials/analyze share ONE anthropic module object, so a
+    single dispatching fake (the project convention) branches on the
+    call's shape."""
+
+    def __init__(self, *a, **kw):
+        pass
+
+    class messages:
+        @staticmethod
+        def create(**kwargs):
+            if kwargs.get("tools"):
+                class _B:
+                    type = "tool_use"
+                    input = {"step_completed": "not_applicable",
+                             "step_reason": "-"}
+            elif "reading a document" in kwargs.get("system", ""):
+                class _B:
+                    type = "text"
+                    text = "Working notes: 2 sections, ~2 recall items."
+            else:
+                class _B:
+                    type = "text"
+                    text = ("정리본 읽었어 — 3장 조기상환 표가 압권이던데.\n"
+                            "시간 될 때 같이 훑어보자.\n"
+                            "[STEP: connect@1, spark_curiosity@1]\n"
+                            "[EXPECT: reply]")
+
+            class _R:
+                content = [_B()]
+            return _R()
+
+
+sms.anthropic.Anthropic = FakeAll
+
+M4 = "m4"
+db.ensure_user_profile_row(M4)
+db.set_agreed_goal(M4, "g"); db.save_learning_path(M4, "d", "p", "c")
+db.set_ignition_marker(M4, "opens the file")
+_fid, _ = materials.register_upload(M4, "정리본.docx", DOCX)
+materials.digest_material(_fid)
+
+
+def m4_events(kind):
+    return [r for r in db.get_events(M4, limit=100) if r["kind"] == kind]
+
+
+check("digest completion fires the coach's follow-up on the thread",
+      len(m4_events("sms_out")) == 1
+      and json.loads(m4_events("sms_out")[0]["payload"])["trigger"]
+      == "material_ready"
+      and "같이 훑어보자" in db.get_recent_sms_messages(M4, limit=1)
+      [0]["content"])
+
+M5 = "m5"                    # onboarding-complete user: never fires
+os.environ["TUTOR_USER_ID"] = "m5"
+db.ensure_user_profile_row(M5)
+db.check_and_complete_onboarding(M5, force=True)
+_fid2, _ = materials.register_upload(M5, "정리본.docx", DOCX)
+materials.digest_material(_fid2)
+check("a completed user's upload stays quiet (no focus to serve)",
+      not [r for r in db.get_events(M5, limit=50)
+           if r["kind"] == "sms_out"])
+
+M6 = "m6"                    # goal not yet agreed → focus isn't walkthrough
+os.environ["TUTOR_USER_ID"] = "m6"
+db.ensure_user_profile_row(M6)
+_fid3, _ = materials.register_upload(M6, "정리본.docx", DOCX)
+materials.digest_material(_fid3)
+check("upload before the goal is agreed stays quiet (focus is the goal)",
+      not [r for r in db.get_events(M6, limit=50)
+           if r["kind"] == "sms_out"])
+
+os.environ["MESSAGING_CHANNEL"] = "whatsapp"  # closed window → refusal logged
+os.environ["TUTOR_USER_ID"] = "m7"
+M7 = "m7"
+db.ensure_user_profile_row(M7)
+db.set_agreed_goal(M7, "g"); db.save_learning_path(M7, "d", "p", "c")
+db.set_ignition_marker(M7, "m")
+_fid4, _ = materials.register_upload(M7, "정리본.docx", DOCX)
+materials.digest_material(_fid4)
+check("closed WhatsApp window → refusal recorded, nothing sent",
+      [r for r in db.get_events(M7, limit=50)
+       if r["kind"] == "material_ready_not_sent"]
+      and not [r for r in db.get_events(M7, limit=50)
+               if r["kind"] == "sms_out"])
+os.environ["MESSAGING_CHANNEL"] = "sms"
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

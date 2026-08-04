@@ -142,6 +142,12 @@ def digest_material(material_id):
                       "chars_read": len(body), "truncated": truncated,
                       "llm_call_id": call_id},
                      source="materials")
+        # The follow-up rides the digest completion: the user is at
+        # their freshest right after sharing — the coach reaches out
+        # now, not at tomorrow's cron. (Guarded inside: only when
+        # this upload is the awaited onboarding step.)
+        import sms as sms_mod
+        sms_mod.handle_material_ready(m["user_id"], material_id)
         return digest
     except Exception as e:
         print(f"[MATERIALS] ⚠️ digest failed for {material_id}: {e}",
