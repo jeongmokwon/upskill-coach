@@ -2735,6 +2735,77 @@ async def _email_my_link_handler(request):
               else f"FAILED: {detail}\n"))
 
 
+# ── screen co-viewing session endpoints (PR A: perception only) ──────
+
+async def _session_start_handler(request):
+    import db
+    user_id, token = _my_auth(request)
+    if not user_id:
+        return web.Response(status=404, text="Not found")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    declared = (str(body.get("source") or "")).strip()[:300]
+    sid = db.start_screen_session(user_id, declared_source=declared)
+    return web.json_response({"session_id": sid})
+
+
+async def _session_heartbeat_handler(request):
+    import db
+    user_id, _tok = _my_auth(request)
+    if not user_id:
+        return web.Response(status=404, text="Not found")
+    body = await request.json()
+    ssn = db.get_screen_session((body.get("session_id") or "").strip())
+    if not ssn or ssn["user_id"] != user_id:
+        return web.Response(status=404, text="no session")
+    db.touch_screen_session(ssn["session_id"])
+    return web.json_response({"ok": True})
+
+
+async def _session_frame_handler(request):
+    """One captured frame. The bytes live in this handler and the
+    eyes call, and nowhere else — never written to disk."""
+    import asyncio
+
+    import db
+    import eyes
+    user_id, _tok = _my_auth(request)
+    if not user_id:
+        return web.Response(status=404, text="Not found")
+    body = await request.json()
+    ssn = db.get_screen_session((body.get("session_id") or "").strip())
+    if not ssn or ssn["user_id"] != user_id or ssn["ended_at"]:
+        return web.Response(status=404, text="no session")
+    event = (body.get("event") or "unknown").strip()[:32]
+    try:
+        jpeg = _b64.b64decode(body.get("jpeg_b64") or "")
+    except Exception:
+        return web.Response(status=400, text="bad frame")
+    if not jpeg or len(jpeg) > 4 * 1024 * 1024:
+        return web.Response(status=400, text="bad frame size")
+    db.touch_screen_session(ssn["session_id"])
+    asyncio.get_event_loop().run_in_executor(
+        None, eyes.read_frame, user_id, ssn["session_id"], jpeg, event,
+        ssn.get("declared_source") or "")
+    return web.json_response({"ok": True})
+
+
+async def _session_stop_handler(request):
+    import db
+    user_id, _tok = _my_auth(request)
+    if not user_id:
+        return web.Response(status=404, text="Not found")
+    body = await request.json()
+    sid = (body.get("session_id") or "").strip()
+    ssn = db.get_screen_session(sid)
+    if not ssn or ssn["user_id"] != user_id:
+        return web.Response(status=404, text="no session")
+    db.end_screen_session(sid, reason="user")
+    return web.json_response({"ok": True})
+
+
 async def _my_page_handler(request):
     import db
     user_id, token = _my_auth(request)
@@ -2787,6 +2858,139 @@ it through with you over text.</p>
          style="{_FIELD_STYLE}">
   <button class="btn" type="submit" style="margin-top:10px">Add link</button>
 </form>
+
+<h2 style="margin-top:30px">Study together — share your screen</h2>
+<p>Start a session and open what you're studying. Theo watches with
+you — it captures a frame only when something meaningful happens
+(you switch, you settle, you linger), reads it once, and <b>deletes
+the image immediately</b>. Only the written observation is kept.</p>
+<div id="ssn-controls">
+  <input type="text" id="ssn-source" placeholder="오늘 뭘로 공부해? (선택)"
+         style="{_FIELD_STYLE}; max-width:420px">
+  <button class="btn" id="ssn-start" style="margin-top:10px">화면 공유 시작</button>
+</div>
+<div id="ssn-live" style="display:none; margin-top:12px; padding:14px 18px;
+     border:2px solid #e8590c; border-radius:10px; background:#fff4ec">
+  <div style="font-weight:700; color:#e8590c">● Theo가 보는 중</div>
+  <div id="ssn-status" class="meta" style="margin-top:6px">시작 중…</div>
+  <div class="meta" style="margin-top:6px">이 창은 옆에 작게 띄워둬도 돼요.
+  화면 원본은 읽는 즉시 삭제됩니다.</div>
+  <button class="btn" id="ssn-stop" style="margin-top:10px">세션 종료</button>
+</div>
+<script>
+(function () {{
+  var K = new URLSearchParams(location.search).get("k");
+  var sid = null, stream = null, video, small, sctx, prev = null;
+  var lastUpload = 0, lastActivity = 0, lastBig = 0, dwelled = false;
+  var settleQuiet = 0, hadScroll = false, timers = [];
+  var MIN_GAP = 15000, MIN_GAP_SWITCH = 5000;
+  var ACT = 0.030, QUIET = 0.010, BIG = 0.25;
+
+  function status(t) {{ document.getElementById("ssn-status").textContent = t; }}
+
+  function post(path, body) {{
+    return fetch(path + "?k=" + K, {{method: "POST",
+      headers: {{"Content-Type": "application/json"}},
+      body: JSON.stringify(body)}});
+  }}
+
+  function grabAndSend(event) {{
+    var now = Date.now();
+    var gap = event === "context_switch" ? MIN_GAP_SWITCH : MIN_GAP;
+    if (now - lastUpload < gap) return;
+    lastUpload = now;
+    var c = document.createElement("canvas");
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    c.getContext("2d").drawImage(video, 0, 0);
+    c.toBlob(function (blob) {{
+      if (!blob) return;
+      var r = new FileReader();
+      r.onload = function () {{
+        post("/session/frame", {{session_id: sid, event: event,
+          jpeg_b64: r.result.split(",")[1]}});
+        status("마지막 관찰 전송: " + new Date().toLocaleTimeString()
+               + " (" + event + ")");
+      }};
+      r.readAsDataURL(blob);
+    }}, "image/jpeg", 0.85);
+  }}
+
+  function tick() {{
+    if (!stream) return;
+    sctx.drawImage(video, 0, 0, 64, 36);
+    var d = 0, img;
+    try {{ img = sctx.getImageData(0, 0, 64, 36).data; }} catch (e) {{ return; }}
+    if (prev) {{
+      var sum = 0;
+      for (var i = 0; i < img.length; i += 16) sum += Math.abs(img[i] - prev[i]);
+      d = sum / (img.length / 16) / 255;
+    }}
+    prev = new Uint8ClampedArray(img);
+    var now = Date.now();
+    if (d > BIG && now - lastBig > 3000) {{
+      lastBig = now; lastActivity = now; dwelled = false; hadScroll = false;
+      grabAndSend("context_switch");
+    }} else if (d > ACT) {{
+      lastActivity = now; hadScroll = true; settleQuiet = 0; dwelled = false;
+    }} else if (d < QUIET) {{
+      if (hadScroll) {{
+        settleQuiet++;
+        if (settleQuiet >= 3) {{ hadScroll = false; settleQuiet = 0;
+          grabAndSend("scroll_settle"); }}
+      }}
+      if (!dwelled && lastActivity && now - lastActivity > 60000) {{
+        dwelled = true; grabAndSend("dwell");
+      }}
+    }}
+  }}
+
+  function cleanup() {{
+    timers.forEach(clearInterval); timers = [];
+    if (stream) {{ stream.getTracks().forEach(function (t) {{ t.stop(); }}); stream = null; }}
+    if (sid) {{ post("/session/stop", {{session_id: sid}}); sid = null; }}
+    document.getElementById("ssn-live").style.display = "none";
+    document.getElementById("ssn-controls").style.display = "block";
+  }}
+
+  document.getElementById("ssn-start").onclick = function () {{
+    navigator.mediaDevices.getDisplayMedia({{video: {{frameRate: 5}}}})
+    .then(function (st) {{
+      stream = st;
+      video = document.createElement("video");
+      video.srcObject = st; video.muted = true; video.play();
+      small = document.createElement("canvas");
+      small.width = 64; small.height = 36;
+      sctx = small.getContext("2d", {{willReadFrequently: true}});
+      st.getVideoTracks()[0].onended = cleanup;
+      return post("/session/start",
+        {{source: document.getElementById("ssn-source").value}})
+        .then(function (r) {{ return r.json(); }});
+    }})
+    .then(function (j) {{
+      // declared source rides on start via form field
+      sid = j.session_id;
+      document.getElementById("ssn-controls").style.display = "none";
+      document.getElementById("ssn-live").style.display = "block";
+      status("공유 시작됨");
+      lastActivity = Date.now();
+      timers.push(setInterval(tick, 500));
+      timers.push(setInterval(function () {{
+        post("/session/heartbeat", {{session_id: sid}});
+      }}, 20000));
+      setTimeout(function () {{ grabAndSend("start"); }}, 1200);
+    }})
+    .catch(function (e) {{ status("공유가 시작되지 않았어요: " + e.message); }});
+  }};
+  document.getElementById("ssn-stop").onclick = cleanup;
+  window.addEventListener("beforeunload", function () {{
+    if (sid && navigator.sendBeacon) {{
+      navigator.sendBeacon("/session/stop?k=" + K,
+        new Blob([JSON.stringify({{session_id: sid}})],
+                 {{type: "application/json"}}));
+    }}
+  }});
+}})();
+</script>
 """
     return web.Response(text=_site_page("Your learning space", body,
                                         path="/my"),
@@ -2961,6 +3165,10 @@ def start_ws_server():
         app.router.add_post("/debug/email-my-link", _email_my_link_handler)
         app.router.add_post("/my/upload", _my_upload_handler)
         app.router.add_post("/my/link", _my_link_handler)
+        app.router.add_post("/session/start", _session_start_handler)
+        app.router.add_post("/session/heartbeat", _session_heartbeat_handler)
+        app.router.add_post("/session/frame", _session_frame_handler)
+        app.router.add_post("/session/stop", _session_stop_handler)
         app.router.add_get("/notes", _notes_handler)
         app.router.add_post("/notes", _notes_handler)
         app.router.add_get("/plan", _plan_handler)

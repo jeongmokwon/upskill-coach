@@ -477,6 +477,27 @@ def init_db():
                 created_at TEXT NOT NULL
             )
         """)
+        # Screen co-viewing sessions (PR A of the session build).
+        # One row per user-initiated screen share on /my. Raw frames
+        # are NEVER stored — they live in memory for the seconds the
+        # eyes call needs, then vanish; observations (text) are the
+        # only persistent trace. last_seen is the heartbeat: a session
+        # whose heartbeat is >60s old is treated as dead (tab closed,
+        # laptop slept) without needing a reaper process.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS screen_sessions (
+                session_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                declared_source TEXT NOT NULL DEFAULT '',
+                started_at TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                ended_at TEXT,
+                frames INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_ssn_user ON screen_sessions (user_id, started_at)"
+        )
         # Commit BEFORE the ALTER-with-rollback migrations below.
         # Those loops rollback when a column already exists (which is
         # every boot after the first), and an uncommitted CREATE TABLE
@@ -825,6 +846,18 @@ def init_db():
                 token TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS screen_sessions (
+                session_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                declared_source TEXT NOT NULL DEFAULT '',
+                started_at TEXT NOT NULL,
+                last_seen TEXT NOT NULL,
+                ended_at TEXT,
+                frames INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_ssn_user ON screen_sessions (user_id, started_at);
 
             CREATE TABLE IF NOT EXISTS user_schedule (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1983,6 +2016,103 @@ def regenerate_user_token(user_id):
     conn.close()
     log_event(user_id, "token_regenerated", {}, source="admin")
     return token
+
+
+# ─── Screen co-viewing sessions ─────────────────────────────────────
+
+SESSION_DEAD_AFTER_S = 60
+
+
+def start_screen_session(user_id, declared_source=""):
+    """→ session_id. Emits session_started."""
+    ensure_user_profile_row(user_id)
+    sid = uuid.uuid4().hex[:12]
+    now = datetime.now().isoformat()
+    conn = get_conn()
+    _execute(conn,
+        f"INSERT INTO screen_sessions (session_id, user_id, "
+        f" declared_source, started_at, last_seen) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P})",
+        (sid, user_id, declared_source, now, now))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "session_started",
+              {"session_id": sid, "declared_source": declared_source},
+              source="session")
+    return sid
+
+
+def touch_screen_session(session_id, frame=False):
+    """Heartbeat (and frame counter). The heartbeat IS liveness:
+    no reaper process, staleness is judged at read time."""
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE screen_sessions SET last_seen = {_P}"
+        + (", frames = frames + 1" if frame else "")
+        + f" WHERE session_id = {_P} AND ended_at IS NULL",
+        (datetime.now().isoformat(), session_id))
+    conn.commit()
+    conn.close()
+
+
+def end_screen_session(session_id, reason="user"):
+    """Idempotent close. Emits session_stopped once."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT user_id, started_at, frames FROM screen_sessions "
+        f"WHERE session_id = {_P} AND ended_at IS NULL", (session_id,))
+    row = _fetchone(cur)
+    if not row:
+        conn.close()
+        return False
+    _execute(conn,
+        f"UPDATE screen_sessions SET ended_at = {_P} "
+        f"WHERE session_id = {_P}",
+        (datetime.now().isoformat(), session_id))
+    conn.commit()
+    conn.close()
+    try:
+        mins = round((datetime.now()
+                      - datetime.fromisoformat(row["started_at"])
+                      ).total_seconds() / 60, 1)
+    except Exception:
+        mins = None
+    log_event(row["user_id"], "session_stopped",
+              {"session_id": session_id, "reason": reason,
+               "minutes": mins, "frames": row["frames"]},
+              source="session")
+    return True
+
+
+def get_screen_session(session_id):
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM screen_sessions WHERE session_id = {_P}",
+        (session_id,))
+    row = _fetchone(cur)
+    conn.close()
+    return row
+
+
+def get_active_screen_session(user_id):
+    """The user's live session, or None. A session is live when it is
+    unended AND its heartbeat is fresh (<{dead}s) — a closed laptop
+    never sent its stop.""".format(dead=SESSION_DEAD_AFTER_S)
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM screen_sessions WHERE user_id = {_P} "
+        f"AND ended_at IS NULL ORDER BY started_at DESC LIMIT 1",
+        (user_id,))
+    row = _fetchone(cur)
+    conn.close()
+    if not row:
+        return None
+    try:
+        age = (datetime.now()
+               - datetime.fromisoformat(row["last_seen"])).total_seconds()
+    except Exception:
+        return None
+    return row if age < SESSION_DEAD_AFTER_S else None
 
 
 def save_learning_path(user_id, direction, project="",
