@@ -280,5 +280,53 @@ check("flight-recorded with frame placeholder, not bytes",
       "fakejpeg" not in json.dumps(db.get_llm_calls(U, limit=3)))
 db.end_screen_session(sid4)
 
+# ── 6. lifecycle voice + session-aware walkthrough (PR C) ────────────
+print("6) lifecycle")
+
+
+def hit_json(handler, path, body):
+    r = hit(handler, path, body)
+    return r, (json.loads(r.text) if r.status == 200 else {})
+
+
+r, j = hit_json(coach._session_start_handler,
+                f"/session/start?k={tok}", {"source": "정리본"})
+sid5 = j["session_id"]
+check("start returns the understated greeting, stored on the thread",
+      j["greeting"] == "세션 시작했네. 보고 있을게."
+      and db.get_recent_sms_messages(U, limit=1)[0]["content"]
+      == j["greeting"])
+check("greeting is marked template in its event (no model chose it)",
+      any(json.loads(e["payload"]).get("template") == "session_greeting"
+          for e in events_of("web_out")))
+
+# session-aware walkthrough label: needs goal/path/marker set so the
+# focus lands on material_walkthrough, plus an in-progress material
+W2 = U
+label_live = sms._walkthrough_label(W2)
+check("with a live session, the label walks the SCREEN",
+      "ON THE LIVE SCREEN" in label_live
+      and "지금 보고 있는 그 부분" in label_live)
+_closings_before = len([e for e in events_of("web_out")
+                        if json.loads(e["payload"]).get("template")
+                        == "session_closing"])
+db.end_screen_session(sid5)
+check("a db-level end (dead session) speaks no closing",
+      len([e for e in events_of("web_out")
+           if json.loads(e["payload"]).get("template")
+           == "session_closing"]) == _closings_before)
+
+r2, j2 = hit_json(coach._session_start_handler,
+                  f"/session/start?k={tok}", {})
+r3, j3 = hit_json(coach._session_stop_handler,
+                  f"/session/stop?k={tok}", {"session_id": j2["session_id"]})
+check("endpoint stop returns the closing and stores it",
+      j3["closing"].startswith("오늘 세션은 여기까지")
+      and db.get_recent_sms_messages(U, limit=1)[0]["content"]
+      == j3["closing"])
+label_idle = sms._walkthrough_label(W2)
+check("no live session → the label falls back to conversation mode",
+      "ON THE LIVE SCREEN" not in label_idle)
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

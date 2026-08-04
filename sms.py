@@ -875,6 +875,17 @@ def _walkthrough_label(user_id):
             "what it covers)")
     m = mats[0]
     named = m.get("title") or "their material"
+    if db.get_active_screen_session(user_id):
+        return (
+            f"walk through {named} ON THE LIVE SCREEN — they are "
+            "sharing it with you right now. Anchor to what the "
+            "observations show ('지금 보고 있는 그 부분—') instead of "
+            "asking them to describe what you can already see. Same "
+            "goal as ever: their own words for what they want from "
+            "it, one question a turn, until you can produce a SAMPLE "
+            "of your offer (an insider-plausible question, a concrete "
+            "next-piece cut) and they confirm it rings true. Their "
+            "words outrank both your digest AND the screen")
     return (
         f"lead a walkthrough of {named} — in THEIR words, not yours. "
         "One goal: their own account of what they want from it, "

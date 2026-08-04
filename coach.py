@@ -2748,7 +2748,19 @@ async def _session_start_handler(request):
         body = {}
     declared = (str(body.get("source") or "")).strip()[:300]
     sid = db.start_screen_session(user_id, declared_source=declared)
-    return web.json_response({"session_id": sid})
+    # The coach acknowledges presence the moment the session opens —
+    # a server template, not a model call: instant, and pinned to the
+    # understated register ("오 보인다—" enthusiasm reads as creepy
+    # when the subject is your screen). It still joins the one
+    # thread, marked template so analysis knows no model chose it.
+    greeting = "세션 시작했네. 보고 있을게."
+    db.save_sms_message(user_id, "assistant", greeting, "out",
+                        channel="web")
+    db.log_event(user_id, "web_out",
+                 {"text": greeting, "session_id": sid,
+                  "steps": [{"tag": "connect", "intensity": 1}],
+                  "template": "session_greeting"}, source="web")
+    return web.json_response({"session_id": sid, "greeting": greeting})
 
 
 async def _session_heartbeat_handler(request):
@@ -2950,8 +2962,17 @@ async def _session_stop_handler(request):
     ssn = db.get_screen_session(sid)
     if not ssn or ssn["user_id"] != user_id:
         return web.Response(status=404, text="no session")
-    db.end_screen_session(sid, reason="user")
-    return web.json_response({"ok": True})
+    closed = db.end_screen_session(sid, reason="user")
+    closing = ""
+    if closed:
+        closing = "오늘 세션은 여기까지 기록해뒀어."
+        db.save_sms_message(user_id, "assistant", closing, "out",
+                            channel="web")
+        db.log_event(user_id, "web_out",
+                     {"text": closing, "session_id": sid,
+                      "steps": [{"tag": "release", "intensity": 1}],
+                      "template": "session_closing"}, source="web")
+    return web.json_response({"ok": True, "closing": closing})
 
 
 async def _my_page_handler(request):
@@ -3103,8 +3124,17 @@ the image immediately</b>. Only the written observation is kept.</p>
   function cleanup() {{
     timers.forEach(clearInterval); timers = [];
     if (stream) {{ stream.getTracks().forEach(function (t) {{ t.stop(); }}); stream = null; }}
-    if (sid) {{ post("/session/stop", {{session_id: sid}}); sid = null; }}
-    document.getElementById("ssn-live").style.display = "none";
+    if (sid) {{
+      var endedSid = sid; sid = null;
+      post("/session/stop", {{session_id: endedSid}})
+        .then(function (r) {{ return r.json(); }})
+        .then(function (j) {{ if (j.closing) bubble("theo", j.closing); }})
+        .catch(function () {{}});
+    }}
+    status("세션 종료됨 — 대화 기록은 그대로 남아요");
+    document.getElementById("chat-in").disabled = true;
+    document.getElementById("chat-send").disabled = true;
+    document.getElementById("ssn-stop").style.display = "none";
     document.getElementById("ssn-controls").style.display = "block";
   }}
 
@@ -3128,6 +3158,7 @@ the image immediately</b>. Only the written observation is kept.</p>
       document.getElementById("ssn-controls").style.display = "none";
       document.getElementById("ssn-live").style.display = "block";
       status("공유 시작됨");
+      if (j.greeting) bubble("theo", j.greeting);
       lastActivity = Date.now();
       timers.push(setInterval(tick, 500));
       timers.push(setInterval(function () {{
