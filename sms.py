@@ -1647,6 +1647,66 @@ def _build_system_prompt_for_reply(user_id):
 
 # ─── Scheduled slot handling ────────────────────────────────────────
 
+def _session_journey_block(user_id, session_id):
+    """The session's observations, oldest first, for the web reply."""
+    obs = db.get_session_observations(session_id, limit=12)
+    ssn = db.get_screen_session(session_id) or {}
+    lines = ["## This session's journey (screen observations, oldest first)"]
+    if ssn.get("declared_source"):
+        lines.append(f"Declared source: {ssn['declared_source']}")
+    if not obs:
+        lines.append("(no observations yet — the session just started; "
+                     "do not guess at their screen)")
+    for o in obs:
+        t = (o.get("ts") or "")[11:16]
+        lines.append(f"\n[{t}] {o['summary']}")
+    return "\n".join(lines)
+
+
+def generate_web_reply(user_id, session_id, text, jpeg_bytes=None):
+    """One turn of the in-session web chat. The user's message may
+    carry the CURRENT frame — the coach's reply is grounded in what
+    is on screen right now (the freshness SMS could never have).
+    Returns the reply text ('' on failure). The frame bytes are
+    ephemeral, same rule as every frame."""
+    db.save_sms_message(user_id, "user", text, "in", channel="web")
+
+    import analyze_turn
+    analyze_turn.analyze(user_id, trigger="web_reply")
+
+    # The fresh frame becomes an observation FIRST (synchronously —
+    # the reply must be grounded in it), then rides the journey block
+    # like any other. The raw bytes stop here.
+    if jpeg_bytes:
+        import eyes
+        ssn = db.get_screen_session(session_id) or {}
+        eyes.read_frame(user_id, session_id, jpeg_bytes, "chat",
+                        declared_source=ssn.get("declared_source") or "")
+
+    system_prompt, prompt_versions = _build_system_prompt_for_reply(user_id)
+    web_block, h_web = _read_prompt_versioned("sms_web_session")
+    prompt_versions["sms_web_session"] = h_web
+    system_prompt = (system_prompt + "\n\n---\n\n" + web_block
+                     + "\n\n---\n\n"
+                     + _session_journey_block(user_id, session_id))
+
+    history = db.get_recent_sms_messages(user_id, limit=HISTORY_LIMIT,
+                                         with_time=True)
+    reply_text, steps, expect, llm_call_id, _hold = generate_message(
+        user_id, system_prompt, history, "web_session_reply",
+        max_tokens=600, prompt_versions=prompt_versions)
+    if not reply_text or not reply_text.strip():
+        return ""
+    reply_text = _strip_extraction_markers(user_id, reply_text)
+    db.save_sms_message(user_id, "assistant", reply_text, "out",
+                        channel="web")
+    db.log_event(user_id, "web_out",
+                 {"text": reply_text, "session_id": session_id,
+                  "steps": steps, "expect": expect,
+                  "llm_call_id": llm_call_id}, source="web")
+    return reply_text
+
+
 def handle_cron_tick(slot, window=None):
     """Run a scheduled slot: decide whether to send, and if so,
     load prompt, call Claude, send WhatsApp.

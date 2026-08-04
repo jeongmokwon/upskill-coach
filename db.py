@@ -1439,8 +1439,12 @@ def _sms_sid(user_id):
     return f"sms-{user_id}"
 
 
-def save_sms_message(user_id, role, content, direction):
-    """Append one SMS message to the rolling thread for `user_id`.
+def save_sms_message(user_id, role, content, direction, channel="sms"):
+    """Append one message to the rolling thread for `user_id`.
+
+    channel: 'sms' or 'web' (the in-session chat). One thread, one
+    memory — the coach is the same person on both; the channel tag
+    exists so style rules and delivery paths can differ.
 
     role: 'user' or 'assistant' (matches Anthropic API shape so the
           thread can be fed straight back into Claude)
@@ -1455,7 +1459,7 @@ def save_sms_message(user_id, role, content, direction):
         f"INSERT INTO messages "
         f"(session_id, user_id, role, content, channel, direction, timestamp) "
         f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
-        (_sms_sid(user_id), user_id, role, content, "sms", direction,
+        (_sms_sid(user_id), user_id, role, content, channel, direction,
          datetime.now().isoformat())
     )
     conn.commit()
@@ -1485,7 +1489,7 @@ def get_recent_sms_messages(user_id, limit=20, since=None,
     if since:
         cur = _execute(conn,
             f"SELECT role, content, timestamp FROM messages "
-            f"WHERE session_id = {_P} AND channel = 'sms' "
+            f"WHERE session_id = {_P} AND channel IN ('sms','web') "
             f"AND timestamp > {_P} "
             f"ORDER BY id DESC LIMIT {_P}",
             (_sms_sid(user_id), since, limit)
@@ -1493,7 +1497,7 @@ def get_recent_sms_messages(user_id, limit=20, since=None,
     else:
         cur = _execute(conn,
             f"SELECT role, content, timestamp FROM messages "
-            f"WHERE session_id = {_P} AND channel = 'sms' "
+            f"WHERE session_id = {_P} AND channel IN ('sms','web') "
             f"ORDER BY id DESC LIMIT {_P}",
             (_sms_sid(user_id), limit)
         )
@@ -2913,6 +2917,20 @@ def get_recent_observations(user_id, minutes=30, limit=5):
         f"ORDER BY id DESC LIMIT {_P}",
         (user_id, threshold, limit)
     )
+    rows = _fetchall(cur)
+    conn.close()
+    rows.reverse()
+    return rows
+
+
+def get_session_observations(session_id, limit=12):
+    """One session's observations, oldest-first — the journey the
+    web-chat reply is grounded in."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT ts, summary FROM observations "
+        f"WHERE session_id = {_P} ORDER BY id DESC LIMIT {_P}",
+        (session_id, limit))
     rows = _fetchall(cur)
     conn.close()
     rows.reverse()

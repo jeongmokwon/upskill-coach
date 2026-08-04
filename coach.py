@@ -2792,6 +2792,43 @@ async def _session_frame_handler(request):
     return web.json_response({"ok": True})
 
 
+async def _session_message_handler(request):
+    """One web-chat turn. The message may carry the current frame
+    (grabbed at send time — ~1s freshness). The heavy work runs in a
+    thread so the event loop stays free; the HTTP response carries
+    the coach's reply."""
+    import asyncio
+
+    import db
+    import sms as sms_mod
+    user_id, _tok = _my_auth(request)
+    if not user_id:
+        return web.Response(status=404, text="Not found")
+    body = await request.json()
+    ssn = db.get_screen_session((body.get("session_id") or "").strip())
+    if not ssn or ssn["user_id"] != user_id or ssn["ended_at"]:
+        return web.Response(status=404, text="no session")
+    text = (str(body.get("text") or "")).strip()[:2000]
+    if not text:
+        return web.Response(status=400, text="empty message")
+    jpeg = None
+    if body.get("jpeg_b64"):
+        try:
+            jpeg = _b64.b64decode(body["jpeg_b64"])
+            if len(jpeg) > 4 * 1024 * 1024:
+                jpeg = None
+        except Exception:
+            jpeg = None
+    db.touch_screen_session(ssn["session_id"])
+    reply = await asyncio.get_event_loop().run_in_executor(
+        None, sms_mod.generate_web_reply, user_id, ssn["session_id"],
+        text, jpeg)
+    if not reply:
+        return web.json_response(
+            {"reply": "…잠깐 말이 엉켰다. 다시 한 번만 보내줄래?"})
+    return web.json_response({"reply": reply})
+
+
 async def _session_stop_handler(request):
     import db
     user_id, _tok = _my_auth(request)
@@ -2875,6 +2912,14 @@ the image immediately</b>. Only the written observation is kept.</p>
   <div id="ssn-status" class="meta" style="margin-top:6px">시작 중…</div>
   <div class="meta" style="margin-top:6px">이 창은 옆에 작게 띄워둬도 돼요.
   화면 원본은 읽는 즉시 삭제됩니다.</div>
+  <div id="chat-log" style="margin-top:12px; max-height:46vh; overflow-y:auto;
+       display:flex; flex-direction:column; gap:8px"></div>
+  <div style="display:flex; gap:8px; margin-top:10px">
+    <input type="text" id="chat-in" placeholder="Theo에게 말하기…"
+           style="flex:1; padding:10px 12px; border:1px solid #ccc;
+                  border-radius:8px; font-size:14px">
+    <button class="btn" id="chat-send">전송</button>
+  </div>
   <button class="btn" id="ssn-stop" style="margin-top:10px">세션 종료</button>
 </div>
 <script>
@@ -2981,6 +3026,51 @@ the image immediately</b>. Only the written observation is kept.</p>
     }})
     .catch(function (e) {{ status("공유가 시작되지 않았어요: " + e.message); }});
   }};
+  function bubble(role, text) {{
+    var d = document.createElement("div");
+    d.style.cssText = "padding:8px 12px; border-radius:12px; font-size:14px;"
+      + "line-height:1.55; max-width:88%; white-space:pre-wrap;"
+      + (role === "me"
+         ? "align-self:flex-end; background:#e8590c; color:#fff"
+         : "align-self:flex-start; background:#f1f3f5; color:#222");
+    d.textContent = text;
+    document.getElementById("chat-log").appendChild(d);
+    d.scrollIntoView({{block: "end"}});
+    return d;
+  }}
+
+  function currentFrameB64(cb) {{
+    if (!video || !video.videoWidth) return cb(null);
+    var c = document.createElement("canvas");
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    c.getContext("2d").drawImage(video, 0, 0);
+    c.toBlob(function (blob) {{
+      if (!blob) return cb(null);
+      var r = new FileReader();
+      r.onload = function () {{ cb(r.result.split(",")[1]); }};
+      r.readAsDataURL(blob);
+    }}, "image/jpeg", 0.85);
+  }}
+
+  function sendChat() {{
+    var inp = document.getElementById("chat-in");
+    var t = inp.value.trim();
+    if (!t || !sid) return;
+    inp.value = "";
+    bubble("me", t);
+    var thinking = bubble("theo", "…");
+    currentFrameB64(function (b64) {{
+      post("/session/message",
+           {{session_id: sid, text: t, jpeg_b64: b64}})
+      .then(function (r) {{ return r.json(); }})
+      .then(function (j) {{ thinking.textContent = j.reply; }})
+      .catch(function () {{ thinking.textContent = "(전송 실패 — 다시?)"; }});
+    }});
+  }}
+  document.getElementById("chat-send").onclick = sendChat;
+  document.getElementById("chat-in").addEventListener("keydown",
+    function (e) {{ if (e.key === "Enter") sendChat(); }});
+
   document.getElementById("ssn-stop").onclick = cleanup;
   window.addEventListener("beforeunload", function () {{
     if (sid && navigator.sendBeacon) {{
@@ -3169,6 +3259,7 @@ def start_ws_server():
         app.router.add_post("/session/heartbeat", _session_heartbeat_handler)
         app.router.add_post("/session/frame", _session_frame_handler)
         app.router.add_post("/session/stop", _session_stop_handler)
+        app.router.add_post("/session/message", _session_message_handler)
         app.router.add_get("/notes", _notes_handler)
         app.router.add_post("/notes", _notes_handler)
         app.router.add_get("/plan", _plan_handler)
