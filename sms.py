@@ -877,15 +877,21 @@ def _walkthrough_label(user_id):
     named = m.get("title") or "their material"
     if db.get_active_screen_session(user_id):
         return (
-            f"walk through {named} ON THE LIVE SCREEN — they are "
-            "sharing it with you right now. Anchor to what the "
-            "observations show ('지금 보고 있는 그 부분—') instead of "
-            "asking them to describe what you can already see. Same "
-            "goal as ever: their own words for what they want from "
-            "it, one question a turn, until you can produce a SAMPLE "
-            "of your offer (an insider-plausible question, a concrete "
-            "next-piece cut) and they confirm it rings true. Their "
-            "words outrank both your digest AND the screen")
+            f"{named} is on their screen right now — they are showing "
+            "it to you live. Your job is UNCHANGED: get their own "
+            "words for what they want from this material, precise "
+            "enough to build your standing offer from. The screen "
+            "changes HOW you ask, never what you are after — every "
+            "question about the material itself ('어떤 형태야? 어느 "
+            "부분이 중요해?') is now wasted, because you can see it; "
+            "spend those turns on what only they know: which parts "
+            "the real world actually demands of them, what they wish "
+            "they could do with the part they are looking at ('지금 "
+            "보고 있는 그 부분, 실제로 그런 걸 물어보는 사람이 "
+            "있어?'). One question a turn. Done only when your sample "
+            "— an insider-plausible question, a concrete next piece — "
+            "gets their '맞아, 딱 그런 거'. Their words outrank your "
+            "digest and the screen both")
     return (
         f"lead a walkthrough of {named} — in THEIR words, not yours. "
         "One goal: their own account of what they want from it, "

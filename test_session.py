@@ -304,9 +304,12 @@ check("greeting is marked template in its event (no model chose it)",
 # focus lands on material_walkthrough, plus an in-progress material
 W2 = U
 label_live = sms._walkthrough_label(W2)
-check("with a live session, the label walks the SCREEN",
-      "ON THE LIVE SCREEN" in label_live
-      and "지금 보고 있는 그 부분" in label_live)
+check("with a live session, the label spends turns on what only "
+      "they know — the purpose, not the screen",
+      "on their screen right now" in label_live
+      and "Your job is UNCHANGED" in label_live
+      and "실제로 그런 걸 물어보는 사람이" in label_live
+      and "맞아, 딱 그런 거" in label_live)
 _closings_before = len([e for e in events_of("web_out")
                         if json.loads(e["payload"]).get("template")
                         == "session_closing"])
@@ -326,7 +329,7 @@ check("endpoint stop returns the closing and stores it",
       == j3["closing"])
 label_idle = sms._walkthrough_label(W2)
 check("no live session → the label falls back to conversation mode",
-      "ON THE LIVE SCREEN" not in label_idle)
+      "on their screen right now" not in label_idle)
 
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
