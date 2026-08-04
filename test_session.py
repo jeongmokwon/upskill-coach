@@ -231,9 +231,16 @@ check("web block + session journey rode the system prompt",
       coach_call
       and "This session's journey" in coach_call[-1]["system"]
       and "Declared source: ML 기사" in coach_call[-1]["system"])
-check("the fresh frame became a [chat] observation BEFORE the reply",
-      "[chat]" in coach_call[-1]["system"]
-      and "Evolution of Machine" in coach_call[-1]["system"])
+img_msg = coach_call[-1]["messages"][-1]
+check("the raw frame rides INSIDE the reply call (one-call turn)",
+      isinstance(img_msg["content"], list)
+      and img_msg["content"][0]["type"] == "image"
+      and "live capture" in coach_call[-1]["system"])
+import time as _t
+_t.sleep(0.3)   # the [chat] observation logs in the background
+check("the same frame still lands in the journey (async)",
+      any("[chat]" in o["summary"]
+          for o in db.get_session_observations(sid3)))
 check("web_out event with steps + session id",
       any(json.loads(e["payload"]).get("session_id") == sid3
           for e in events_of("web_out")))
