@@ -3196,7 +3196,7 @@ the image immediately</b>. Only the written observation is kept.</p>
           return reader.read().then(function (x) {{
             if (x.done) return;
             buf += dec.decode(x.value, {{stream: true}});
-            var events = buf.split("\n\n");
+            var events = buf.split("\\n\\n");
             buf = events.pop();
             events.forEach(function (ev) {{
               var kind = (ev.match(/^event: (.+)$/m) || [])[1];
