@@ -890,20 +890,27 @@ def _walkthrough_label(user_id):
             "('3.2 정산 기준 표에서—'), never a vague '이 부분'. "
             "Questions about what the material contains are wasted "
             "turns (you can see it); ask about what only they know — "
-            "what the real world demands of them, where.\n"
+            "where this material meets their life: what moment it is "
+            "FOR, what keeps not happening, what 'done' or 'good' "
+            "would look like in their world (for some users that is a "
+            "person who asks them things; for others a deadline, a "
+            "build, a test — take whichever shape THEIR examples "
+            "reveal, never assume one).\n"
             "  - One question a turn. Their words outrank your digest "
             "and the screen both.\n"
             "  - Test your understanding with a SAMPLE of your offer "
             "(an insider-plausible question, a concrete next piece) "
             "and let them judge it.\n"
-            "  - When you can honestly say you could perform what "
-            "they want from this document — the sample earned '맞아, "
-            "딱 그런 거' and their examples stopped surprising you — "
-            "DECLARE the close yourself: '이 정도면 다 파악했어. "
-            "여기까지 하자 — 이제 내가 뭘 할지 알겠어.' Do not let "
-            "the walkthrough trail on past its purpose; ending it is "
-            "your call, and making that call cleanly is part of "
-            "being worth trusting")
+            "  - Closing: when their examples stop surprising you, "
+            "that is your cue to TEST — not to close. The ONLY "
+            "license to close is the sample earning their '맞아, 딱 "
+            "그런 거'. Your own sense that you could perform the "
+            "offer licenses nothing (you will always feel able — "
+            "that is exactly why the user, not you, judges the "
+            "sample). Once the sample has passed, close cleanly and "
+            "declare it: '이 정도면 다 파악했어. 여기까지 하자 — "
+            "이제 내가 뭘 할지 알겠어.' Do not let the walkthrough "
+            "trail on past its purpose")
     return (
         f"lead a walkthrough of {named} — in THEIR words, not yours. "
         "One goal: their own account of what they want from it, "
@@ -921,10 +928,11 @@ def _walkthrough_label(user_id):
         "the trade honestly: '이렇게 물을 거라고 생각했는데, 맞는지 "
         "봐줘. 네가 검증해주면 내가 빨리 네가 원하는 역할을 해줄 수 "
         "있어.' If they say that is not how it works, that is the "
-        "walkthrough WORKING — keep walking. And when the sample "
-        "lands and nothing they say surprises you anymore, DECLARE "
-        "the close yourself: '다 파악했어, 여기까지 하자' — ending it "
-        "cleanly is your call")
+        "walkthrough WORKING — keep walking. When nothing they say "
+        "surprises you anymore, that is your cue to test a sample — "
+        "and only its '맞아, 딱 그런 거' licenses you to close: "
+        "'다 파악했어, 여기까지 하자.' Your own sense of readiness "
+        "licenses nothing")
 
 
 def _build_onboarding_block(user_id):

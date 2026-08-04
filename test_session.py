@@ -309,7 +309,8 @@ check("live-session label: examples in, pinned questions, coach "
       "TOGETHER, live" in label_live
       and "예를 하나 들어줄래" in label_live
       and "3.2 정산 기준 표에서" in label_live
-      and "DECLARE the close yourself" in label_live)
+      and "The ONLY license to close" in label_live
+      and "you will always feel able" in label_live)
 _closings_before = len([e for e in events_of("web_out")
                         if json.loads(e["payload"]).get("template")
                         == "session_closing"])
@@ -330,7 +331,7 @@ check("endpoint stop returns the closing and stores it",
 label_idle = sms._walkthrough_label(W2)
 check("no live session → the label falls back to conversation mode",
       "TOGETHER, live" not in label_idle
-      and "DECLARE the close" in label_idle)
+      and "licenses you to close" in label_idle)
 
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
