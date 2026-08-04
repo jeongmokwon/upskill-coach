@@ -1671,17 +1671,25 @@ def generate_web_reply(user_id, session_id, text, jpeg_bytes=None):
     ephemeral, same rule as every frame."""
     db.save_sms_message(user_id, "user", text, "in", channel="web")
 
-    import analyze_turn
-    analyze_turn.analyze(user_id, trigger="web_reply")
-
-    # The fresh frame becomes an observation FIRST (synchronously —
-    # the reply must be grounded in it), then rides the journey block
-    # like any other. The raw bytes stop here.
+    # Latency budget: chat dies past ~10s, and the first live test
+    # measured 25-30s because analysis, the frame read and the reply
+    # ran in series (three user messages then piled into three
+    # interleaved pipelines). The reply is now ONE model call:
+    # - the raw frame goes INTO the reply call itself (the coach
+    #   sees the pixels — even fresher than a pre-read),
+    # - the journey observation for the same frame is logged in the
+    #   BACKGROUND (the record must not gate the conversation),
+    # - analyze_turn runs AFTER the reply, also in the background.
     if jpeg_bytes:
+        import threading
+
         import eyes
         ssn = db.get_screen_session(session_id) or {}
-        eyes.read_frame(user_id, session_id, jpeg_bytes, "chat",
-                        declared_source=ssn.get("declared_source") or "")
+        threading.Thread(
+            target=eyes.read_frame,
+            args=(user_id, session_id, jpeg_bytes, "chat"),
+            kwargs={"declared_source": ssn.get("declared_source") or ""},
+            daemon=True).start()
 
     system_prompt, prompt_versions = _build_system_prompt_for_reply(user_id)
     web_block, h_web = _read_prompt_versioned("sms_web_session")
@@ -1692,6 +1700,20 @@ def generate_web_reply(user_id, session_id, text, jpeg_bytes=None):
 
     history = db.get_recent_sms_messages(user_id, limit=HISTORY_LIMIT,
                                          with_time=True)
+    if jpeg_bytes and history and history[-1]["role"] == "user":
+        import base64 as b64mod
+        system_prompt += (
+            "\n\nThe user's newest message carries a live capture of "
+            "their screen AT THIS MOMENT — this image outranks every "
+            "older observation in the journey above.")
+        history = history[:-1] + [{
+            "role": "user",
+            "content": [
+                {"type": "image",
+                 "source": {"type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": b64mod.b64encode(jpeg_bytes).decode()}},
+                {"type": "text", "text": history[-1]["content"]}]}]
     reply_text, steps, expect, llm_call_id, _hold = generate_message(
         user_id, system_prompt, history, "web_session_reply",
         max_tokens=600, prompt_versions=prompt_versions)
@@ -1704,6 +1726,11 @@ def generate_web_reply(user_id, session_id, text, jpeg_bytes=None):
                  {"text": reply_text, "session_id": session_id,
                   "steps": steps, "expect": expect,
                   "llm_call_id": llm_call_id}, source="web")
+    import threading
+
+    import analyze_turn
+    threading.Thread(target=analyze_turn.analyze, args=(user_id,),
+                     kwargs={"trigger": "web_reply"}, daemon=True).start()
     return reply_text
 
 

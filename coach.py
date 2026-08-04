@@ -3052,19 +3052,41 @@ the image immediately</b>. Only the written observation is kept.</p>
     }}, "image/jpeg", 0.85);
   }}
 
+  var chatBusy = false;
+  function setBusy(b) {{
+    chatBusy = b;
+    document.getElementById("chat-in").disabled = b;
+    document.getElementById("chat-send").disabled = b;
+    document.getElementById("chat-in").placeholder =
+      b ? "Theo가 생각 중…" : "Theo에게 말하기…";
+  }}
   function sendChat() {{
     var inp = document.getElementById("chat-in");
     var t = inp.value.trim();
-    if (!t || !sid) return;
+    if (!t || !sid || chatBusy) return;
     inp.value = "";
     bubble("me", t);
     var thinking = bubble("theo", "…");
+    setBusy(true);
+    var timer = setTimeout(function () {{
+      thinking.textContent = "(응답이 늦네요 — 잠시 후 다시 보내주세요)";
+      setBusy(false);
+    }}, 75000);
     currentFrameB64(function (b64) {{
       post("/session/message",
            {{session_id: sid, text: t, jpeg_b64: b64}})
       .then(function (r) {{ return r.json(); }})
-      .then(function (j) {{ thinking.textContent = j.reply; }})
-      .catch(function () {{ thinking.textContent = "(전송 실패 — 다시?)"; }});
+      .then(function (j) {{
+        clearTimeout(timer);
+        thinking.textContent = j.reply || "(빈 응답)";
+        setBusy(false);
+        thinking.scrollIntoView({{block: "end"}});
+      }})
+      .catch(function () {{
+        clearTimeout(timer);
+        thinking.textContent = "(전송 실패 — 다시 보내줄래?)";
+        setBusy(false);
+      }});
     }});
   }}
   document.getElementById("chat-send").onclick = sendChat;
