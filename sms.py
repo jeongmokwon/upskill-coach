@@ -909,7 +909,10 @@ def _walkthrough_label(user_id):
         "the trade honestly: '이렇게 물을 거라고 생각했는데, 맞는지 "
         "봐줘. 네가 검증해주면 내가 빨리 네가 원하는 역할을 해줄 수 "
         "있어.' If they say that is not how it works, that is the "
-        "walkthrough WORKING — keep walking")
+        "walkthrough WORKING — keep walking. And when the sample "
+        "lands and nothing they say surprises you anymore, DECLARE "
+        "the close yourself: '다 파악했어, 여기까지 하자' — ending it "
+        "cleanly is your call")
 
 
 def _build_onboarding_block(user_id):
