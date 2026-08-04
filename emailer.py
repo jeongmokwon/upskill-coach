@@ -33,7 +33,12 @@ def send_email(to, subject, text):
     req = urllib.request.Request(
         RESEND_API, data=body, method="POST",
         headers={"Authorization": f"Bearer {key}",
-                 "Content-Type": "application/json"})
+                 "Content-Type": "application/json",
+                 # Cloudflare in front of Resend bans urllib's default
+                 # Python-urllib/3.x signature (observed live: 403,
+                 # error code 1010, while the same key + payload
+                 # succeeded via curl). Any honest custom UA passes.
+                 "User-Agent": "theo-coach/1.0 (learningtheo.com)"})
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             return True, json.loads(resp.read().decode()).get("id", "")
