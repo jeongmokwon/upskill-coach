@@ -37,6 +37,16 @@ def send_email(to, subject, text):
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             return True, json.loads(resp.read().decode()).get("id", "")
+    except urllib.error.HTTPError as e:
+        # Resend explains itself in the response body ("domain not
+        # verified", "API key restricted", ...). str(e) alone is just
+        # "HTTP Error 403: Forbidden" — observed while debugging
+        # blind; keep the body.
+        try:
+            detail = e.read().decode()[:500]
+        except Exception:
+            detail = ""
+        return False, f"{e} — {detail}"
     except Exception as e:
         return False, str(e)
 
