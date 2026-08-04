@@ -259,5 +259,26 @@ r = hit(coach._session_message_handler, f"/session/message?k={tok}",
         {"session_id": sid3, "text": "hi"})
 check("chat to an ended session refused", r.status == 404)
 
+# ── 5. the split turn + holdback invariants (streaming path) ─────────
+print("5) stream mechanics")
+sid4 = db.start_screen_session(U, declared_source="ML")
+sysp, hist, vers = sms.build_web_turn(U, sid4, "이 표 뭐야?",
+                                      jpeg_bytes=b"\xff\xd8f3")
+check("build/finish split: prompt carries web block + journey",
+      "SITTING WITH them" in sysp and "This session's journey" in sysp
+      and hist[-1]["role"] == "user")
+raw = ("표는 트리거 조건이야. 어느 행이 헷갈려?\n"
+       "[STEP: spark_curiosity@1]\n[EXPECT: reply]\n[IGNITION: 2]")
+final = sms.finish_web_turn(U, sid4, raw, sysp, hist, vers)
+check("finish strips ALL trailing markers from the stored/displayed text",
+      "[STEP" not in final and "[EXPECT" not in final
+      and "[IGNITION" not in final and "트리거 조건" in final)
+check("markers sit within the last 160 chars — the stream holdback "
+      "keeps them off the user's screen",
+      len(raw) - raw.index("[STEP") <= 160)
+check("flight-recorded with frame placeholder, not bytes",
+      "fakejpeg" not in json.dumps(db.get_llm_calls(U, limit=3)))
+db.end_screen_session(sid4)
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
