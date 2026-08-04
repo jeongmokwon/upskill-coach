@@ -1809,6 +1809,64 @@ def generate_web_reply(user_id, session_id, text, jpeg_bytes=None):
                            history, versions)
 
 
+def handle_material_ready(user_id, material_id):
+    """The user just uploaded a material and the digest is done —
+    the freshest window there is: they opened the link, shared the
+    thing, and are probably still holding the phone. Waiting for
+    tomorrow's cron would burn exactly the moment the whole arc was
+    built to reach, so the coach follows up NOW.
+
+    Fires only when this upload is the awaited step: onboarding
+    incomplete AND the current focus is material_walkthrough. The
+    WhatsApp window gate still applies. Returns sent text or None."""
+    try:
+        state = db.get_onboarding_state(user_id)
+        if state["completed_at"] or not state["missing"] \
+                or state["missing"][0] != "material_walkthrough":
+            return None
+        if whatsapp_window_closed(user_id):
+            db.log_event(user_id, "material_ready_not_sent",
+                         {"material_id": material_id,
+                          "reason": "whatsapp_window_closed"},
+                         source="sms")
+            return None
+        to_number = os.environ.get("TUTOR_USER_PHONE", "").strip()
+        if os.environ.get("TUTOR_USER_ID", "").strip() != user_id \
+                or not to_number:
+            return None
+        m = db.get_material(material_id) or {}
+        system_prompt, prompt_versions = \
+            _build_system_prompt_for_reply(user_id)
+        history = db.get_recent_sms_messages(
+            user_id, limit=HISTORY_LIMIT, with_time=True)
+        history.append(_server_turn(
+            f"The user just shared '{m.get('title') or 'their material'}' "
+            f"on their /my page moments ago, and you have finished "
+            f"reading it (your digest is in the materials block "
+            f"above). They are probably still at the screen. Write "
+            f"the next message: let them know you have actually read "
+            f"it — one specific, true thing you noticed shows that "
+            f"better than any adjective — and open the walkthrough."))
+        text, steps, expect, llm_call_id, _hold = generate_message(
+            user_id, system_prompt, history, "material_ready",
+            max_tokens=400, prompt_versions=prompt_versions)
+        if not text or not text.strip():
+            return None
+        text = _strip_extraction_markers(user_id, text)
+        send_sms(to_number, text, user_id=user_id)
+        db.save_sms_message(user_id, "assistant", text, "out")
+        db.log_event(user_id, "sms_out",
+                     {"text": text, "trigger": "material_ready",
+                      "material_id": material_id, "steps": steps,
+                      "expect": expect, "llm_call_id": llm_call_id},
+                     source="sms")
+        return text
+    except Exception as e:
+        print(f"[SMS] ⚠️ material_ready follow-up failed: {e}",
+              flush=True)
+        return None
+
+
 def handle_cron_tick(slot, window=None):
     """Run a scheduled slot: decide whether to send, and if so,
     load prompt, call Claude, send WhatsApp.
