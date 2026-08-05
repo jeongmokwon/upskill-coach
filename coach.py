@@ -2045,7 +2045,8 @@ def _site_page(title, body_html, desc=None, path="/", wide=False):
 
 _LEGAL_PATHS = {"Privacy Policy": "/privacy",
                 "Terms and Conditions": "/terms",
-                "SMS Signup": "/sms-signup"}
+                "SMS Signup": "/sms-signup",
+                "Screen Sharing Consent": "/screen-consent"}
 
 
 def _legal_page(title, body_html):
@@ -2472,7 +2473,11 @@ data at any time.</p>
 captured frames are processed transiently to generate text
 observations and are not stored. Documents and links you share are
 stored as extracted text to power your coaching. You can end a
-session at any time, and sharing is always initiated by you.</p>
+session at any time, and sharing is always initiated by you. Before
+your first session we present a dedicated
+<a href="/screen-consent">Screen Sharing Consent</a> describing
+exactly what is captured and kept; your acceptance is recorded with
+its date and document version.</p>
 
 <h2>Sharing</h2>
 <p><strong>We do not sell, rent, or share mobile information with third
@@ -2715,6 +2720,88 @@ _MY_STATUS_LABEL = {"none": "shared — walkthrough not started",
                     "validated": "walked through ✓"}
 
 
+SCREEN_CONSENT_VERSION = "2026-08-05"
+
+
+async def _screen_consent_page_handler(request):
+    body = f"""
+<h1>Screen Sharing Consent</h1>
+<div class="meta">Version {SCREEN_CONSENT_VERSION} · Green Gables
+Studio LLC</div>
+
+<p>Theo offers optional <b>study sessions</b>: you share your screen
+from your laptop so Theo can look at your study material with you
+while you talk. This document describes exactly what that involves.
+It is shown to you before your first session, and your acceptance is
+recorded with its date and this document's version.</p>
+
+<h2>What is captured, and when</h2>
+<ul>
+<li>Sessions only ever start when <b>you</b> click "화면 공유 시작"
+and choose what to share in your browser's picker. Theo can never
+open a session by itself.</li>
+<li>During a session, still frames of the shared screen are captured
+at meaningful moments — when you switch windows, when you stop
+scrolling, when you stay on one spot for a while, and when you send
+a chat message. This is <b>not continuous video</b>. No audio, no
+camera, and no keystrokes are captured.</li>
+<li>A visible indicator ("Theo가 보는 중") is shown for the whole
+session, and your browser shows its own sharing indicator too.</li>
+</ul>
+
+<h2>What happens to the frames</h2>
+<ul>
+<li>Each captured frame is sent, over an encrypted connection, to
+our AI model provider (Anthropic) to produce a short <b>written
+observation</b> of what is on screen — for example, which section of
+your document you are reading.</li>
+<li>The frame image is <b>discarded immediately after it is read</b>.
+It is never written to disk and never stored. What remains is the
+written observation only.</li>
+</ul>
+
+<h2>What we keep</h2>
+<ul>
+<li>The written observations from each session (text).</li>
+<li>Session records: when a session started and ended, and how many
+frames were captured.</li>
+<li>Your chat messages with Theo during the session, as part of your
+ongoing conversation history.</li>
+<li>Materials you upload separately are kept as extracted text, as
+described in our <a href="/privacy">Privacy Policy</a>.</li>
+</ul>
+
+<h2>Your control</h2>
+<ul>
+<li>End a session at any time with the 세션 종료 button; closing the
+tab or laptop also ends it within about a minute.</li>
+<li>You can simply never start a session — every other part of Theo
+works without screen sharing.</li>
+<li>You may request deletion of your session observations and any
+other data at any time by replying to any Theo message or emailing
+<a href="mailto:jeongmo.kwon@learningtheo.com">jeongmo.kwon@learningtheo.com</a>.</li>
+</ul>
+
+<p class="meta">This consent supplements our
+<a href="/privacy">Privacy Policy</a> and
+<a href="/terms">Terms</a>. If this document materially changes, you
+will be asked to review and accept the new version before your next
+session.</p>
+"""
+    return web.Response(text=_legal_page("Screen Sharing Consent", body),
+                        content_type="text/html")
+
+
+async def _session_consent_handler(request):
+    """Record the just-in-time acceptance (version-stamped)."""
+    import db
+    user_id, _tok = _my_auth(request)
+    if not user_id:
+        return web.Response(status=404, text="Not found")
+    db.record_consent(user_id, "screen_share", SCREEN_CONSENT_VERSION)
+    return web.json_response({"ok": True})
+
+
 async def _my_token_handler(request):
     """Operator-only: mint/fetch a user's magic link (CRON_SECRET
     auth, same convention as the other debug endpoints). This is how
@@ -2780,6 +2867,11 @@ async def _session_start_handler(request):
         body = await request.json()
     except Exception:
         body = {}
+    if not db.has_consent(user_id, "screen_share",
+                          SCREEN_CONSENT_VERSION):
+        return web.json_response(
+            {"consent_required": True,
+             "version": SCREEN_CONSENT_VERSION}, status=428)
     declared = (str(body.get("source") or "")).strip()[:300]
     sid = db.start_screen_session(user_id, declared_source=declared)
     # The coach acknowledges presence the moment the session opens —
@@ -3014,6 +3106,8 @@ async def _my_page_handler(request):
     user_id, token = _my_auth(request)
     if not user_id:
         return web.Response(status=404, text="Not found")
+    consented = db.has_consent(user_id, "screen_share",
+                               SCREEN_CONSENT_VERSION)
     rows = db.get_user_materials(user_id)
     items = ""
     for m in rows:
@@ -3073,6 +3167,21 @@ the image immediately</b>. Only the written observation is kept.</p>
          style="{_FIELD_STYLE}; max-width:420px">
   <button class="btn" id="ssn-start" style="margin-top:10px">화면 공유 시작</button>
 </div>
+<div id="ssn-consent" style="display:none; margin-top:12px; padding:16px 18px;
+     border:1px solid #ccc; border-radius:10px; background:#fafafa">
+  <div style="font-weight:700">시작 전에 한 가지만 — Theo가 화면을 어떻게 보는지</div>
+  <ul style="font-size:13.5px; line-height:1.7; margin:10px 0; padding-left:18px">
+    <li>세션은 <b>네가 시작할 때만</b> 열리고, 보는 동안 표시등이 항상 떠 있어요.</li>
+    <li>연속 녹화가 아니라 <b>의미 있는 순간의 정지 화면</b>만 캡처돼요 (창 전환,
+    스크롤 멈춤 등). 소리·카메라·키보드는 안 봐요.</li>
+    <li>캡처된 화면은 AI가 <b>읽는 즉시 삭제</b>되고, 글로 된 관찰만 남아요.</li>
+    <li>언제든 종료할 수 있고, 삭제 요청도 언제든 가능해요.</li>
+  </ul>
+  <div class="meta">자세한 내용:
+  <a href="/screen-consent" target="_blank" rel="noopener">Screen Sharing
+  Consent</a> (동의하면 이 문서 버전과 시각이 기록됩니다)</div>
+  <button class="btn" id="ssn-agree" style="margin-top:12px">동의하고 시작</button>
+</div>
 <div id="ssn-live" style="display:none; margin-top:12px; padding:14px 18px;
      border:2px solid #e8590c; border-radius:10px; background:#fff4ec">
   <div style="font-weight:700; color:#e8590c">● Theo가 보는 중</div>
@@ -3092,6 +3201,7 @@ the image immediately</b>. Only the written observation is kept.</p>
 <script>
 (function () {{
   var K = new URLSearchParams(location.search).get("k");
+  var CONSENTED = {str(consented).lower()};
   var sid = null, stream = null, video, small, sctx, prev = null;
   var lastUpload = 0, lastActivity = 0, lastBig = 0, dwelled = false;
   var settleQuiet = 0, hadScroll = false, timers = [];
@@ -3173,7 +3283,7 @@ the image immediately</b>. Only the written observation is kept.</p>
     document.getElementById("ssn-controls").style.display = "block";
   }}
 
-  document.getElementById("ssn-start").onclick = function () {{
+  function beginShare() {{
     navigator.mediaDevices.getDisplayMedia({{video: {{frameRate: 5}}}})
     .then(function (st) {{
       stream = st;
@@ -3201,7 +3311,26 @@ the image immediately</b>. Only the written observation is kept.</p>
       }}, 20000));
       setTimeout(function () {{ grabAndSend("start"); }}, 1200);
     }})
-    .catch(function (e) {{ status("공유가 시작되지 않았어요: " + e.message); }});
+    .catch(function (e) {{
+      var st = document.getElementById("ssn-status");
+      if (st) st.textContent = "공유가 시작되지 않았어요: " + e.message;
+    }});
+  }}
+
+  document.getElementById("ssn-start").onclick = function () {{
+    if (!CONSENTED) {{
+      document.getElementById("ssn-consent").style.display = "block";
+      return;
+    }}
+    beginShare();
+  }};
+
+  document.getElementById("ssn-agree").onclick = function () {{
+    post("/session/consent", {{}}).then(function () {{
+      CONSENTED = true;
+      document.getElementById("ssn-consent").style.display = "none";
+      beginShare();
+    }});
   }};
   function bubble(role, text) {{
     var d = document.createElement("div");
@@ -3484,6 +3613,8 @@ def start_ws_server():
         app.router.add_post("/session/frame", _session_frame_handler)
         app.router.add_post("/session/stop", _session_stop_handler)
         app.router.add_post("/session/message", _session_message_handler)
+        app.router.add_get("/screen-consent", _screen_consent_page_handler)
+        app.router.add_post("/session/consent", _session_consent_handler)
         app.router.add_post("/session/message/stream", _session_stream_handler)
         app.router.add_post("/debug/material", _material_admin_handler)
         app.router.add_get("/notes", _notes_handler)

@@ -498,6 +498,22 @@ def init_db():
         conn.cursor().execute(
             "CREATE INDEX IF NOT EXISTS idx_ssn_user ON screen_sessions (user_id, started_at)"
         )
+        # Consent records — the compliance artifact for sensitive
+        # features (screen sharing first). One row per (user, doc,
+        # version) acceptance, timestamped. Append-only: a new doc
+        # version requires a fresh row.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS user_consents (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                doc TEXT NOT NULL,
+                version TEXT NOT NULL,
+                ts TEXT NOT NULL
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_consents_user ON user_consents (user_id, doc)"
+        )
         # Commit BEFORE the ALTER-with-rollback migrations below.
         # Those loops rollback when a column already exists (which is
         # every boot after the first), and an uncommitted CREATE TABLE
@@ -856,6 +872,16 @@ def init_db():
                 ended_at TEXT,
                 frames INTEGER NOT NULL DEFAULT 0
             );
+
+            CREATE TABLE IF NOT EXISTS user_consents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                doc TEXT NOT NULL,
+                version TEXT NOT NULL,
+                ts TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_consents_user ON user_consents (user_id, doc);
 
             CREATE INDEX IF NOT EXISTS idx_ssn_user ON screen_sessions (user_id, started_at);
 
@@ -2025,6 +2051,37 @@ def regenerate_user_token(user_id):
 # ─── Screen co-viewing sessions ─────────────────────────────────────
 
 SESSION_DEAD_AFTER_S = 60
+
+
+def record_consent(user_id, doc, version):
+    """Record an explicit acceptance (just-in-time consent). The row
+    IS the compliance artifact: who, which document, which version,
+    when. Idempotent per (user, doc, version)."""
+    if has_consent(user_id, doc, version):
+        return False
+    conn = get_conn()
+    _execute(conn,
+        f"INSERT INTO user_consents (user_id, doc, version, ts) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P})",
+        (user_id, doc, version, datetime.now().isoformat()))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "consent_accepted",
+              {"doc": doc, "version": version}, source="web")
+    return True
+
+
+def has_consent(user_id, doc, version):
+    """True if this user accepted THIS version of the document. A
+    version bump reopens the question by construction."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT COUNT(*) AS n FROM user_consents "
+        f"WHERE user_id = {_P} AND doc = {_P} AND version = {_P}",
+        (user_id, doc, version))
+    row = _fetchone(cur)
+    conn.close()
+    return bool(row and row["n"])
 
 
 def start_screen_session(user_id, declared_source=""):

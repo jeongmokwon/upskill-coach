@@ -289,6 +289,23 @@ def hit_json(handler, path, body):
     return r, (json.loads(r.text) if r.status == 200 else {})
 
 
+# ── JIT consent gates the session start ─────────────────────────────
+print("consent gate")
+r = hit(coach._session_start_handler, f"/session/start?k={tok}",
+        {"source": "x"})
+check("no consent on record → 428 with the required version",
+      r.status == 428
+      and json.loads(r.text)["version"] == coach.SCREEN_CONSENT_VERSION)
+r = hit(coach._session_consent_handler, f"/session/consent?k={tok}", {})
+check("acceptance recorded once, version-stamped, evented",
+      r.status == 200
+      and db.has_consent(U, "screen_share", coach.SCREEN_CONSENT_VERSION)
+      and db.record_consent(U, "screen_share",
+                            coach.SCREEN_CONSENT_VERSION) is False
+      and len(events_of("consent_accepted")) == 1)
+check("a version bump reopens the question",
+      not db.has_consent(U, "screen_share", "2099-01-01"))
+
 r, j = hit_json(coach._session_start_handler,
                 f"/session/start?k={tok}", {"source": "정리본"})
 sid5 = j["session_id"]
