@@ -2892,6 +2892,34 @@ async def _activate_handler(request):
               f"the next evening cron opens their onboarding.\n"))
 
 
+async def _reset_user_handler(request):
+    """Operator-only, DESTRUCTIVE: wipe a user back to birth (keeps
+    phone + email + magic token; everything else gone, consent
+    included). Requires confirm=<user_id> typed again.
+
+    POST /debug/reset-user?secret=..&user_id=jeongmo&confirm=jeongmo
+    """
+    import db
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret", "").strip()
+                or request.query.get("secret", "").strip())
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+    user_id = (request.query.get("user_id") or "").strip()
+    confirm = (request.query.get("confirm") or "").strip()
+    if not user_id or confirm != user_id:
+        return web.Response(
+            status=400,
+            text="confirm=<user_id> must be repeated exactly — this "
+                 "wipes the user's entire history\n")
+    counts = db.reset_user(user_id)
+    wiped = {k: v for k, v in counts.items()
+             if isinstance(v, int) and v}
+    return web.Response(
+        text=f"reset {user_id} — kept phone/email/token; wiped: "
+             f"{json.dumps(wiped)}\n")
+
+
 async def _bind_phone_handler(request):
     """Operator-only: bind a phone number to a user (CRON_SECRET).
     The multi-user backfill path — and the guard against silent
@@ -3721,6 +3749,7 @@ def start_ws_server():
         app.router.add_get("/my", _my_page_handler)
         app.router.add_get("/debug/my-link", _my_token_handler)
         app.router.add_post("/debug/bind-phone", _bind_phone_handler)
+        app.router.add_post("/debug/reset-user", _reset_user_handler)
         app.router.add_get("/debug/signups", _signups_handler)
         app.router.add_post("/debug/activate", _activate_handler)
         app.router.add_post("/debug/email-my-link", _email_my_link_handler)

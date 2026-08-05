@@ -97,8 +97,11 @@ similarly, that alone disqualifies the opener.
 
 ## Hard SMS rules (every slot, no exceptions)
 
-1. **Max 2 messages, each under 160 characters.** Real SMS-shaped. No
-   walls of text.
+1. **ONE message, under 160 characters, is the default.** A second
+   bubble (separated by `---`) is the rare exception, only when two
+   genuinely separate thoughts demand it — replies take seconds to
+   generate, and two bubbles landing at once reads as a burst, not
+   a conversation.
 
 ## Recent conversation context
 

@@ -1832,6 +1832,59 @@ def set_agreed_bite(user_id, bite_text, source="llm_marker",
               {"bite": bite_text, "decision_id": decision_id}, source=source)
 
 
+_USER_SCOPED_TABLES = (
+    "messages", "events", "observations", "screen_sessions",
+    "user_materials", "user_notes", "sequence_plans", "learning_paths",
+    "user_schedule", "user_profile_briefs", "availability_snapshots",
+    "insights", "llm_calls", "user_consents", "user_state", "sessions",
+)
+
+
+def reset_user(user_id):
+    """Wipe a user back to birth: every row in every user-scoped
+    table is deleted, then a minimal profile row is recreated keeping
+    ONLY phone, email, and their magic-link token (the /my link they
+    already have keeps working; consent is deliberately wiped so the
+    JIT flow runs again). Returns {table: rows_deleted}.
+
+    Destructive by design — the operator endpoint requires an
+    explicit confirmation. Built for pilot #0's own account so the
+    founder can walk the real new-user flow end to end."""
+    prof = get_user_profile_by_id(user_id) or {}
+    keep_phone = (prof.get("phone") or "").strip()
+    keep_email = (prof.get("email") or "").strip()
+    conn = get_conn()
+    counts = {}
+    for t in _USER_SCOPED_TABLES:
+        try:
+            cur = _execute(conn,
+                f"DELETE FROM {t} WHERE user_id = {_P}", (user_id,))
+            counts[t] = cur.rowcount
+        except Exception as e:
+            conn.rollback()
+            counts[t] = f"skipped ({e})"
+    _execute(conn, f"DELETE FROM user_profiles WHERE user_id = {_P}",
+             (user_id,))
+    conn.commit()
+    conn.close()
+    ensure_user_profile_row(user_id)
+    if keep_phone:
+        conn = get_conn()
+        _execute(conn,
+            f"UPDATE user_profiles SET phone = {_P}, email = {_P} "
+            f"WHERE user_id = {_P}",
+            (keep_phone, keep_email, user_id))
+        conn.commit()
+        conn.close()
+    log_event(user_id, "user_reset",
+              {"kept": {"phone": bool(keep_phone),
+                        "email": bool(keep_email)},
+               "deleted": {k: v for k, v in counts.items()
+                           if isinstance(v, int) and v}},
+              source="admin")
+    return counts
+
+
 def set_user_phone(user_id, phone, source="operator"):
     """Bind a phone (E.164) to a user — THE identity edge for inbound
     routing and outbound sends. Refuses a number already bound to a
