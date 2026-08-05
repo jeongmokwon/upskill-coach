@@ -342,5 +342,42 @@ check("the final message's handler answers, once, with all in view",
       and len([e for e in db.get_events("bursty", limit=30)
                if e["kind"] == "sms_out"]) == 1)
 
+# ── 10. prefix strip + auto link delivery ────────────────────────────
+print("10) prefix strip + link email")
+_steps, out = _sms._process_step_marker(
+    "bursty", "[수요일 14:51] 그럼 시작하자\n[STEP: connect@1]")
+check("self-imitated time prefixes are stripped from outbound",
+      out == "그럼 시작하자")
+_steps, out2 = _sms._process_step_marker(
+    "bursty", "[A] 항목 얘기부터 하자면 그건 좀 달라")
+check("but a bracket the coach legitimately opens with mid-content "
+      "only loses the annotation shape, not meaning",
+      "항목 얘기부터" in out2)
+
+os.environ["RESEND_API_KEY"] = "re_test"
+emailer.urllib.request.urlopen = FakeHTTP
+LK = "linkless"
+db.ensure_user_profile_row(LK)
+db.set_user_email(LK, "lk@x.co")
+db.set_agreed_goal(LK, "g"); db.save_learning_path(LK, "d", "p", "c")
+db.set_ignition_marker(LK, "m")
+_sms.ensure_my_link_delivered(LK)
+check("walkthrough focus + email on file + nothing sent → email fires",
+      any(e["kind"] == "my_link_emailed"
+          for e in db.get_events(LK, limit=20)))
+_sms.ensure_my_link_delivered(LK)
+check("idempotent — second call sends nothing new",
+      len([e for e in db.get_events(LK, limit=20)
+           if e["kind"] == "my_link_emailed"]) == 1)
+check("and the walkthrough label now points at the inbox",
+      "point them at their INBOX" in _sms._walkthrough_label(LK))
+GOALLESS = "goalless"
+db.ensure_user_profile_row(GOALLESS)
+db.set_user_email(GOALLESS, "gl@x.co")
+_sms.ensure_my_link_delivered(GOALLESS)
+check("a user whose focus is still the goal gets no email yet",
+      not [e for e in db.get_events(GOALLESS, limit=20)
+           if e["kind"] == "my_link_emailed"])
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
