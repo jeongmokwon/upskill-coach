@@ -209,7 +209,8 @@ check("materials block carries both readings, user's words on top",
       and "THEIR words win" in p_walk)
 check("capability stock is in the prompt (offers draw only on it)",
       "the only stock your promises draw on" in p_walk
-      and "can NOT (today): see their screen" in p_walk)
+      and "sit with them while they study" in p_walk
+      and "can NOT (today): see anything outside a session" in p_walk)
 db.update_material_walkthrough(_wm, status="validated")
 p_offer, _ = sms._build_system_prompt("evening", U6)
 check("validated → focus moves to the offer, built FROM the walkthrough",
