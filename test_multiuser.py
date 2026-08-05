@@ -208,6 +208,33 @@ r = hit(coach._activate_handler,
 check("no SMS consent → activation refused (carrier promise is structural)",
       r.status == 412 and db.get_user_by_phone("+15550007002") is None)
 
+# ── 6b. manual trigger targets one user, scheduled hits the roster ───
+print("6b) per-user trigger")
+os.environ["CRON_SECRET"] = "sek"
+
+
+def hit_q(handler, path):
+    async def go():
+        return await handler(make_mocked_request("POST", path))
+    return asyncio.run(go())
+
+
+import time as _t
+
+before = len([r for r in db.get_events("mallory", limit=100)
+              if r["kind"] in ("cron_tick", "sms_out")])
+r = hit_q(coach._sms_cron_tick_handler,
+          "/sms/cron-tick?secret=sek&slot=evening&user_id=alice")
+_t.sleep(0.4)   # executor thread
+after = len([r for r in db.get_events("mallory", limit=100)
+             if r["kind"] in ("cron_tick", "sms_out")])
+check("targeted trigger runs alice only — mallory untouched",
+      r.status == 200 and json.loads(r.text)["user_id"] == "alice"
+      and after == before)
+r = hit_q(coach._sms_cron_tick_handler,
+          "/sms/cron-tick?secret=sek&slot=evening&user_id=ghost99")
+check("unknown target → 404, nothing fires", r.status == 404)
+
 # ── 7. reset: back to birth, keeping only the identity edge ──────────
 print("7) reset")
 db.set_agreed_goal("grace1", "g")

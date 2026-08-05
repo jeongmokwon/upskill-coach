@@ -857,8 +857,26 @@ async def _sms_cron_tick_handler(request):
     if slot not in sms.SLOTS:
         return web.Response(status=400, text=f"slot must be one of {sms.SLOTS}")
 
-    print(f"[SMS] cron-tick slot={slot}", flush=True)
+    # Optional single-user targeting for MANUAL triggers. Since the
+    # M2 fan-out, a bare trigger fires for the whole roster — which
+    # is what the scheduled crons want and exactly what an operator
+    # poking one user does not: observed need the same day the
+    # fan-out shipped ("남편한테까지 가는 거 아닌가?"). With
+    # user_id, only that user's slot runs.
+    target = (request.query.get("user_id") or "").strip()
+    if target:
+        import db
+        phone = sms._phone_for(target)
+        if not phone:
+            return web.Response(status=404,
+                                text=f"no phone bound for {target}")
+        print(f"[SMS] cron-tick slot={slot} → {target} only", flush=True)
+        asyncio.get_event_loop().run_in_executor(
+            None, sms._cron_tick_for_user, target, phone, slot)
+        return web.json_response({"ok": True, "slot": slot,
+                                  "user_id": target})
 
+    print(f"[SMS] cron-tick slot={slot} (all active users)", flush=True)
     # Run the LLM + send in a thread — same reasoning as inbound.
     asyncio.get_event_loop().run_in_executor(
         None, sms.handle_cron_tick, slot
