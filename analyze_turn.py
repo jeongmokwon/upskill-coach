@@ -403,6 +403,18 @@ def _apply(user_id, p, llm_call_id):
                                    confidence=conf)
             applied.append(f"ignition_marker({status})")
 
+    named = p.get("material_named") or {}
+    if (named.get("title") or "").strip() \
+            and not db.get_user_materials(user_id):
+        mid = db.add_user_material(
+            user_id, "named",
+            title=named["title"].strip()[:200], source="analyze")
+        if (named.get("description") or "").strip():
+            db.update_material_walkthrough(
+                mid, user_description=named["description"].strip(),
+                status="in_progress", source="analyze")
+        applied.append("material_named")
+
     mats = db.get_user_materials(user_id)
     if mats:
         m = mats[0]

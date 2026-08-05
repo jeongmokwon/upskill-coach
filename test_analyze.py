@@ -251,6 +251,35 @@ check("idempotent — re-running the same payload writes nothing new",
       and len([r for r in db.get_events(W, limit=50)
                if r["kind"] == "walkthrough_validated"]) == 1)
 
+# ── 3d. no material exists → the agreed first material gets a row ────
+print("3d) named material creation")
+N = "u_nomat"
+db.ensure_user_profile_row(N)
+db.save_sms_message(N, "user", "자료가 딱히 없어", "in")
+db.save_sms_message(N, "assistant", "그럼 첫 자료를 정하자", "out")
+db.save_sms_message(N, "user",
+                    "multimodal pipeline 개념 가이드 같은 걸 네가 "
+                    "만들어주면 그걸로 하자", "in")
+ToolFake.payload = {
+    "material_named": {"title": "Multimodal pipeline 개념 가이드",
+                       "description": "저장 방식, episode 묶기, "
+                                      "inference 타이밍의 판단 기준"},
+    "step_completed": "not_applicable", "step_reason": "-",
+}
+analyze_turn.analyze(N)
+_nm = db.get_user_materials(N)
+check("the agreed first material becomes a named row, in_progress",
+      len(_nm) == 1 and _nm[0]["kind"] == "named"
+      and _nm[0]["title"].startswith("Multimodal")
+      and _nm[0]["walkthrough_status"] == "in_progress")
+ToolFake.payload = {
+    "material_named": {"title": "다른 제목"},
+    "step_completed": "not_applicable", "step_reason": "-",
+}
+analyze_turn.analyze(N)
+check("a second naming while one exists is ignored (no dup anchor)",
+      len(db.get_user_materials(N)) == 1)
+
 # ── 4. step judgment rides the same call ─────────────────────────────
 print("4) step judgment")
 db.save_sequence_plan(U, [
