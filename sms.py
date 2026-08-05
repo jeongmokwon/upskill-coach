@@ -1583,9 +1583,33 @@ def _resolve_user_from_phone(from_number):
     return user_id
 
 
+# Per-user reply locks: a user who sends three texts in a burst gets
+# ONE answer that has read all three, not three interleaved replies
+# (observed live: two coach replies 19 seconds apart to a two-text
+# burst). In-process locks are sufficient — the service runs as a
+# single instance.
+_inbound_locks = {}
+_inbound_locks_guard = __import__("threading").Lock()
+
+
+def _inbound_lock(user_id):
+    with _inbound_locks_guard:
+        if user_id not in _inbound_locks:
+            _inbound_locks[user_id] = __import__("threading").Lock()
+        return _inbound_locks[user_id]
+
+
 def handle_inbound(from_number, body):
     """Process an inbound SMS. Returns the text we replied with (or
-    None if we chose not to reply)."""
+    None if we chose not to reply).
+
+    Burst folding: the message is saved immediately, then the reply
+    runs under a per-user lock with two freshness checks — on entry
+    (a newer message already exists → this handler folds; the newer
+    one answers everything) and after generation (a newer message
+    arrived WHILE generating → the drafted reply is discarded rather
+    than sent stale). Every burst thus gets exactly one reply,
+    written with the full burst in view."""
     user_id = _resolve_user_from_phone(from_number)
     if not user_id:
         # Unknown sender is still an event (brief: nothing unrecorded).
@@ -1598,6 +1622,20 @@ def handle_inbound(from_number, body):
     # build context for our reply.
     db.save_sms_message(user_id, "user", body, "in")
     db.log_event(user_id, "sms_in", {"text": body}, source="sms")
+    my_msg_id = db.get_last_user_message_id(user_id)
+
+    with _inbound_lock(user_id):
+        return _reply_to_inbound(user_id, from_number, body, my_msg_id)
+
+
+def _reply_to_inbound(user_id, from_number, body, my_msg_id):
+    latest = db.get_last_user_message_id(user_id)
+    if latest != my_msg_id:
+        # A newer message arrived while we waited for the lock — its
+        # handler will answer the whole burst.
+        db.log_event(user_id, "inbound_folded",
+                     {"text": body[:120]}, source="sms")
+        return None
 
     # Meta-commands short-circuit the LLM.
     if _is_command(body, SKIP_TOKENS):
@@ -1649,6 +1687,15 @@ def handle_inbound(from_number, body):
         user_id, system_prompt, history, "inbound_reply",
         max_tokens=400, prompt_versions=prompt_versions)
     if reply_text is None:
+        return None
+    if db.get_last_user_message_id(user_id) != my_msg_id:
+        # They typed again while we were generating: this draft never
+        # saw that message. Sending it would answer the past —
+        # discard, and let the newer handler (waiting on the lock)
+        # answer everything.
+        db.log_event(user_id, "reply_discarded_stale",
+                     {"draft": reply_text[:160],
+                      "llm_call_id": llm_call_id}, source="sms")
         return None
     _check_plan_deviation(user_id, steps)
     # Field fills above may have completed the checklist — code, not

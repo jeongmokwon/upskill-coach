@@ -1496,6 +1496,18 @@ def save_sms_message(user_id, role, content, direction, channel="sms"):
     conn.close()
 
 
+def get_last_user_message_id(user_id):
+    """Row id of the user's newest inbound — the freshness marker the
+    burst-folding logic compares against."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT MAX(id) AS m FROM messages "
+        f"WHERE user_id = {_P} AND role = 'user'", (user_id,))
+    row = _fetchone(cur)
+    conn.close()
+    return row["m"] if row else None
+
+
 def get_recent_sms_messages(user_id, limit=20, since=None,
                             with_time=False):
     """Return last N SMS messages for `user_id`, oldest-first.
