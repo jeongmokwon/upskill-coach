@@ -2896,6 +2896,8 @@ async def _activate_handler(request):
     try:
         db.ensure_user_profile_row(user_id)
         db.set_user_phone(user_id, row["phone"], source="activation")
+        if (row.get("name") or "").strip():
+            db.set_user_name(user_id, row["name"], source="activation")
     except ValueError as e:
         return web.Response(status=409, text=str(e))
     email_line = ""

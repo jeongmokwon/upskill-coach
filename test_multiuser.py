@@ -276,5 +276,22 @@ check("onboarding is back to square one",
 check("still on the cron roster (phone kept, status default active)",
       "grace1" in {u["user_id"] for u in db.get_active_users()})
 
+# ── 8. activation plants the real name ───────────────────────────────
+print("8) names")
+import sms as _sms  # noqa: E402
+
+db.save_sms_signup("+15550007003", name="Hana", email="h@x.co",
+                   consent_checkins=True)
+_sid3 = [r for r in db.get_pending_signups()
+         if r["phone"] == "+15550007003"][0]["id"]
+hit(coach._activate_handler,
+    f"/debug/activate?secret=sek&signup_id={_sid3}&user_id=hana1")
+check("activation plants the signup's real name",
+      (db.get_user_profile_by_id("hana1") or {}).get("user_name")
+      == "Hana")
+p3, _ = _sms._build_system_prompt("nudge", "hana1")
+check("an activated friend is greeted by name, never by id",
+      "Hana" in p3 and "hana1" not in p3)
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

@@ -1500,6 +1500,7 @@ def _process_step_marker(user_id, text):
         steps.append({"tag": tag, "intensity": intensity})
     text = _STEP_MARKER_RE.sub("", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    text = re.sub(r"(\n?---\s*)+$", "", text).strip()
     return steps, text
 
 
