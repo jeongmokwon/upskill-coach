@@ -183,8 +183,10 @@ db.ensure_user_profile_row(U6)
 db.set_agreed_goal(U6, "g"); db.save_learning_path(U6, "d", "p", "c")
 db.set_ignition_marker(U6, "m")
 p_show, _ = sms._build_system_prompt("evening", U6)
-check("no material yet → focus is getting them to SHOW the thing",
-      "SHOW you the thing they actually study from" in p_show
+check("no material yet → the label reads the situation, three ways",
+      "FIRST read the conversation" in p_show
+      and "There IS no material yet" in p_show
+      and "template parrot" in p_show
       and "do NOT send that link over SMS" in p_show)
 db.log_event(U6, "my_link_emailed", {"to": "x@y.z"}, source="emailer")
 p_mail, _ = sms._build_system_prompt("evening", U6)

@@ -890,7 +890,7 @@ def _walkthrough_label(user_id):
     if not mats:
         emailed = any(e["kind"] == "my_link_emailed"
                       for e in db.get_events(user_id, limit=300))
-        where = ("You already emailed them their private page link — "
+        where = ("you already emailed them their private page link — "
                  "point them at their INBOX ('메일함 봐봐, 내가 링크 "
                  "하나 보내놨어'), never paste the link itself into a "
                  "text"
@@ -898,14 +898,27 @@ def _walkthrough_label(user_id):
                  "their /my page takes a file or a link, but do NOT "
                  "send that link over SMS — it reaches them by email")
         return (
-            "get them to SHOW you the thing they actually study from. "
-            "Bridge from what they already told you, and give the "
-            "honest reason — seeing it makes you precise: '네가 얘기한 "
-            "그 자료, 직접 보면 내가 훨씬 정확해질 것 같은데'. "
-            + where +
-            " (if they study from something they can't share — a "
-            "book, a course — just have them name it and tell you "
-            "what it covers)")
+            "nothing is registered yet. FIRST read the conversation "
+            "for which situation this actually is — never assume:\n"
+            "  (a) They HAVE a material they haven't shown (they "
+            "mentioned notes, a file, a video they study from) → ask "
+            "to SEE it, with the honest reason that seeing it makes "
+            "you precise; " + where + ".\n"
+            "  (b) They study from something unsharable (a book, a "
+            "course, an app) → have them NAME it and tell you what "
+            "it covers — the name becomes the anchor.\n"
+            "  (c) There IS no material yet — they said so. Do NOT "
+            "recite the ask-to-see line at them (observed live: the "
+            "coach said '네가 얘기한 그 자료, 직접 보면—' to a user "
+            "who had JUST said they have nothing — a template parrot, "
+            "and it reads as not listening). The walkthrough then "
+            "anchors on what the first material SHOULD BE: agree it "
+            "together ('그럼 첫 자료를 정하자') — something they will "
+            "bring, or something YOU will build for them piece by "
+            "piece in this very conversation (drafting a concept "
+            "guide is within your stock: you know things). Once "
+            "agreed, that named thing IS the material and the "
+            "walkthrough continues on it")
     m = mats[0]
     named = m.get("title") or "their material"
     if db.get_active_screen_session(user_id):
