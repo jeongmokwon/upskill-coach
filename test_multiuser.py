@@ -145,5 +145,68 @@ check("a crashing user is recorded and the rest still run",
 check("empty roster (env unset too) skips with a reason",
       True)  # covered implicitly; env pair is set in this suite
 
+# ── 6. activation pipeline (M3) ──────────────────────────────────────
+print("6) activation")
+import asyncio  # noqa: E402
+import json  # noqa: E402
+
+import coach  # noqa: E402
+import emailer  # noqa: E402
+from aiohttp.test_utils import make_mocked_request  # noqa: E402
+
+os.environ["CRON_SECRET"] = "sek"
+
+
+class FakeHTTP:
+    def __init__(self, req, timeout=None):
+        pass
+
+    def __enter__(self):
+        class R:
+            @staticmethod
+            def read():
+                return b'{"id": "re_w"}'
+        return R()
+
+    def __exit__(self, *a):
+        return False
+
+
+emailer.urllib.request.urlopen = FakeHTTP
+os.environ["RESEND_API_KEY"] = "re_test"
+
+
+def hit(handler, path):
+    async def go():
+        return await handler(make_mocked_request("POST", path))
+    return asyncio.run(go())
+
+
+db.save_sms_signup("+15550007001", name="Grace", email="g@x.co",
+                   consent_checkins=True)
+db.save_sms_signup("+15550007002", name="NoConsent", email="n@x.co",
+                   consent_checkins=False)
+sid_ok = db.get_pending_signups()[0]["id"]
+sid_no = db.get_pending_signups()[1]["id"]
+
+r = hit(coach._activate_handler,
+        f"/debug/activate?secret=sek&signup_id={sid_ok}&user_id=grace1")
+check("one click: profile + phone + email + active + event",
+      r.status == 200
+      and db.get_user_by_phone("+15550007001") == "grace1"
+      and db.get_sms_signup(sid_ok)["status"] == "active"
+      and (db.get_user_profile_by_id("grace1") or {}).get("email") == "g@x.co"
+      and any(e["kind"] == "user_activated"
+              for e in db.get_events("grace1", limit=10)))
+check("activated user joins the cron roster immediately",
+      "grace1" in {u["user_id"] for u in db.get_active_users()})
+r = hit(coach._activate_handler,
+        f"/debug/activate?secret=sek&signup_id={sid_ok}&user_id=grace2")
+check("re-activating the same signup is refused", r.status == 409)
+r = hit(coach._activate_handler,
+        f"/debug/activate?secret=sek&signup_id={sid_no}&user_id=nope1")
+check("no SMS consent → activation refused (carrier promise is structural)",
+      r.status == 412 and db.get_user_by_phone("+15550007002") is None)
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
