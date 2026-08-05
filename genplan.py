@@ -275,11 +275,41 @@ def _validate(payload, user_text=None, require_profile=False):
     return errors
 
 
+def _materials_section(user_id):
+    """What the user actually studies from — the walkthrough's
+    output. Absent for pre-materials users ('' renders nothing).
+    The digest is Theo's read; user_description/wants are the
+    user's own account and outrank it. PR 5 of the walkthrough
+    arc: before this, plan generation was blind to the very
+    materials the offer is built on."""
+    mats = db.get_user_materials(user_id)
+    if not mats:
+        return ""
+    lines = ["\n\n---\n\n## Their materials (from the walkthrough — "
+             "the user's words outrank the digest)"]
+    for m in mats[:5]:
+        head = m.get("title") or m.get("source_url") or m["kind"]
+        lines.append(f"\n### {head} ({m['kind']}, walkthrough: "
+                     f"{m['walkthrough_status']})")
+        if m.get("digest"):
+            lines.append(f"- Theo's read: {m['digest']}")
+        if m.get("user_description"):
+            lines.append(f"- Their description: {m['user_description']}")
+        for w in (m.get("wants") or []):
+            q = (w.get("quote") or "").strip()
+            mn = (w.get("meaning") or "").strip()
+            if q:
+                lines.append(f"- They said: \"{q}\""
+                             + (f" → {mn}" if mn else ""))
+    return "\n".join(lines)
+
+
 def _build_system(user_id):
     prior, h_prior = sms._read_prompt_versioned("prior")
     phase = db.get_user_phase(user_id)
     path = db.get_current_path(user_id) or {}
     sched = db.get_user_schedule(user_id) or {}
+    prof = db.get_user_profile_by_id(user_id) or {}
     deliverables = (
         f"- Agreed goal (their own words): {phase['agreed_goal']}\n"
         f"- Path: {path.get('direction', '?')} | {path.get('project', '?')}"
@@ -287,7 +317,9 @@ def _build_system(user_id):
         f"- First bite: {phase['agreed_first_bite']}\n"
         f"- Their ignition marker (the sequence's terminal condition): "
         f"{phase['ignition_marker']}\n"
-        f"- Agreed messaging windows: {sched.get('raw_text', '?')}"
+        f"- Agreed messaging windows: {sched.get('raw_text', '?')}\n"
+        f"- The standing offer (what Theo committed to keep doing): "
+        f"{prof.get('agreed_offer') or '?'}"
     )
     system = f"""You are the planning layer of Theo, an AI learning coach. A new
 user has just completed onboarding. Read their whole onboarding
@@ -353,9 +385,9 @@ moments, not a monologue outline.
 
 ---
 
-## What onboarding agreed (the five fields)
+## What onboarding agreed
 
-{deliverables}"""
+{deliverables}{_materials_section(user_id)}"""
     return system, {"prior": h_prior}
 
 
@@ -542,7 +574,7 @@ reasons and the trajectory.
 
 ---
 
-{notes_mod.render_notes_block(user_id) or "(no notes yet)"}
+{notes_mod.render_notes_block(user_id) or "(no notes yet)"}{_materials_section(user_id)}
 
 ---
 

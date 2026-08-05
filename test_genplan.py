@@ -135,6 +135,25 @@ check("call carried prior + vocabulary + deliverables + tool forcing",
       and "make an app with ML" in sys_prompt
       and FakeAnthropic.seen[0]["tool_choice"]["name"] == "submit_initial_plan")
 
+# ── PR 5: the walkthrough's output feeds the generation ──────────────
+_gm = db.add_user_material(U, "file", title="정리본.docx",
+                           extracted_text="...")
+db.set_material_digest(_gm, "3 sections, 41 recall items")
+db.update_material_walkthrough(
+    _gm, user_description="업무에서 정리한 파일",
+    wants=[{"quote": "바로 대답하고 싶어", "meaning": "recall"}],
+    status="validated")
+db.set_agreed_offer(U, "매일 저녁 질문 하나씩")
+sys2, _ = genplan._build_system(U)
+check("materials section: digest + user's words + status ride along",
+      "Their materials" in sys2 and "41 recall items" in sys2
+      and "바로 대답하고 싶어" in sys2 and "validated" in sys2)
+check("the standing offer is a deliverable the plan must serve",
+      "매일 저녁 질문 하나씩" in sys2)
+check("a materials-less user renders no materials section",
+      "Their materials" not in genplan._build_system("hub2")[0]
+      or db.get_user_materials("hub2"))
+
 # ── 2. invalid → feedback retry → valid ──────────────────────────────
 print("2) retry")
 bad = json.loads(json.dumps(VALID))
