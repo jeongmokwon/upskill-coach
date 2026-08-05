@@ -1948,6 +1948,16 @@ def set_user_status(user_id, status, source="operator"):
               source=source)
 
 
+def set_user_name(user_id, name, source="operator"):
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET user_name = {_P} WHERE user_id = {_P}",
+        (name.strip(), user_id))
+    conn.commit()
+    conn.close()
+
+
 def set_user_email(user_id, email, source="operator"):
     ensure_user_profile_row(user_id)
     conn = get_conn()

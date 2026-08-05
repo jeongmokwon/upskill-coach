@@ -403,8 +403,17 @@ def _build_placeholders(user_id):
     """
     profile = db.get_user_profile_by_id(user_id) or {}
     phase_state = db.get_user_phase(user_id)
+    # An account id is NOT a name. user_name defaults to the user_id
+    # at row creation, and rendering it greeted the founder with
+    # "안녕 jeongmo" — with generated ids that becomes "안녕 u_135".
+    raw_name = (profile.get("user_name") or "").strip()
+    known_name = raw_name if raw_name and raw_name != user_id else ""
     return {
-        "user_name": profile.get("user_name") or "you",
+        "user_name": known_name or "the user",
+        "name_line": known_name or
+            "(not known yet — NEVER call them by an account id or an "
+            "invented name; going nameless is natural in Korean, and "
+            "if a name would help, asking for one is allowed)",
         "goal": profile.get("goal") or "(not set)",
         "studying": profile.get("studying") or "(not set)",
         "recent_insights": _format_recent_insights(user_id),
@@ -1500,6 +1509,7 @@ def _process_step_marker(user_id, text):
         steps.append({"tag": tag, "intensity": intensity})
     text = _STEP_MARKER_RE.sub("", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    text = re.sub(r"(\n?---\s*)+$", "", text).strip()
     return steps, text
 
 

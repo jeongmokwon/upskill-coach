@@ -276,5 +276,32 @@ check("onboarding is back to square one",
 check("still on the cron roster (phone kept, status default active)",
       "grace1" in {u["user_id"] for u in db.get_active_users()})
 
+# ── 8. an account id is not a name ───────────────────────────────────
+print("8) name leak")
+import sms as _sms  # noqa: E402
+
+db.ensure_user_profile_row("u_135")
+prompt, _v = _sms._build_system_prompt("nudge", "u_135")
+check("the account id appears NOWHERE in the prompt",
+      "u_135" not in prompt)
+check("the prompt says the name is unknown and forbids inventing one",
+      "not known yet" in prompt and "account id" in prompt)
+db.set_user_name("u_135", "Grace")
+prompt2, _v = _sms._build_system_prompt("nudge", "u_135")
+check("a real name, once known, renders as the name",
+      "Grace" in prompt2 and "not known yet" not in prompt2)
+db.save_sms_signup("+15550007003", name="Hana", email="h@x.co",
+                   consent_checkins=True)
+_sid3 = [r for r in db.get_pending_signups()
+         if r["phone"] == "+15550007003"][0]["id"]
+hit(coach._activate_handler,
+    f"/debug/activate?secret=sek&signup_id={_sid3}&user_id=hana1")
+check("activation plants the signup's real name",
+      (db.get_user_profile_by_id("hana1") or {}).get("user_name")
+      == "Hana")
+p3, _ = _sms._build_system_prompt("nudge", "hana1")
+check("an activated friend is greeted by name, never by id",
+      "Hana" in p3 and "hana1" not in p3)
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

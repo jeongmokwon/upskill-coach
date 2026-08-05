@@ -3,9 +3,9 @@ brief, so everything factual about this person sits together near the
 top. It used to sit two thirds of the way down sms_shared.md, far from
 the brief that describes the same person. -->
 
-## What you know about {user_name}
+## What you know about this user
 
-- Name: {user_name}
+- Name: {name_line}
 - **AGREED GOAL (authoritative — agreed in your discovery
   conversations, persisted): {agreed_goal}**
 - Current phase: **{phase}**  (`discovery` or `first_bite`)
