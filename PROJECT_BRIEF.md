@@ -86,8 +86,9 @@ If a task seems to require one of these, stop and flag it instead of building it
 [User phone + desktop]          featurization       │
  SMS (toll-free via Twilio) ◄──► job (LLM →         ▼
  coach conversation             LearnerState)   raw blob store
- (desktop surface: §3.2)                        (Cloudflare R2:
-                                                 screenshots, dumps)
+ (desktop surface: §3.2)                        (SUPERSEDED: unused —
+                                                 frames are ephemeral,
+                                                 never stored; §8.3)
 ```
 
 ### 3.1 Channel decision: SMS, not WhatsApp (decided 2026-07, do not revert casually)
