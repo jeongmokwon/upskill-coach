@@ -2430,11 +2430,11 @@ you.</p>
 async def _privacy_handler(request):
     body = """
 <h1>Privacy Policy</h1>
-<div class="meta">Last updated: July 2026</div>
+<div class="meta">Last updated: August 2026</div>
 
-<p>Theo is an early-stage AI learning-coach service built and
-operated by Green Gables Studio LLC. This policy describes how phone
-numbers and message content are handled.</p>
+<p>Theo is an AI learning-coach service built and operated by Green
+Gables Studio LLC. This policy describes how phone numbers, message
+content, and study data are handled.</p>
 
 <h2>What we collect</h2>
 <ul>
@@ -2444,6 +2444,8 @@ numbers and message content are handled.</p>
       choices made on that form.</li>
   <li>SMS messages exchanged with members, stored for the purpose of
       providing learning context to subsequent messages.</li>
+  <li>Study materials and study-session data a member chooses to
+      share (see "Study sessions and shared materials" below).</li>
   <li>Service usage data tied to the member's account.</li>
 </ul>
 
@@ -2455,13 +2457,37 @@ enrollment. They are not used for marketing or advertising of any
 kind. Text messages are sent only for the purposes a member has
 separately consented to on the signup form.</p>
 
+<h2>Service improvement and research</h2>
+<p>We use de-identified and aggregated data — including message
+content and service usage patterns with personal identifiers
+removed — to improve Theo's coaching quality, evaluate which coaching
+approaches work, and train and refine the models and prompts that
+power the service. De-identified data cannot reasonably be linked
+back to you. This use never includes selling your data or sharing it
+for third parties' own purposes, and you may request deletion of your
+data at any time.</p>
+
+<h2>Study sessions and shared materials</h2>
+<p>When you choose to share your screen during a study session,
+captured frames are processed transiently to generate text
+observations and are not stored. Documents and links you share are
+stored as extracted text to power your coaching. You can end a
+session at any time, and sharing is always initiated by you.</p>
+
 <h2>Sharing</h2>
 <p><strong>We do not sell, rent, or share mobile information with third
 parties or affiliates for marketing or promotional purposes.</strong>
-Mobile numbers are shared only with our communications provider (Twilio)
-strictly for the purpose of delivering SMS messages, and with our model
-provider (Anthropic) strictly for the purpose of generating message
-content. No other third-party sharing occurs.</p>
+We share data only with service providers that process it on our
+behalf to run the service — such as our communications provider
+(Twilio) for delivering messages, our model provider (Anthropic) for
+generating message content, and our hosting and email providers —
+under obligations of confidentiality. We never share data for third
+parties' own purposes.</p>
+
+<h2>Business transfers</h2>
+<p>If Theo is involved in a merger, acquisition, or sale of assets,
+your information may be transferred as part of that transaction,
+subject to the commitments in this policy.</p>
 
 <h2>Message frequency</h2>
 <p>Message frequency varies and is capped at the limit the user agrees
@@ -2493,7 +2519,7 @@ active account, and is deleted on request.</p>
 async def _terms_handler(request):
     body = """
 <h1>Terms and Conditions</h1>
-<div class="meta">Last updated: July 2026</div>
+<div class="meta">Last updated: August 2026</div>
 
 <p>Theo is an early-stage AI learning-coach service operated
 by Green Gables Studio LLC. By using the SMS service, you agree to the
@@ -2528,6 +2554,12 @@ up.</p>
       with contact information.</li>
   <li>Message and data rates may apply.</li>
 </ul>
+
+<h2>Data use</h2>
+<p>By using Theo, you agree that de-identified and aggregated service
+data may be used to improve the service and develop the coaching
+models behind it, as described in our
+<a href="/privacy">Privacy Policy</a>.</p>
 
 <h2>Disclaimer</h2>
 <p>Theo is provided as-is for personal educational use. The
@@ -2627,7 +2659,9 @@ will contact you by email to get you set up.</p>
   Consent is not required to use Theo and is not a condition of any
   purchase.</p>
 
-  <p><a href="/terms">Terms of Service</a> · <a href="/privacy">Privacy Policy</a></p>
+  <p>By signing up, you agree to our
+  <a href="/terms">Terms of Service</a> and
+  <a href="/privacy">Privacy Policy</a>.</p>
 
   <button type="submit"
           style="margin-top:12px; padding:12px 28px; font-size:16px;
