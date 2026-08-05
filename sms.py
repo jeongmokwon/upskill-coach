@@ -1548,15 +1548,22 @@ def _strip_channel(addr):
 
 
 def _resolve_user_from_phone(from_number):
-    """Map an inbound phone number to a user_id. Single-user MVP: env
-    var TUTOR_USER_PHONE must match exactly (after stripping any
-    channel prefix Twilio added).
+    """Map an inbound phone number to a user_id.
+
+    The DB (user_profiles.phone) is the source of truth; the
+    TUTOR_USER_* env pair stays as a fallback so the pilot user's
+    routing never breaks mid-migration. DB wins on conflict — a
+    number bound in the DB routes there even while the env still
+    points somewhere.
     """
+    incoming = _strip_channel(from_number.strip())
+    bound = db.get_user_by_phone(incoming)
+    if bound:
+        return bound
     expected = os.environ.get("TUTOR_USER_PHONE", "").strip()
     user_id = os.environ.get("TUTOR_USER_ID", "").strip()
     if not (expected and user_id):
         return None
-    incoming = _strip_channel(from_number.strip())
     if incoming != _strip_channel(expected):
         print(f"[SMS] inbound from unknown number {from_number} (normalized {incoming}), ignoring", flush=True)
         return None
@@ -1809,6 +1816,18 @@ def generate_web_reply(user_id, session_id, text, jpeg_bytes=None):
                            history, versions)
 
 
+def _phone_for(user_id):
+    """The user's send-to number: profile first, env fallback (only
+    when the env pair names this exact user)."""
+    prof = db.get_user_profile_by_id(user_id) or {}
+    phone = (prof.get("phone") or "").strip()
+    if phone:
+        return phone
+    if os.environ.get("TUTOR_USER_ID", "").strip() == user_id:
+        return os.environ.get("TUTOR_USER_PHONE", "").strip()
+    return ""
+
+
 def handle_material_ready(user_id, material_id):
     """The user just uploaded a material and the digest is done —
     the freshest window there is: they opened the link, shared the
@@ -1830,9 +1849,11 @@ def handle_material_ready(user_id, material_id):
                           "reason": "whatsapp_window_closed"},
                          source="sms")
             return None
-        to_number = os.environ.get("TUTOR_USER_PHONE", "").strip()
-        if os.environ.get("TUTOR_USER_ID", "").strip() != user_id \
-                or not to_number:
+        to_number = _phone_for(user_id)
+        if not to_number:
+            db.log_event(user_id, "material_ready_not_sent",
+                         {"material_id": material_id,
+                          "reason": "no_phone_bound"}, source="sms")
             return None
         m = db.get_material(material_id) or {}
         system_prompt, prompt_versions = \

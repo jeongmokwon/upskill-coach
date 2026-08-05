@@ -218,6 +218,8 @@ def init_db():
             # ten turns of himself and got nothing back.
             ("agreed_offer", "TEXT DEFAULT ''"),
             ("email", "TEXT DEFAULT ''"),
+            ("phone", "TEXT DEFAULT ''"),
+            ("status", "TEXT DEFAULT 'active'"),
             # 'provisional' (inferred by the analysis pass) vs
             # 'confirmed' (the user said it). See set_ignition_marker.
             ("ignition_marker_status", "TEXT DEFAULT ''"),
@@ -690,6 +692,8 @@ def init_db():
             ("onboarding_completed_at", "TEXT"),
             ("agreed_offer", "TEXT DEFAULT ''"),
             ("email", "TEXT DEFAULT ''"),
+            ("phone", "TEXT DEFAULT ''"),
+            ("status", "TEXT DEFAULT 'active'"),
             ("ignition_marker_status", "TEXT DEFAULT ''"),
         ]:
             try:
@@ -1826,6 +1830,69 @@ def set_agreed_bite(user_id, bite_text, source="llm_marker",
     print(f"  [DB] First bite saved for {user_id}: {bite_text!r}", flush=True)
     log_event(user_id, "bite_committed",
               {"bite": bite_text, "decision_id": decision_id}, source=source)
+
+
+def set_user_phone(user_id, phone, source="operator"):
+    """Bind a phone (E.164) to a user — THE identity edge for inbound
+    routing and outbound sends. Refuses a number already bound to a
+    different user: a silent re-bind would reroute someone's whole
+    conversation."""
+    phone = (phone or "").strip()
+    existing = get_user_by_phone(phone)
+    if existing and existing != user_id:
+        raise ValueError(f"phone {phone} already bound to {existing}")
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET phone = {_P} WHERE user_id = {_P}",
+        (phone, user_id))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "phone_bound", {"phone": phone}, source=source)
+
+
+def get_user_by_phone(phone):
+    """→ user_id or None. DB is the source of truth for routing; the
+    TUTOR_USER_* env pair remains a fallback in sms.py so nothing
+    breaks mid-migration."""
+    phone = (phone or "").strip()
+    if not phone:
+        return None
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT user_id FROM user_profiles WHERE phone = {_P}",
+        (phone,))
+    row = _fetchone(cur)
+    conn.close()
+    return row["user_id"] if row else None
+
+
+def get_active_users():
+    """Users the coach serves: a bound phone and status 'active'.
+    → [{'user_id', 'phone'}] ordered by user_id for stable cron
+    iteration."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT user_id, phone FROM user_profiles "
+        f"WHERE phone != '' AND status = 'active' ORDER BY user_id")
+    rows = _fetchall(cur)
+    conn.close()
+    return rows
+
+
+def set_user_status(user_id, status, source="operator"):
+    """'active' | 'paused'. Paused users keep all their data; the
+    cron fan-out simply skips them."""
+    if status not in ("active", "paused"):
+        raise ValueError(f"unknown status {status!r}")
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET status = {_P} WHERE user_id = {_P}",
+        (status, user_id))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "status_changed", {"status": status},
+              source=source)
 
 
 def set_user_email(user_id, email, source="operator"):

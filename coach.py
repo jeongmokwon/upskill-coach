@@ -2802,6 +2802,31 @@ async def _session_consent_handler(request):
     return web.json_response({"ok": True})
 
 
+async def _bind_phone_handler(request):
+    """Operator-only: bind a phone number to a user (CRON_SECRET).
+    The multi-user backfill path — and the guard against silent
+    rebinding lives in db.set_user_phone.
+
+    POST /debug/bind-phone?secret=..&user_id=chrisyu2&phone=%2B1555...
+    """
+    import db
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret", "").strip()
+                or request.query.get("secret", "").strip())
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+    user_id = (request.query.get("user_id") or "").strip()
+    phone = (request.query.get("phone") or "").strip()
+    if not user_id or not phone.startswith("+"):
+        return web.Response(status=400,
+                            text="user_id + phone (E.164, URL-encode the +) required")
+    try:
+        db.set_user_phone(user_id, phone)
+    except ValueError as e:
+        return web.Response(status=409, text=str(e))
+    return web.Response(text=f"bound {phone} -> {user_id}\n")
+
+
 async def _my_token_handler(request):
     """Operator-only: mint/fetch a user's magic link (CRON_SECRET
     auth, same convention as the other debug endpoints). This is how
@@ -3605,6 +3630,7 @@ def start_ws_server():
         app.router.add_get("/debug/trace", _debug_trace_handler)
         app.router.add_get("/my", _my_page_handler)
         app.router.add_get("/debug/my-link", _my_token_handler)
+        app.router.add_post("/debug/bind-phone", _bind_phone_handler)
         app.router.add_post("/debug/email-my-link", _email_my_link_handler)
         app.router.add_post("/my/upload", _my_upload_handler)
         app.router.add_post("/my/link", _my_link_handler)
