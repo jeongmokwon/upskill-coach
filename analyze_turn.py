@@ -132,9 +132,15 @@ _TOOL = {
                     "required": ["quote"],
                 },
                 "description": "What the user wants from this "
-                               "material, as VERBATIM quotes from the "
-                               "conversation plus your one-line "
-                               "reading. Report the full cumulative "
+                               "material, as VERBATIM quotes of the "
+                               "USER'S OWN messages plus your "
+                               "one-line reading. NEVER quote a "
+                               "coach line — a coach question is not "
+                               "a user want, however suggestive. The "
+                               "server verifies every quote against "
+                               "the user's actual messages and "
+                               "silently drops any that do not "
+                               "match. Report the full cumulative "
                                "list each time (it replaces the "
                                "stored one).",
             },
@@ -181,6 +187,29 @@ _FIELD_TO_KEY = {
     "offer": "offer",
     "path": "path_direction",
 }
+
+
+def _norm(t):
+    """Whitespace-normalized text for verbatim matching (line breaks
+    and double spaces are not paraphrase; anything else is)."""
+    import re as _re
+    return _re.sub(r"\s+", " ", t or "").strip()
+
+
+def _user_said(user_id, quote, limit=100):
+    """True if `quote` appears verbatim (whitespace-normalized) in
+    one of the USER'S own messages. The attribution guard: observed
+    in prod, the extraction quoted the COACH'S questions as user
+    wants — plausible text, wrong mouth. Prompt rules lower the
+    rate; only matching against the actual transcript makes
+    mis-attribution structurally impossible."""
+    q = _norm(quote)
+    if not q:
+        return False
+    for m in db.get_recent_sms_messages(user_id, limit=limit):
+        if m["role"] == "user" and q in _norm(m["content"]):
+            return True
+    return False
 
 
 def _transcript(user_id, limit=100):
@@ -383,6 +412,21 @@ def _apply(user_id, p, llm_call_id):
             wants = [{"quote": (w.get("quote") or "").strip(),
                       "meaning": (w.get("meaning") or "").strip()}
                      for w in wants if (w.get("quote") or "").strip()]
+            verified, rejected = [], []
+            for w in wants:
+                (verified if _user_said(user_id, w["quote"])
+                 else rejected).append(w)
+            if rejected:
+                print(f"[ANALYZE] ⚠️ dropped {len(rejected)} want "
+                      f"quote(s) not found in user messages",
+                      flush=True)
+                db.log_event(user_id, "want_quote_rejected",
+                             {"material_id": m["id"],
+                              "quotes": [w["quote"][:120]
+                                         for w in rejected],
+                              "llm_call_id": llm_call_id},
+                             source="analyze")
+            wants = verified
         validated = bool(p.get("walkthrough_sample_validated"))
         status = None
         if validated and m["walkthrough_status"] != "validated":

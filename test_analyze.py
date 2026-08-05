@@ -185,6 +185,9 @@ db.ensure_user_profile_row(W)
 _wm = db.add_user_material(W, "file", title="정리본.docx",
                            extracted_text="...")
 db.save_sms_message(W, "user", "그 파일은 내가 업무하면서 정리한 거야", "in")
+db.save_sms_message(W, "assistant",
+                    "혹시 시험 준비용이야? 아니면 회의 대비?", "out")
+db.save_sms_message(W, "user", "클라이언트가 물으면 바로 대답해야 해", "in")
 ToolFake.payload = {
     "material_description": "업무하면서 직접 정리한 법률지식 파일",
     "material_wants": [{"quote": "클라이언트가 물으면 바로 대답해야 해",
@@ -197,6 +200,28 @@ check("description + verbatim wants land, status → in_progress",
       _m["user_description"].startswith("업무하면서")
       and _m["wants"][0]["quote"].startswith("클라이언트")
       and _m["walkthrough_status"] == "in_progress")
+
+# ── 3c-2. the attribution guard: coach lines can NEVER become wants ──
+ToolFake.payload = {
+    "material_wants": [
+        {"quote": "클라이언트가 물으면 바로 대답해야 해",
+         "meaning": "real user words"},
+        {"quote": "혹시 시험 준비용이야? 아니면 회의 대비?",
+         "meaning": "the COACH said this — must be dropped"},
+        {"quote": "이건 아무도 말한 적 없는 문장",
+         "meaning": "invented — must be dropped"}],
+    "step_completed": "not_applicable", "step_reason": "-",
+}
+analyze_turn.analyze(W)
+_m = db.get_material(_wm)
+check("coach-mouthed and invented quotes are dropped; user's survive",
+      [w["quote"] for w in _m["wants"]]
+      == ["클라이언트가 물으면 바로 대답해야 해"]
+      and any(r["kind"] == "want_quote_rejected"
+              and len(json.loads(r["payload"])["quotes"]) == 2
+              for r in db.get_events(W, limit=30)))
+check("whitespace differences are not paraphrase (normalized match)",
+      analyze_turn._user_said(W, "클라이언트가  물으면\n바로 대답해야 해"))
 check("the analysis prompt showed the material's state",
       "newest material: 정리본.docx"
       in ToolFake.seen[-1]["system"])
