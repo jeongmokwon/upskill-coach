@@ -105,10 +105,10 @@ Scripted.queue = [
 Scripted.seen = []
 text, steps, expect, call_id, _hold = sms.generate_message(
     U, "sys", [{"role": "user", "content": "hi"}], "test")
-check("violating draft triggers exactly one retry", len(Scripted.seen) == 2)
-check("retry carried the violation as feedback",
+check("violating draft triggers a retry", len(Scripted.seen) == 2)
+check("retry carries the violation + the surgical instruction",
       "broke a hard rule" in Scripted.seen[1]["messages"][-1]["content"]
-      and "questions" in Scripted.seen[1]["messages"][-1]["content"])
+      and "become a statement" in Scripted.seen[1]["messages"][-1]["content"])
 check("compliant rewrite is what gets returned",
       text.count("?") == 1 and "외워본 적" not in text)
 check("clean retry logs no violation",
@@ -122,13 +122,18 @@ print("3) send-anyway")
 Scripted.queue = [
     "이거 어때? 저건 어때?\n[STEP: connect@1]",
     "그래도 이거 어때? 저건 어때?\n[STEP: connect@1]",
+    "마지막까지 이거 어때? 저건 어때?\n[STEP: connect@1]",
 ]
 Scripted.seen = []
 text, steps, expect, call_id, _hold = sms.generate_message(
     U, "sys", [{"role": "user", "content": "hi"}], "test")
-check("stops after one retry (2 calls total)", len(Scripted.seen) == 2)
+check("stops after TWO retries (3 calls total) — one retry failed "
+      "the one-question rule twice in one live evening",
+      len(Scripted.seen) == 3)
 check("message is still returned — silence is worse",
       text is not None and "어때" in text)
+check("second retry ALSO carried the feedback",
+      "become a statement" in Scripted.seen[2]["messages"][-1]["content"])
 v = events_of("send_guard_violation")
 check("violation recorded with its trigger + call id",
       len(v) == 1

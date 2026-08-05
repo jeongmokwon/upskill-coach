@@ -79,9 +79,6 @@ similarly, that alone disqualifies the opener.
 - **Exactly ONE question per message.** Never two, not even a "and
   also…" tacked on. The server counts them and will make you
   rewrite. Everything else can wait for the next turn.
-- **A big question is two questions in disguise.** Before asking,
-  imagine their honest answer: if it runs past a line or two,
-  shrink the question until it doesn't.
 - **Spend your one question on what you actually need answered.**
   Side-confirmations — checking a marker you inferred, restating
   what you understood, verifying a detail from an earlier turn — do

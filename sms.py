@@ -1342,7 +1342,7 @@ def generate_message(user_id, system_prompt, history, trigger,
     text = steps = expect = llm_call_id = None
     violations = []
 
-    for attempt in (1, 2):
+    for attempt in (1, 2, 3):
         try:
             resp = client.messages.create(
                 model=MODEL, max_tokens=max_tokens,
@@ -1400,7 +1400,11 @@ def generate_message(user_id, system_prompt, history, trigger,
             continue
 
         violations = check_send_guards(text, steps)
-        if not violations or attempt == 2:
+        # Two rewrite attempts for guard violations (was one): the
+        # one-question rule failed through a single retry twice in
+        # one live evening — both the draft AND its rewrite carried
+        # two questions.
+        if not violations or attempt == 3:
             break
         print(f"[SMS] guard violation, regenerating: {violations}",
               flush=True)
@@ -1408,8 +1412,11 @@ def generate_message(user_id, system_prompt, history, trigger,
             {"role": "assistant", "content": raw},
             _server_turn("Your draft broke a hard rule:\n- "
                          + "\n- ".join(violations)
-                         + "\nRewrite it. Same intent, same warmth, "
-                           "rule respected.")]
+                         + "\nRewrite the SAME message. Keep the one "
+                           "most important question exactly; every "
+                           "other question must become a statement "
+                           "or disappear — do not merge them into a "
+                           "bigger question.")]
 
     if violations:
         print(f"[SMS] ⚠️ sending despite violations: {violations}",
