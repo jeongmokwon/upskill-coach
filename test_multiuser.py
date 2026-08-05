@@ -208,5 +208,29 @@ r = hit(coach._activate_handler,
 check("no SMS consent → activation refused (carrier promise is structural)",
       r.status == 412 and db.get_user_by_phone("+15550007002") is None)
 
+# ── 7. reset: back to birth, keeping only the identity edge ──────────
+print("7) reset")
+db.set_agreed_goal("grace1", "g")
+db.save_sms_message("grace1", "user", "안녕", "in")
+db.record_consent("grace1", "screen_share", "2026-08-05")
+_tok_before = db.ensure_user_token("grace1")
+counts = db.reset_user("grace1")
+prof = db.get_user_profile_by_id("grace1") or {}
+check("history wiped, identity kept",
+      counts.get("messages") == 1
+      and prof.get("phone") == "+15550007001"
+      and prof.get("email") == "g@x.co"
+      and (prof.get("agreed_goal") or "") == ""
+      and db.get_recent_sms_messages("grace1", limit=5) == [])
+check("consent wiped → the JIT flow runs again",
+      not db.has_consent("grace1", "screen_share", "2026-08-05"))
+check("magic token survives (their /my link keeps working)",
+      db.ensure_user_token("grace1") == _tok_before)
+check("onboarding is back to square one",
+      db.get_onboarding_state("grace1")["missing"][0] == "goal"
+      and db.get_onboarding_state("grace1")["completed_at"] is None)
+check("still on the cron roster (phone kept, status default active)",
+      "grace1" in {u["user_id"] for u in db.get_active_users()})
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
