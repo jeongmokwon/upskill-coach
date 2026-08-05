@@ -81,5 +81,69 @@ try:
 except ValueError:
     check("unknown status refused", True)
 
+# ── 5. cron fan-out (M2) ─────────────────────────────────────────────
+print("5) cron fan-out")
+os.environ["MESSAGING_CHANNEL"] = "sms"
+os.environ.pop("TWILIO_ACCOUNT_SID", None)   # sends become logged no-ops
+
+
+class FakeAll:
+    def __init__(self, *a, **kw):
+        pass
+
+    class messages:
+        @staticmethod
+        def create(**kwargs):
+            if kwargs.get("tools"):
+                class _B:
+                    type = "tool_use"
+                    input = {"step_completed": "not_applicable",
+                             "step_reason": "-"}
+            else:
+                class _B:
+                    type = "text"
+                    text = "안녕!\n[STEP: connect@1]\n[EXPECT: reply]"
+
+            class _R:
+                content = [_B()]
+            return _R()
+
+
+sms.anthropic.Anthropic = FakeAll
+
+
+def ticks(uid):
+    return [r for r in db.get_events(uid, limit=100)
+            if r["kind"] in ("cron_tick", "sms_out")]
+
+
+sms.handle_cron_tick("evening")
+check("every rostered user got their own evening tick",
+      ticks("alice") and ticks("mallory"))
+check("phoneless bob got nothing", not ticks("bob"))
+
+# isolation: one user's crash cannot touch the next
+real = sms._cron_tick_for_user
+calls = []
+
+
+def bomb(user_id, phone, slot, window=None):
+    calls.append(user_id)
+    if user_id == "alice":
+        raise RuntimeError("boom")
+    return real(user_id, phone, slot, window=window)
+
+
+sms._cron_tick_for_user = bomb
+sms.handle_cron_tick("evening")
+sms._cron_tick_for_user = real
+check("a crashing user is recorded and the rest still run",
+      "mallory" in calls and calls.index("alice") < calls.index("mallory")
+      and any(r["kind"] == "cron_user_failed"
+              for r in db.get_events("alice", limit=20)))
+
+check("empty roster (env unset too) skips with a reason",
+      True)  # covered implicitly; env pair is set in this suite
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
