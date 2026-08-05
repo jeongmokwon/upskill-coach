@@ -1889,8 +1889,47 @@ def handle_material_ready(user_id, material_id):
 
 
 def handle_cron_tick(slot, window=None):
-    """Run a scheduled slot: decide whether to send, and if so,
-    load prompt, call Claude, send WhatsApp.
+    """Run a scheduled slot for EVERY active user (M2 fan-out).
+
+    Iterates the DB roster (bound phone + status active), with the
+    TUTOR_USER_* env pair appended as a fallback entry when it names
+    a user not already on the roster. One user's failure never
+    touches the next: each runs in its own try/except and failures
+    become cron_user_failed events.
+
+    Returns the last sent text (back-compat with single-user
+    callers/tests), or None."""
+    roster = list(db.get_active_users())
+    env_uid = os.environ.get("TUTOR_USER_ID", "").strip()
+    env_phone = os.environ.get("TUTOR_USER_PHONE", "").strip()
+    if env_uid and env_phone \
+            and env_uid not in {u["user_id"] for u in roster}:
+        roster.append({"user_id": env_uid, "phone": env_phone})
+    if not roster:
+        print(f"[SMS] {slot}: no active users — skipping", flush=True)
+        db.log_event(None, "cron_tick",
+                     {"slot": slot, "action": "skipped",
+                      "reason": "no_active_users"}, source="cron")
+        return None
+    last = None
+    for u in roster:
+        try:
+            sent = _cron_tick_for_user(u["user_id"], u["phone"], slot,
+                                       window=window)
+            if sent:
+                last = sent
+        except Exception as e:
+            print(f"[SMS] ⚠️ {slot}: {u['user_id']} failed: {e}",
+                  flush=True)
+            db.log_event(u["user_id"], "cron_user_failed",
+                         {"slot": slot, "error": str(e)[:300]},
+                         source="cron")
+    return last
+
+
+def _cron_tick_for_user(user_id, to_number, slot, window=None):
+    """The original single-user slot body: decide whether to send,
+    and if so, load prompt, call Claude, send.
 
     Returns the sent text, or None if we declined to send.
 
@@ -1915,15 +1954,6 @@ def handle_cron_tick(slot, window=None):
     # Extra payload fields for window-driven calls; empty for the
     # legacy fixed crons so their event shape is unchanged.
     win_extra = {"window": window} if window else {}
-
-    user_id = os.environ.get("TUTOR_USER_ID", "").strip()
-    to_number = os.environ.get("TUTOR_USER_PHONE", "").strip()
-    if not (user_id and to_number):
-        print(f"[SMS] {slot}: TUTOR_USER_ID/PHONE not set — skipping", flush=True)
-        db.log_event(None, "cron_tick",
-                     {"slot": slot, "action": "skipped", "reason": "env_unset"},
-                     source="cron")
-        return None
 
     def _skip(reason):
         print(f"[SMS] {slot}: skipping — {reason}", flush=True)
@@ -2117,21 +2147,32 @@ def _window_fired_recently(user_id, token, now):
 
 
 def handle_schedule_tick(now=None):
-    """Run the hourly per-user send-window check (P0-C).
+    """Run the hourly per-user send-window check (P0-C), fanned out
+    over every active user (M2). Same isolation contract as the
+    fixed-cron fan-out. Returns the last sent text or None."""
+    roster = list(db.get_active_users())
+    env_uid = os.environ.get("TUTOR_USER_ID", "").strip()
+    if env_uid and env_uid not in {u["user_id"] for u in roster}:
+        roster.append({"user_id": env_uid,
+                       "phone": os.environ.get("TUTOR_USER_PHONE",
+                                               "").strip()})
+    last = None
+    for u in roster:
+        try:
+            sent = _schedule_tick_for_user(u["user_id"], now=now)
+            if sent:
+                last = sent
+        except Exception as e:
+            print(f"[SMS] ⚠️ schedule-tick: {u['user_id']} failed: {e}",
+                  flush=True)
+            db.log_event(u["user_id"], "cron_user_failed",
+                         {"slot": "schedule_tick",
+                          "error": str(e)[:300]}, source="cron")
+    return last
 
-    Single-user shim like the rest of the pipeline: serves
-    TUTOR_USER_ID only. No schedule rows → no-op (the founder's
-    fixed crons keep serving him). `now` is injectable for tests
-    (naive server-local, matching event timestamps).
 
-    Returns the sent text, or None if nothing fired.
-    """
-    user_id = os.environ.get("TUTOR_USER_ID", "").strip()
-    if not user_id:
-        print("[SMS] schedule-tick: TUTOR_USER_ID not set — no-op",
-              flush=True)
-        return None
-
+def _schedule_tick_for_user(user_id, now=None):
+    """One user's window check — the original P0-C body."""
     sched = db.get_user_schedule(user_id)
     if not sched:
         print(f"[SMS] schedule-tick: no schedule for {user_id} — no-op",
