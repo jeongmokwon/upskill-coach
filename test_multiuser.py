@@ -235,6 +235,23 @@ r = hit_q(coach._sms_cron_tick_handler,
           "/sms/cron-tick?secret=sek&slot=evening&user_id=ghost99")
 check("unknown target → 404, nothing fires", r.status == 404)
 
+# ── 6c. the nudge slot: evening's twin, honestly labeled ─────────────
+print("6c) nudge")
+r = hit_q(coach._sms_cron_tick_handler,
+          "/sms/cron-tick?secret=sek&slot=nudge")
+check("a bare nudge (no user) is refused — never a roster blast",
+      r.status == 400)
+r = hit_q(coach._sms_cron_tick_handler,
+          "/sms/cron-tick?secret=sek&slot=nudge&user_id=mallory")
+_t.sleep(0.4)
+nudge_events = [x for x in db.get_events("mallory", limit=30)
+                if x["kind"] == "sms_out"
+                and json.loads(x["payload"]).get("trigger") == "cron_nudge"]
+check("nudge fires for its user, labeled cron_nudge (not evening)",
+      r.status == 200 and nudge_events)
+check("phase timer started by the nudge (first-contact semantics)",
+      db.get_user_phase("mallory").get("phase_started_at") is not None)
+
 # ── 7. reset: back to birth, keeping only the identity edge ──────────
 print("7) reset")
 db.set_agreed_goal("grace1", "g")

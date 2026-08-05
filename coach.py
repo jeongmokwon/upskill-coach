@@ -864,6 +864,10 @@ async def _sms_cron_tick_handler(request):
     # fan-out shipped ("남편한테까지 가는 거 아닌가?"). With
     # user_id, only that user's slot runs.
     target = (request.query.get("user_id") or "").strip()
+    if slot == "nudge" and not target:
+        return web.Response(
+            status=400,
+            text="nudge is per-user by definition — pass user_id\n")
     if target:
         import db
         phone = sms._phone_for(target)

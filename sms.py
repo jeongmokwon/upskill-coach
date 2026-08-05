@@ -44,7 +44,12 @@ import policy
 
 PROMPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "prompts")
 
-SLOTS = ("morning", "lunch", "afternoon", "evening")
+# `nudge` is the operator's poke: identical to the evening slot in
+# prompt and behavior, but time-agnostic and honestly labeled — a
+# manual send recorded as cron_evening would corrupt every
+# slot-conditioned pattern in the exploration data. Never fired by a
+# schedule; the endpoint requires an explicit user_id for it.
+SLOTS = ("morning", "lunch", "afternoon", "evening", "nudge")
 
 # User-local time is approximated with a fixed offset from server
 # time (same convention as features.py/trace.py/annotate.py — no
@@ -382,7 +387,7 @@ def _prompt_name_for_slot(slot, phase):
     """
     if slot == "morning":
         return "sms_morning"
-    if slot == "evening":
+    if slot in ("evening", "nudge"):
         return "sms_first_bite" if phase == "first_bite" else "sms_discovery"
     # Unreachable in normal flow — handle_cron_tick skips lunch/afternoon.
     return None
@@ -2021,8 +2026,8 @@ def _cron_tick_for_user(user_id, to_number, slot, window=None):
                      source="cron")
         return None
 
-    if slot == "evening":
-        # Start the Phase 0 timer on the first evening tick (idempotent).
+    if slot in ("evening", "nudge"):
+        # Start the Phase 0 timer on the first contact (idempotent).
         db.ensure_phase_timer_started(user_id)
 
     # Decision point (T3): all hard gates passed — does policy fire
