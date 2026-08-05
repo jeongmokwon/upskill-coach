@@ -640,6 +640,7 @@ def _build_system_prompt(slot, user_id):
     prompt_name = _prompt_name_for_slot(slot, db.get_user_phase(user_id)["phase"])
     if prompt_name is None:
         return None, {}
+    ensure_my_link_delivered(user_id)
     shared, h_shared = _read_prompt_versioned("sms_shared")
     slot_prompt, h_slot = _read_prompt_versioned(prompt_name)
     fields = _build_placeholders(user_id)
@@ -852,6 +853,33 @@ def _strip_extraction_markers(user_id, text):
                      {"markers": stripped}, source="sms")
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
+
+
+def ensure_my_link_delivered(user_id):
+    """When the onboarding focus reaches material_walkthrough with no
+    materials, no link email on record, and an email address on file
+    — send the /my link email NOW, so the coach can honestly say
+    '메일함 봐봐'. Without this, the coach improvises a tokenless URL
+    (observed live: 'learningtheo.com/my에 올려줄래?' — a 404 for the
+    user). Idempotent via the my_link_emailed event. Never raises."""
+    try:
+        state = db.get_onboarding_state(user_id)
+        if state["completed_at"] or not state["missing"] \
+                or state["missing"][0] != "material_walkthrough":
+            return
+        if db.get_user_materials(user_id):
+            return
+        if any(e["kind"] == "my_link_emailed"
+               for e in db.get_events(user_id, limit=300)):
+            return
+        email = ((db.get_user_profile_by_id(user_id) or {})
+                 .get("email") or "").strip()
+        if "@" not in email:
+            return
+        import emailer
+        emailer.send_my_link(user_id, email)
+    except Exception as e:
+        print(f"[SMS] ⚠️ my-link auto-delivery failed: {e}", flush=True)
 
 
 def _walkthrough_label(user_id):
@@ -1501,6 +1529,12 @@ def _process_step_marker(user_id, text):
     text = _STEP_MARKER_RE.sub("", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     text = re.sub(r"(\n?---\s*)+$", "", text).strip()
+    # History turns carry server annotations like "[수요일 14:51,
+    # 지금]"; the model imitates the format and prefixes its OWN
+    # output (observed live: users received texts starting
+    # "[수요일 14:51] ..."). Same failure family as marker
+    # self-imitation — strip any leading bracket annotation.
+    text = re.sub(r"^\[[^\]\n]{1,40}\]\s*", "", text)
     return steps, text
 
 
@@ -1681,6 +1715,7 @@ def _reply_to_inbound(user_id, from_number, body, my_msg_id):
     # Use the phase-specific evening prompt for inbound replies too —
     # the LLM should be in the same mode whether the user is replying
     # to a scheduled ping or texting spontaneously.
+    ensure_my_link_delivered(user_id)
     system_prompt, prompt_versions = _build_system_prompt_for_reply(user_id)
 
     reply_text, steps, expect, llm_call_id, _hold = generate_message(
