@@ -293,5 +293,54 @@ p3, _ = _sms._build_system_prompt("nudge", "hana1")
 check("an activated friend is greeted by name, never by id",
       "Hana" in p3 and "hana1" not in p3)
 
+# ── 9. burst folding: three texts, one answer ────────────────────────
+print("9) burst folding")
+os.environ["TUTOR_USER_ID"] = "bursty"
+os.environ["TUTOR_USER_PHONE"] = "+15550008888"
+db.ensure_user_profile_row("bursty")
+
+
+class BurstFake:
+    """During the FIRST generation, a second user text 'arrives'."""
+    calls = 0
+
+    def __init__(self, *a, **kw):
+        pass
+
+    class messages:
+        @staticmethod
+        def create(**kwargs):
+            if kwargs.get("tools"):
+                class _B:
+                    type = "tool_use"
+                    input = {"step_completed": "not_applicable",
+                             "step_reason": "-"}
+            else:
+                BurstFake.calls += 1
+                if BurstFake.calls == 1:
+                    db.save_sms_message("bursty", "user",
+                                        "아 그리고 하나 더", "in")
+
+                class _B:
+                    type = "text"
+                    text = "답장!\n[STEP: connect@1]\n[EXPECT: reply]"
+
+            class _R:
+                content = [_B()]
+            return _R()
+
+
+_sms.anthropic.Anthropic = BurstFake
+r1 = _sms.handle_inbound("+15550008888", "첫 문자")
+check("a reply drafted before the burst finished is DISCARDED",
+      r1 is None
+      and any(e["kind"] == "reply_discarded_stale"
+              for e in db.get_events("bursty", limit=20)))
+r2 = _sms.handle_inbound("+15550008888", "이제 진짜 끝")
+check("the final message's handler answers, once, with all in view",
+      r2 is not None
+      and len([e for e in db.get_events("bursty", limit=30)
+               if e["kind"] == "sms_out"]) == 1)
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
