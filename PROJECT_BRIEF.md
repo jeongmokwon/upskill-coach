@@ -86,8 +86,9 @@ If a task seems to require one of these, stop and flag it instead of building it
 [User phone + desktop]          featurization       │
  SMS (toll-free via Twilio) ◄──► job (LLM →         ▼
  coach conversation             LearnerState)   raw blob store
- (desktop surface: §3.2)                        (Cloudflare R2:
-                                                 screenshots, dumps)
+ (desktop surface: §3.2)                        (SUPERSEDED: unused —
+                                                 frames are ephemeral,
+                                                 never stored; §8.3)
 ```
 
 ### 3.1 Channel decision: SMS, not WhatsApp (decided 2026-07, do not revert casually)
@@ -190,7 +191,9 @@ First task of week 1 is a written inventory of this repo before any changes.
 
 **Week 1 — Data foundation (the non-retrofittable layer).** Unified append-only event store + per-user timeline; raw blob store; prompt version registry; LearnerState feature schema v1 + LLM annotation job; randomization/decision hook with logging; infra-event and capture-gap detection. Existing components rewired to emit events. *(Detailed in WEEK1_ORDER.md.)*
 
-**Week 2 — Capture client + pipeline hardening.** Primary client is a **Chrome extension** (one artifact covers macOS + Windows + ChromeOS; the recruiting pool skews Chromebook, and this population's learning is browser-centric — Colab, MOOCs, docs). Capture core: cadence, active-tab/workspace high-res handling, tab-switch events (`browser_tabs_captured`-class observations — avoidance signal), upload protocol, retry/offline buffering. Distribution: Chrome Web Store unlisted (no signing certs, no notarization). Always-visible capture indicator + one-click pause. Server ingest hardening. **Final build order is decided by the recruit device mix from 1:1 conversations** — native clients (macOS menubar via ScreenCaptureKit, Windows tray) are post-pilot or for IDE-centric users; the founder's own `observer.py` terminal agent continues for n=1.
+**Week 2 — Capture client + pipeline hardening.** *(SUPERSEDED
+2026-08-05 — the extension is retired for the pilot; capture is the
+web session page. See §8.3.)* Primary client is a **Chrome extension** (one artifact covers macOS + Windows + ChromeOS; the recruiting pool skews Chromebook, and this population's learning is browser-centric — Colab, MOOCs, docs). Capture core: cadence, active-tab/workspace high-res handling, tab-switch events (`browser_tabs_captured`-class observations — avoidance signal), upload protocol, retry/offline buffering. Distribution: Chrome Web Store unlisted (no signing certs, no notarization). Always-visible capture indicator + one-click pause. Server ingest hardening. **Final build order is decided by the recruit device mix from 1:1 conversations** — native clients (macOS menubar via ScreenCaptureKit, Windows tray) are post-pilot or for IDE-centric users; the founder's own `observer.py` terminal agent continues for n=1.
 
 **Week 3 — Multi-user + operator tooling.** SMS pipeline user routing (per-user prompts, per-user silence-rule state, per-user phase estimate; toll-free number per §3.1). Operator dashboard: per-user timeline (capture summaries + conversation + sent messages + feature trends) and per-user prompt editing. Target: founder reviews all users in <10 min/morning. One-page data collection/retention policy document.
 
@@ -219,9 +222,128 @@ First task of week 1 is a written inventory of this repo before any changes.
   - **Decision markers stay on the generation call** — `[STEP: tag@n]` (which move was chosen), `[EXPECT: ...]` (predicted reaction), `[REPLAN: "..."]`. These exist only in the model's head; nothing can extract them from the transcript afterward.
   - **Extraction moves to a dedicated ANALYSIS call** — goal, path, first bite, ignition marker, schedule, offer. These are facts already present in the conversation, so a single-task call reading the transcript recovers them far more reliably. Consequences that matter: it sees the WHOLE conversation (a fact stated three turns ago is still catchable — a missed turn is no longer permanent data loss), and it is **re-runnable over history**, so past conversations can be back-extracted.
   - Shape: one analysis call per inbound reply (it replaces/absorbs the step-completion judge), forced tool call, sections active by phase — field extraction while onboarding, step-completion judgment after. It runs BEFORE generation, so the generation call receives already-updated state and only has to talk well. Extraction never speculates: a field fills only when the user actually said or agreed to it; the server validates format and every write is an event.
-- **Onboarding arc (6 deliverables, ordered; revised 2026-07-30 from pilot user #1's session).** The checklist is now an ORDERED focus — one field per turn, in arc order: field/goal → goal elaboration → **what Theo will do for them (`agreed_offer`, confirmed by the user)** → messaging windows → ignition marker → first concrete task. The offer step was missing entirely: the user talked about themselves for ten turns and got nothing back, which is both a reciprocity failure and an expectations gap; it is also the natural place for a commitment (`secure_commit`). Its content is dictated by the user's **learning type** (below).
+- **Onboarding arc** *(SUPERSEDED 2026-08-05 — see §8.2 for the
+  current arc: bite removed, material walkthrough added, completion
+  redefined.)* **(original 2026-07-30 design:)** The checklist is now an ORDERED focus — one field per turn, in arc order: field/goal → goal elaboration → **what Theo will do for them (`agreed_offer`, confirmed by the user)** → messaging windows → ignition marker → first concrete task. The offer step was missing entirely: the user talked about themselves for ten turns and got nothing back, which is both a reciprocity failure and an expectations gap; it is also the natural place for a commitment (`secure_commit`). Its content is dictated by the user's **learning type** (below).
 - **Question burden (pilot user #1 dropped out on exactly this).** Two rules, one mechanical: **(a) one question per message — server-enforced** (question-mark count across bubbles; one regeneration attempt, then send anyway and log the violation, because silence is worse than a flawed send). **(b) Answers must fit in one short sentence**: prefer guess-and-confirm ("워드나 노션 같은 데 정리해둔 거야?") over open elicitation, convert to explicit choices, and keep open questions narrow. This is in tension with the self-persuasion principle (which needs the user's own words) and the resolution is *narrow* open questions, not none — the user answered five short questions in six minutes and only quit when a message asked two open-ended things at once.
 - **Learning types (per user, multi-label; drives offer + step selection).** Memorization/retention · **retrieval fluency** (instant recall under questioning — distinct: the target is speed and availability, not mere knowing) · skill practice & mastery · conceptual understanding · project completion · exam prep · language acquisition · habit formation · exploration (deciding whether to pursue). Pilot user #1 = memorization + retrieval fluency over self-authored notes, which prescribes active recall, spaced repetition and question-form conversion — and that prescription IS his offer. **Consequence for §7's learning path:** the `direction / project+done-condition / bite` middle layer is project-shaped and does not fit every type; `learning_paths.path_kind` records which framing applies (deliverable+done-condition / coverage target / duration of practice).
 - **User profile brief (generated at onboarding completion, versioned, append-only).** Alongside notes and the initial plan, the generation call emits a brief: job/field, learning types, learning materials, **what they want from Theo — as verbatim quotes, never paraphrase** (raw is sacred applies to self-description), and a free-form personality read. Structured where a machine branches on it (learning types), free-form where only the LLM consumes it (personality).
 - **Availability grid (evolving, derived).** A per-user day×hour grid seeded by self-report during onboarding and refined nightly by behavior — reply latency and hour-of-day are already in the event log, so "says 8pm, actually only answers at 10pm" surfaces on its own. Stored as versioned snapshots derived from raw events (same discipline as notes: the events are the truth, the grid is a rebuildable projection). Feeds per-user scheduling.
 - **Initial policy generation** (design in week 3; schema-accommodated in week 1): the transform `(policy_prior, onboarding_data) → initial_per_user_policy`, performed by an LLM when a user completes onboarding. NOT blank-slate: the LLM instantiates the founder's prior against this specific user's goal / why / schedule / learning style / shape-of-inertia gathered during onboarding. The LLM instantiates and adapts the prior; it never invents new coaching principles. **Output is always `policy + rationale`, never policy alone.** The rationale records: (a) prior version used, (b) parameters extracted from onboarding, (c) for each major policy setting, which principle × which user parameter produced it. The rationale is what lets the operator distinguish "wrong principle" from "wrong reading of the user" when a policy underperforms, and accumulated rationales are the evidence base for revising the prior itself. This is the automatic bootstrap that makes onboarding user #2 through #10 possible without real-time founder involvement; ongoing adjustment thereafter is manual and asynchronous.
+
+
+## 8. Live-state addendum — 2026-08-05
+
+*Everything below is SHIPPED and live-verified unless marked open.
+Where this section conflicts with §3/§6/§7, this section wins. TFV
+approved 2026-08-05; the channel is SMS (toll-free +18555028436);
+the WhatsApp sandbox era is over.*
+
+### 8.1 Materials & the backbone ("text over pixels")
+
+`user_materials`: one row per thing the user studies from — `file`
+(upload on /my; **extracted text kept, original bytes discarded** —
+the pilot's first file is a law-firm document), `link` (famous
+resources are covered by latent knowledge; no fetch), `named` (only
+spoken of). Upload triggers a one-time LLM read producing the
+coach's working notes (structure, item counts, dense parts —
+explicitly not study advice). Governing rule everywhere: **the
+user's own walkthrough account outranks the digest**, and the digest
+outranks raw pixels. The digest completion fires an immediate coach
+follow-up (`material_ready`) when the upload is the awaited
+onboarding step — the freshest window there is.
+
+### 8.2 The walkthrough — onboarding completion redefined
+
+Completion no longer means "fields collected"; it means **Theo
+understands its job for this user well enough that the user
+confirmed a sample of it.** `ONBOARDING_FIELDS = (goal, path,
+ignition_marker, material_walkthrough, offer, schedule)` — order IS
+the arc; `bite` is gone (the first task belongs to the first
+session, after a plan exists). The walkthrough: Theo-led, anchored
+to the material (on screen when a session is live), elicits via
+EXAMPLES not abstractions, pins its questions to exact
+sections/pages, one question a turn. Exit is licensed ONLY by the
+user affirming a demonstrated sample ("맞아, 딱 그런 거") — the
+model's own sense of readiness licenses nothing (it always feels
+able), and the mechanical gate agrees: analyze flips
+`walkthrough_status=validated` only on transcript evidence of
+sample+affirmation, and **every want quote is verified verbatim
+against the user's actual turns** (coach lines and inventions are
+dropped and evented — the attribution guard, added after live
+mis-attribution). The coach then DECLARES the close ("다 파악했어,
+여기까지 하자") rather than letting the walkthrough trail. The
+offer is built FROM the walkthrough and rendered on every
+subsequent send as **YOUR STANDING PROMISE** — a debt actively
+paid, never re-offered as new, never quietly dropped.
+
+### 8.3 Screen co-viewing sessions (the pilot's whole purpose)
+
+The extension is retired for the pilot; capture is the **web
+session page** on /my (magic-link token = login; no accounts).
+Perception is three-layered and was spike-validated before build:
+**reading** (frame + backbone → located content: "3.2 정산 기준 표"
+— alignment over OCR), **flow** (journey log → activity judgments:
+"영상 보며 노트테이킹 중", including document-growth detection),
+**change** (client-side 500ms diff loop, zero API cost, emits
+context_switch / scroll_settle / dwell / chat — event-driven
+attention, not clock sampling). **Frames are ephemeral**: read in
+memory, never written to disk, discarded after the observation
+text is stored; the flight record keeps context but not the image.
+Honesty floor: '자료 밖' over forced alignment; unread over
+guessed; confidence caps how strongly the coach may speak.
+
+In-session conversation is **web chat on the same page** (the
+getDisplayMedia stream dies on navigation, so it must be): each
+turn attaches the CURRENT frame (~1s freshness — the raw frame
+rides inside the reply call itself); replies stream over SSE with a
+160-char holdback so trailing markers never reach the user; guards
+are log-only on streamed turns (a read reply cannot be retried).
+One thread, one memory: web turns store into the same messages
+table (`channel='web'`) and both channels read both. Lifecycle is
+server-templated in the understated register ("세션 시작했네. 보고
+있을게." / "오늘 세션은 여기까지 기록해뒀어") — enthusiasm about
+watching reads as surveillance wearing a smile; a dead session
+(missed heartbeats, >60s) speaks nothing. Consent is layered:
+Privacy Policy disclosure + versioned /screen-consent document +
+just-in-time acceptance panel recorded per (user, doc, version) in
+`user_consents`, with a 428 server gate.
+
+### 8.4 Multi-user (M1-M4, shipped 2026-08-05)
+
+Identity lives in the DB: `user_profiles.phone` (E.164; rebinding
+another user's number is refused — a silent rebind reroutes a
+whole conversation) + `status` active/paused. Routing is DB-first
+with the TUTOR_* env pair as fallback. Both cron entry points fan
+out over the roster with **per-user crash isolation** (one user's
+failure becomes `cron_user_failed`; the loop continues — the
+alternative is invisible whole-roster silence). Signup activation
+is one operator click: profile + phone + real name from the form +
+magic token + welcome email (the /my link; Resend, with a
+User-Agent header because Cloudflare bans urllib's default) →
+the next evening slot opens onboarding. SMS consent is structural:
+a signup without the checked box cannot be activated for texting.
+Operator tools: `nudge` (evening's twin, time-agnostic, honestly
+labeled `cron_nudge`, per-user only — manual sends must not
+corrupt slot-conditioned data), `reset-user` (back to birth
+keeping phone/email/token; consent wiped so JIT runs again),
+`bind-phone`, `/debug/signups`. Inbound bursts fold: per-user lock
++ dual freshness check → every burst gets exactly one reply,
+written with the full burst in view.
+
+### 8.5 Open — deliberately undesigned or deferred
+
+- **Post-onboarding offer delivery machinery**: none yet, on
+  purpose — observe the husband's first delivery before building
+  (the question-bank idea was rejected as user-overfit; the generic
+  layer, if needed, is material-content access at generation time).
+- **KNOWN INCONSISTENCY (fix queued)**: the capability stock in
+  sms_shared still says the coach cannot see the screen; sessions
+  shipped. Update the stock + the offer surface to include live
+  co-viewing.
+- Quiet-prompt trigger during walkthrough sessions (speak-first on
+  screen activity): policy undecided, v1.1.
+- Name extraction in analyze (users who skip the form name).
+- Phone-native capture (ReplayKit; founder's iOS background),
+  extension + tab telemetry, RCS/iMessage typing indicators: all
+  post-pilot.
