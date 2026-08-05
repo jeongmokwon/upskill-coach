@@ -2991,6 +2991,35 @@ def save_observation(session_id, user_id, summary):
     conn.close()
 
 
+def get_sms_signup(signup_id):
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM sms_signups WHERE id = {_P}", (signup_id,))
+    row = _fetchone(cur)
+    conn.close()
+    return row
+
+
+def get_pending_signups():
+    """Waiting consent records, oldest first — the operator's inbox."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM sms_signups WHERE status = 'pending' "
+        f"ORDER BY id")
+    rows = _fetchall(cur)
+    conn.close()
+    return rows
+
+
+def set_signup_status(signup_id, status):
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE sms_signups SET status = {_P} WHERE id = {_P}",
+        (status, signup_id))
+    conn.commit()
+    conn.close()
+
+
 def save_sms_signup(phone, name="", email="", consent_checkins=False,
                     consent_support=False):
     """Record a web opt-in consent (phone already normalized E.164).

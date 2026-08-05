@@ -2802,6 +2802,96 @@ async def _session_consent_handler(request):
     return web.json_response({"ok": True})
 
 
+async def _signups_handler(request):
+    """Operator-only: the activation inbox — pending signups with the
+    exact command to activate each.
+
+    GET /debug/signups?secret=...
+    """
+    import db
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret", "").strip()
+                or request.query.get("secret", "").strip())
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+    rows = db.get_pending_signups()
+    if not rows:
+        return web.Response(text="(no pending signups)\n",
+                            content_type="text/plain")
+    lines = []
+    for r in rows:
+        lines.append(
+            f"#{r['id']} {r.get('name') or '(no name)'} "
+            f"{r['phone']} {r.get('email') or '(no email)'} "
+            f"sms_consent={'Y' if r.get('consent_checkins') else 'N'} "
+            f"at {r['consented_at']}\n"
+            f"  activate: POST /debug/activate?secret=...&signup_id="
+            f"{r['id']}&user_id=<choose-a-slug>")
+    return web.Response(text="\n".join(lines) + "\n",
+                        content_type="text/plain")
+
+
+async def _activate_handler(request):
+    """Operator-only: promote a pending signup to a live user (M3).
+    One click does everything a new user needs:
+
+      profile row + phone binding + email + magic-link token +
+      welcome email (their /my link) + signup marked active +
+      user_activated event
+
+    From that moment the cron fan-out serves them: the next evening
+    slot opens their onboarding conversation.
+
+    POST /debug/activate?secret=..&signup_id=3&user_id=grace1
+    """
+    import db
+    import emailer
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret", "").strip()
+                or request.query.get("secret", "").strip())
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+    sid = (request.query.get("signup_id") or "").strip()
+    user_id = (request.query.get("user_id") or "").strip()
+    if not sid.isdigit() or not user_id.isalnum():
+        return web.Response(status=400,
+                            text="signup_id + alphanumeric user_id required")
+    row = db.get_sms_signup(int(sid))
+    if not row:
+        return web.Response(status=404, text="no such signup")
+    if row["status"] != "pending":
+        return web.Response(status=409,
+                            text=f"signup #{sid} is {row['status']}, not pending")
+    if not row.get("consent_checkins"):
+        # The signup form allows submitting without SMS consent; a
+        # user without the checked box may NOT be texted. Refusing
+        # here keeps the carrier promise structural, not procedural.
+        return web.Response(status=412,
+                            text="no SMS consent on this signup — cannot "
+                                 "activate for texting")
+    if db.get_user_profile_by_id(user_id):
+        return web.Response(status=409, text=f"user {user_id} exists")
+    try:
+        db.ensure_user_profile_row(user_id)
+        db.set_user_phone(user_id, row["phone"], source="activation")
+    except ValueError as e:
+        return web.Response(status=409, text=str(e))
+    email_line = ""
+    if (row.get("email") or "").strip():
+        ok, detail = emailer.send_my_link(user_id, row["email"].strip())
+        email_line = (f"welcome email: sent ({detail})" if ok
+                      else f"welcome email FAILED: {detail}")
+    db.set_signup_status(int(sid), "active")
+    db.log_event(user_id, "user_activated",
+                 {"signup_id": int(sid), "phone": row["phone"],
+                  "name": row.get("name") or "",
+                  "email_sent": bool(email_line.startswith("welcome email: sent"))},
+                 source="operator")
+    return web.Response(
+        text=(f"activated {user_id}: {row['phone']}\n{email_line}\n"
+              f"the next evening cron opens their onboarding.\n"))
+
+
 async def _bind_phone_handler(request):
     """Operator-only: bind a phone number to a user (CRON_SECRET).
     The multi-user backfill path — and the guard against silent
@@ -3631,6 +3721,8 @@ def start_ws_server():
         app.router.add_get("/my", _my_page_handler)
         app.router.add_get("/debug/my-link", _my_token_handler)
         app.router.add_post("/debug/bind-phone", _bind_phone_handler)
+        app.router.add_get("/debug/signups", _signups_handler)
+        app.router.add_post("/debug/activate", _activate_handler)
         app.router.add_post("/debug/email-my-link", _email_my_link_handler)
         app.router.add_post("/my/upload", _my_upload_handler)
         app.router.add_post("/my/link", _my_link_handler)
