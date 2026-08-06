@@ -685,7 +685,19 @@ def _build_materials_block(user_id):
     contains, only the user knows why it exists."""
     mats = db.get_user_materials(user_id)
     if not mats:
-        return ""
+        # Absence is not an assertion. With no block at all, the
+        # model filled the silence from the conversation's narrative
+        # — observed live: the user said "올려놓을게", a day passed,
+        # and the evening cron opened with "워드파일 올려놓은 거
+        # 읽어봤어" about a file that was never uploaded. State the
+        # emptiness explicitly.
+        return (
+            "## Their materials — NONE\n\n"
+            "Their /my page is empty right now. Nothing has been "
+            "shared — no file, no link — whatever the conversation "
+            "says or promises. A promise to upload is not an upload. "
+            "You have read NOTHING of theirs; never speak as if you "
+            "have.")
     lines = ["## Their materials — what they study from",
              "",
              "Two readings live here: your one-time digest (what the "
