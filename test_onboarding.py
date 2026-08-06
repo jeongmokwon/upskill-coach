@@ -277,6 +277,41 @@ check("validated → focus moves to the offer, built FROM the walkthrough",
       "This message's focus: what YOU will do for them, ongoing"
       in p_offer and "the sample they already confirmed" in p_offer)
 
+# ── settled no_material: the ask-to-upload move must not exist ──────
+print("no-material protection")
+U9 = "settled-none"
+db.ensure_user_profile_row(U9)
+db.set_agreed_goal(U9, "g"); db.set_ignition_marker(U9, "m")
+db.set_expectation_sent(U9)
+db.set_material_status(U9, "no_material", source="analyze")
+p9, _ = sms._build_system_prompt("evening", U9)
+r9, _ = sms._build_system_prompt_for_reply(U9)
+check("settled no_material → the standing block bans the upload ask, "
+      "on the scheduled path and the reply path both",
+      "SETTLED as studying without a material" in p9
+      and "the ask-to-upload move does not exist" in p9
+      and "the ask-to-upload move does not exist" in r9)
+check("the door stays ajar — only THEY reopen the settled answer",
+      "only they change it" in p9)
+check("the NONE hallucination guard still stands next to it",
+      "Their materials — NONE" in p9
+      and "A promise to upload is not an upload" in p9)
+mb_unaligned = sms._build_materials_block("matless")
+check("an unaligned ('') empty page keeps today's plain NONE block — "
+      "the settlement rider is only for a stored decision",
+      "Their materials — NONE" in mb_unaligned
+      and "A promise to upload is not an upload" in mb_unaligned
+      and "SETTLED as studying without a material" not in mb_unaligned
+      and "ask-to-upload move" not in mb_unaligned)
+check("offer focus builds from the person, not a walkthrough that "
+      "never happened",
+      "This message's focus: what YOU will do for them, ongoing" in p9
+      and "no material walkthrough to build from" in p9
+      and "the sample they already confirmed" not in p9)
+check("uncertain → ONE targeted discovery question, never the open ask",
+      "ONE targeted discovery question" in p9
+      and "never ask them to produce or upload a material" in p9)
+
 # ── the agreed offer is a standing promise the coach can SEE ────────
 print("offer persistence")
 U5 = "promiser"
