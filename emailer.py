@@ -56,6 +56,37 @@ def send_email(to, subject, text):
         return False, str(e)
 
 
+def send_welcome(user_id, to_email):
+    """The activation welcome email: expectation-setting content plus
+    the user's personal /my upload link, from
+    prompts/welcome_email.md (first line = subject). Records
+    welcome_emailed AND my_link_emailed — the link IS in it, and the
+    walkthrough focus label + resend safety net key on the latter.
+    → (ok, detail)."""
+    import re
+    token = db.ensure_user_token(user_id)
+    link = f"https://www.learningtheo.com/my?k={token}"
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "prompts", "welcome_email.md")
+    with open(path, encoding="utf-8") as f:
+        raw = re.sub(r"<!--.*?-->\s*", "", f.read(), flags=re.DOTALL)
+    subject, _, body = raw.strip().partition("\n")
+    text = body.strip().replace("{link}", link) + "\n"
+    ok, detail = send_email(to_email, subject.strip(), text)
+    if ok:
+        db.set_user_email(user_id, to_email)
+        db.log_event(user_id, "welcome_emailed",
+                     {"to": to_email, "resend_id": detail},
+                     source="emailer")
+        db.log_event(user_id, "my_link_emailed",
+                     {"to": to_email, "via": "welcome"},
+                     source="emailer")
+    else:
+        db.log_event(user_id, "welcome_email_failed",
+                     {"to": to_email, "error": detail}, source="emailer")
+    return ok, detail
+
+
 def send_my_link(user_id, to_email):
     """Email the user their /my magic link. Records my_link_emailed
     on success — the walkthrough focus label keys on that event to

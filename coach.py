@@ -2902,7 +2902,7 @@ async def _activate_handler(request):
         return web.Response(status=409, text=str(e))
     email_line = ""
     if (row.get("email") or "").strip():
-        ok, detail = emailer.send_my_link(user_id, row["email"].strip())
+        ok, detail = emailer.send_welcome(user_id, row["email"].strip())
         email_line = (f"welcome email: sent ({detail})" if ok
                       else f"welcome email FAILED: {detail}")
     db.set_signup_status(int(sid), "active")

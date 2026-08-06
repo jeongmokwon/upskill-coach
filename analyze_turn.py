@@ -161,6 +161,34 @@ _TOOL = {
                 "description": "The coach's sample and the user's "
                                "affirmation, quoted.",
             },
+            "material_status": {
+                "type": "string",
+                "enum": ["has_material", "no_material"],
+                "description": "Only when the conversation SETTLED "
+                               "whether they study from a material. "
+                               "has_material = they named or "
+                               "described one (file, notes, video, "
+                               "course, book — shared or not). "
+                               "no_material = they said nothing "
+                               "exists yet. Omit while it is still "
+                               "unasked or ambiguous.",
+            },
+            "material_named": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                },
+                "description": "When the conversation settled WHICH "
+                               "specific thing they study from but "
+                               "nothing is registered yet (an "
+                               "unsharable book/course/app, or a "
+                               "first material they agreed to) — its "
+                               "name as the user would recognize it, "
+                               "plus their own account of what it "
+                               "covers. Omit if a material is "
+                               "already registered.",
+            },
             "step_completed": {
                 "type": "string",
                 "enum": ["yes", "no", "uncertain", "not_applicable"],
@@ -237,6 +265,8 @@ def _build_system(user_id):
         f"- schedule: {sched.get('raw_text', '(unknown)')}",
         f"- offer (what the coach committed to): "
         f"{prof.get('agreed_offer') or '(unknown)'}",
+        f"- material alignment: "
+        f"{state.get('material_status') or '(not settled)'}",
     ]
     mats = db.get_user_materials(user_id)
     if mats:
@@ -317,7 +347,15 @@ Still missing: {', '.join(state['missing']) or '(nothing)'}
   the letter — the coach demonstrated a sample AND the user
   affirmed it. "그런 건 안 물어봐" is a false; it is also exactly
   the walkthrough working, so record what they DID say in
-  material_wants."""
+  material_wants.
+- material_status is the settled answer to "do they study from
+  something?" — report it the turn the conversation settles it,
+  either way. no_material is a good answer, not a failure; it means
+  the offer gets built without one. Do not infer no_material from
+  silence — only from them saying so.
+- material_named: when they name the specific thing (an unsharable
+  book/course, or a first material just agreed), report it so the
+  server can register the name as the anchor."""
 
 
 def analyze(user_id, trigger="inbound", client=None):
@@ -402,6 +440,18 @@ def _apply(user_id, p, llm_call_id):
                                    status=status, basis=basis,
                                    confidence=conf)
             applied.append(f"ignition_marker({status})")
+
+    status = (p.get("material_status") or "").strip()
+    if status:
+        prof_status = (prof.get("material_status") or "").strip()
+        # A registered material outranks a conversational
+        # "no_material" reading (uploads are facts; readings drift).
+        if status == "no_material" and db.get_user_materials(user_id):
+            print("[ANALYZE] no_material reading ignored — a material "
+                  "is registered", flush=True)
+        elif status != prof_status:
+            db.set_material_status(user_id, status, source="analyze")
+            applied.append(f"material_status({status})")
 
     named = p.get("material_named") or {}
     if (named.get("title") or "").strip() \

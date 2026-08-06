@@ -91,6 +91,8 @@ class FakeAnthropicClient:
 
 
 sms.anthropic.Anthropic = FakeAnthropicClient
+db.ensure_user_profile_row(U)
+db.set_expectation_sent(U)   # step tagging, not expectation, under test
 sent = sms.handle_cron_tick("evening")
 check("marker stripped from outbound text",
       sent is not None and "[STEP" not in sent)
