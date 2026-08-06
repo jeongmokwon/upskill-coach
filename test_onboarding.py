@@ -204,6 +204,10 @@ p_walk, _ = sms._build_system_prompt("evening", U6)
 check("material exists → focus is the walkthrough to a validated sample",
       "lead a walkthrough of 정리본.docx" in p_walk
       and "SAMPLE" in p_walk and "rings true" in p_walk)
+check("a material-less user gets the NONE assertion, not silence",
+      "Their materials — NONE" in sms._build_materials_block("matless")
+      and "A promise to upload is not an upload"
+      in sms._build_materials_block("matless"))
 check("materials block carries both readings, user's words on top",
       "Their materials — what they study from" in p_walk
       and "~40 recall items" in p_walk
