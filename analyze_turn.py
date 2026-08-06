@@ -189,6 +189,25 @@ _TOOL = {
                                "covers. Omit if a material is "
                                "already registered.",
             },
+            "smalltalk_aversion": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "How much this user does NOT want "
+                               "small talk, judged from the "
+                               "ACCUMULATED conversation, not one "
+                               "message. 1.0 = clearly averse: "
+                               "consistently terse, sticks to the "
+                               "point, skips or ignores chit-chat "
+                               "openers. Situational terseness — "
+                               "replying briefly while at work, "
+                               "mid-task — is weak evidence; do not "
+                               "confuse context with preference. "
+                               "Omit the field entirely unless the "
+                               "transcript gives real evidence "
+                               "either way; re-report later when "
+                               "the picture changes.",
+            },
             "step_completed": {
                 "type": "string",
                 "enum": ["yes", "no", "uncertain", "not_applicable"],
@@ -355,7 +374,12 @@ Still missing: {', '.join(state['missing']) or '(nothing)'}
   silence — only from them saying so.
 - material_named: when they name the specific thing (an unsharable
   book/course, or a first material just agreed), report it so the
-  server can register the name as the anchor."""
+  server can register the name as the anchor.
+- smalltalk_aversion is a standing read of the WHOLE transcript,
+  not a verdict on the latest reply — one terse message from
+  someone at work is context, not preference. Report it on real
+  accumulated evidence only, and re-report when the picture
+  changes; the stored value is meant to move."""
 
 
 def analyze(user_id, trigger="inbound", client=None):
@@ -519,6 +543,15 @@ def _apply(user_id, p, llm_call_id):
     if offer and offer != (prof.get("agreed_offer") or "").strip():
         db.set_agreed_offer(user_id, offer, source="analyze")
         applied.append("offer")
+
+    aversion = p.get("smalltalk_aversion")
+    if aversion is not None:
+        # The setter skips near-identical re-reports (the model
+        # restates its read most turns); only actual writes count
+        # as applied.
+        if db.set_smalltalk_aversion(user_id, aversion,
+                                     source="analyze"):
+            applied.append(f"smalltalk_aversion({aversion})")
 
     direction = (p.get("path_direction") or "").strip()
     if direction:
