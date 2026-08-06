@@ -280,6 +280,7 @@ M4 = "m4"
 db.ensure_user_profile_row(M4)
 db.set_agreed_goal(M4, "g"); db.save_learning_path(M4, "d", "p", "c")
 db.set_ignition_marker(M4, "opens the file")
+db.set_expectation_sent(M4)
 _fid, _ = materials.register_upload(M4, "정리본.docx", DOCX)
 materials.digest_material(_fid)
 
@@ -320,6 +321,7 @@ M7 = "m7"
 db.ensure_user_profile_row(M7)
 db.set_agreed_goal(M7, "g"); db.save_learning_path(M7, "d", "p", "c")
 db.set_ignition_marker(M7, "m")
+db.set_expectation_sent(M7)
 _fid4, _ = materials.register_upload(M7, "정리본.docx", DOCX)
 materials.digest_material(_fid4)
 check("closed WhatsApp window → refusal recorded, nothing sent",

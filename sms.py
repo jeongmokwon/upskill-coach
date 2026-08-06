@@ -867,17 +867,50 @@ def _strip_extraction_markers(user_id, text):
     return text
 
 
+def _expectation_due(user_id):
+    """True when the fixed expectation-setting message (checklist v2
+    item 1) must go out before anything else does."""
+    state = db.get_onboarding_state(user_id)
+    return (not state["completed_at"]
+            and "expectation_setting" in state["missing"])
+
+
+def send_expectation_message(user_id, to_number, trigger):
+    """Deliver the fixed expectation-setting text (identical for
+    every user, from prompts/expectation_setting.md), stamp the
+    checklist item, record everything. SERVER-SENT by design: the one
+    onboarding item with zero LLM variance. Returns the text, or None
+    if sending failed."""
+    text = _read_prompt("expectation_setting").strip()
+    if not text:
+        print("[SMS] ⚠️ expectation_setting.md is empty — not sending",
+              flush=True)
+        return None
+    send_sms(to_number, text, user_id=user_id)
+    db.save_sms_message(user_id, "assistant", text, "out")
+    db.set_expectation_sent(user_id, source="sms")
+    db.log_event(user_id, "sms_out",
+                 {"text": text, "trigger": trigger,
+                  "server_sent": True}, source="sms")
+    return text
+
+
 def ensure_my_link_delivered(user_id):
-    """When the onboarding focus reaches material_walkthrough with no
+    """When the onboarding focus reaches the material items with no
     materials, no link email on record, and an email address on file
     — send the /my link email NOW, so the coach can honestly say
-    '메일함 봐봐'. Without this, the coach improvises a tokenless URL
-    (observed live: 'learningtheo.com/my에 올려줄래?' — a 404 for the
-    user). Idempotent via the my_link_emailed event. Never raises."""
+    '메일함 봐봐'. Since activation started sending the welcome email
+    (which carries the link and logs my_link_emailed), this is the
+    safety net for users activated without an email address whose
+    address arrived later. Without it, the coach improvises a
+    tokenless URL (observed live: 'learningtheo.com/my에 올려줄래?' —
+    a 404 for the user). Idempotent via the my_link_emailed event.
+    Never raises."""
     try:
         state = db.get_onboarding_state(user_id)
         if state["completed_at"] or not state["missing"] \
-                or state["missing"][0] != "material_walkthrough":
+                or state["missing"][0] not in ("material_alignment",
+                                               "material_understanding"):
             return
         if db.get_user_materials(user_id):
             return
@@ -894,43 +927,61 @@ def ensure_my_link_delivered(user_id):
         print(f"[SMS] ⚠️ my-link auto-delivery failed: {e}", flush=True)
 
 
+def _link_pointer(user_id):
+    """How the coach may refer to the /my upload link, by whether an
+    email carrying it has actually gone out."""
+    emailed = any(e["kind"] == "my_link_emailed"
+                  for e in db.get_events(user_id, limit=300))
+    return ("you already emailed them their private page link — "
+            "point them at their INBOX ('메일함 봐봐, 내가 링크 "
+            "하나 보내놨어'), never paste the link itself into a "
+            "text"
+            if emailed else
+            "their /my page takes a file or a link, but do NOT "
+            "send that link over SMS — it reaches them by email")
+
+
+def _alignment_label(user_id):
+    """The material_alignment focus: settle WHAT they study from —
+    or that nothing exists yet. Both answers are fine; the point is
+    that it becomes stored fact instead of per-turn guessing."""
+    return (
+        "settle what they actually study from — a file, notes, a "
+        "video, a course, a book — or that nothing exists yet. Both "
+        "answers are equally good outcomes; this is a question about "
+        "their reality, not a push to produce something. If they "
+        "HAVE something: " + _link_pointer(user_id) + ". If it is "
+        "unsharable (a book, a course, an app), have them NAME it — "
+        "the name becomes the anchor. If there IS no material yet — "
+        "they said so; believe them. Do NOT recite an ask-to-see "
+        "line at them (observed live: the coach said '네가 얘기한 그 "
+        "자료, 직접 보면—' to a user who had JUST said they have "
+        "nothing — a template parrot, and it reads as not "
+        "listening). No material simply means your offer will be "
+        "built without one — perhaps agreeing together what the "
+        "first material should be, perhaps something YOU build for "
+        "them piece by piece (drafting a concept guide is within "
+        "your stock: you know things)")
+
+
 def _walkthrough_label(user_id):
-    """The material_walkthrough focus, phased by what exists. Before
-    any material: get them to show the thing. After: lead the
+    """The material_understanding focus (only reached once alignment
+    settled on has_material), phased by what exists. Material not yet
+    shown: get them to show or name the thing. After: lead the
     walkthrough to a validated sample."""
     mats = db.get_user_materials(user_id)
     if not mats:
-        emailed = any(e["kind"] == "my_link_emailed"
-                      for e in db.get_events(user_id, limit=300))
-        where = ("you already emailed them their private page link — "
-                 "point them at their INBOX ('메일함 봐봐, 내가 링크 "
-                 "하나 보내놨어'), never paste the link itself into a "
-                 "text"
-                 if emailed else
-                 "their /my page takes a file or a link, but do NOT "
-                 "send that link over SMS — it reaches them by email")
         return (
-            "nothing is registered yet. FIRST read the conversation "
-            "for which situation this actually is — never assume:\n"
+            "they told you a material exists but nothing is "
+            "registered yet. FIRST read the conversation for which "
+            "situation this is — never assume:\n"
             "  (a) They HAVE a material they haven't shown (they "
             "mentioned notes, a file, a video they study from) → ask "
             "to SEE it, with the honest reason that seeing it makes "
-            "you precise; " + where + ".\n"
+            "you precise; " + _link_pointer(user_id) + ".\n"
             "  (b) They study from something unsharable (a book, a "
             "course, an app) → have them NAME it and tell you what "
-            "it covers — the name becomes the anchor.\n"
-            "  (c) There IS no material yet — they said so. Do NOT "
-            "recite the ask-to-see line at them (observed live: the "
-            "coach said '네가 얘기한 그 자료, 직접 보면—' to a user "
-            "who had JUST said they have nothing — a template parrot, "
-            "and it reads as not listening). The walkthrough then "
-            "anchors on what the first material SHOULD BE: agree it "
-            "together ('그럼 첫 자료를 정하자') — something they will "
-            "bring, or something YOU will build for them piece by "
-            "piece in this very conversation (drafting a concept "
-            "guide is within your stock: you know things). Once "
-            "agreed, that named thing IS the material and the "
-            "walkthrough continues on it")
+            "it covers — the name becomes the anchor")
     m = mats[0]
     named = m.get("title") or "their material"
     if db.get_active_screen_session(user_id):
@@ -1000,9 +1051,11 @@ def _build_onboarding_block(user_id):
     state = db.get_onboarding_state(user_id)
     if state["completed_at"]:
         return ""
-    label = {"goal": "their goal, in their own words",
-             "path": "the big-steps picture: direction, a mid-horizon "
-                     "target, and how they'll know it's reached",
+    label = {"expectation_setting": "(server-delivered — the fixed "
+                                    "expectation message goes out "
+                                    "automatically; never try to "
+                                    "deliver or restate it yourself)",
+             "goal": "their goal, in their own words",
              "ignition_marker": "what STARTING one ordinary session "
                                 "observably looks like for them — NOT "
                                 "their goal's success criterion. "
@@ -1020,7 +1073,8 @@ def _build_onboarding_block(user_id):
                                 "in THEIR craft, never a feeling "
                                 "('집중되면')",
              "schedule": "the times of day they want to hear from you",
-             "material_walkthrough": _walkthrough_label(user_id),
+             "material_alignment": _alignment_label(user_id),
+             "material_understanding": _walkthrough_label(user_id),
              "offer": "what YOU will do for them, ongoing. PROPOSE it "
                       "— never ask them what you could do. Build it "
                       "directly from the walkthrough: their own words "
@@ -1031,7 +1085,11 @@ def _build_onboarding_block(user_id):
                       "times.' '내가 뭘 도와줄까?' is the failure mode: "
                       "it hands your job back to them and costs a long "
                       "answer they have no reason to write"}
-    missing = state["missing"]
+    # expectation_setting is the server's job (a fixed message, sent
+    # mechanically) — it is never the LLM's focus. Normally it is
+    # already sent before any LLM call runs; the web-chat path is the
+    # exception, where the next SMS touchpoint will deliver it.
+    missing = [f for f in state["missing"] if f != "expectation_setting"]
     lines = [
         "## Onboarding — what is still unsettled",
         "",
@@ -1713,6 +1771,13 @@ def _reply_to_inbound(user_id, from_number, body, my_msg_id):
         db.log_event(user_id, "sms_out", {"text": reply, "trigger": "later_ack"}, source="sms")
         return reply
 
+    # Checklist v2 gate: a user who texts in before the first cron
+    # touch still gets the fixed expectation message first, as its
+    # own bubble; the LLM reply follows with it already in history.
+    if _expectation_due(user_id):
+        send_expectation_message(user_id, from_number,
+                                 "inbound_expectation")
+
     # If the user is mid-study with the observer running, grab a
     # fresh screen capture before building the reply context.
     _request_fresh_screen(user_id)
@@ -1956,12 +2021,14 @@ def handle_material_ready(user_id, material_id):
     built to reach, so the coach follows up NOW.
 
     Fires only when this upload is the awaited step: onboarding
-    incomplete AND the current focus is material_walkthrough. The
-    WhatsApp window gate still applies. Returns sent text or None."""
+    incomplete AND the current focus is material_understanding (the
+    upload itself just settled alignment, so that is where the focus
+    lands). The WhatsApp window gate still applies. Returns sent
+    text or None."""
     try:
         state = db.get_onboarding_state(user_id)
         if state["completed_at"] or not state["missing"] \
-                or state["missing"][0] != "material_walkthrough":
+                or state["missing"][0] != "material_understanding":
             return None
         if whatsapp_window_closed(user_id):
             db.log_event(user_id, "material_ready_not_sent",
@@ -2147,6 +2214,22 @@ def _cron_tick_for_user(user_id, to_number, slot, window=None):
         context={"phase": db.get_user_phase(user_id)["phase"]})
     if fire_choice != "fire":
         return _skip(f"policy_hold:{fire_decision_id}")
+
+    # Checklist v2 gate: the fixed expectation-setting message is
+    # Theo's first onboarding message, sent by the server — this slot
+    # delivers it INSTEAD of an LLM turn. The next slot (or the
+    # user's reply) opens the conversation proper.
+    if _expectation_due(user_id):
+        text = send_expectation_message(user_id, to_number,
+                                        f"cron_{slot}_expectation")
+        if text is None:
+            return _skip("expectation_prompt_empty")
+        db.mark_onboarding_started(user_id)
+        db.log_event(user_id, "cron_tick",
+                     {"slot": slot, "action": "fired_expectation",
+                      "decision_id": fire_decision_id, **win_extra},
+                     source="cron")
+        return text
 
     system_prompt, prompt_versions = _build_system_prompt(slot, user_id)
     if system_prompt is None:

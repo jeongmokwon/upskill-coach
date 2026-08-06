@@ -270,8 +270,10 @@ check("consent wiped → the JIT flow runs again",
       not db.has_consent("grace1", "screen_share", "2026-08-05"))
 check("magic token survives (their /my link keeps working)",
       db.ensure_user_token("grace1") == _tok_before)
-check("onboarding is back to square one",
-      db.get_onboarding_state("grace1")["missing"][0] == "goal"
+check("onboarding is back to square one — the reset user will get "
+      "the expectation message again",
+      db.get_onboarding_state("grace1")["missing"][0]
+      == "expectation_setting"
       and db.get_onboarding_state("grace1")["completed_at"] is None)
 check("still on the cron roster (phone kept, status default active)",
       "grace1" in {u["user_id"] for u in db.get_active_users()})
@@ -331,6 +333,7 @@ class BurstFake:
 
 
 _sms.anthropic.Anthropic = BurstFake
+db.set_expectation_sent("bursty")   # not this test's subject
 r1 = _sms.handle_inbound("+15550008888", "첫 문자")
 check("a reply drafted before the burst finished is DISCARDED",
       r1 is None
@@ -361,6 +364,7 @@ db.ensure_user_profile_row(LK)
 db.set_user_email(LK, "lk@x.co")
 db.set_agreed_goal(LK, "g"); db.save_learning_path(LK, "d", "p", "c")
 db.set_ignition_marker(LK, "m")
+db.set_expectation_sent(LK)
 _sms.ensure_my_link_delivered(LK)
 check("walkthrough focus + email on file + nothing sent → email fires",
       any(e["kind"] == "my_link_emailed"

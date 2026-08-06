@@ -45,14 +45,22 @@ def events_of(kind):
 print("1) fresh user")
 db.ensure_user_profile_row(U)
 s = db.get_onboarding_state(U)
-check("all five fields missing", s["missing"] == list(db.ONBOARDING_FIELDS)
+check("fresh user misses every applicable field — material_"
+      "understanding stays OFF the list until alignment says "
+      "has_material",
+      s["missing"] == ["expectation_setting", "goal", "ignition_marker",
+                       "material_alignment", "offer", "schedule"]
       and s["started_at"] is None and s["completed_at"] is None)
 check("the first concrete task is NOT an onboarding field — it "
       "belongs to the first session, after a plan exists",
       "bite" not in db.ONBOARDING_FIELDS and "offer" in db.ONBOARDING_FIELDS)
+check("path (v1) left the checklist — live data showed it collapsing "
+      "into a goal restatement",
+      "path" not in db.ONBOARDING_FIELDS)
 
 prompt, _ = sms._build_system_prompt("evening", U)
-check("checklist block injected, focused on the first missing field",
+check("checklist block injected; expectation_setting is the server's "
+      "job so the LLM focus skips to the goal",
       "Onboarding — what is still unsettled" in prompt
       and "This message's focus: their goal" in prompt
       and "Sequence assignment" not in prompt)
@@ -83,14 +91,26 @@ db.save_user_schedule(U, sms.parse_schedule_windows("20:00-22:00"),
 db.set_agreed_goal(U, "become the ML-capable founder")
 db.set_agreed_offer(U, "daily question drills from your notes")
 db.set_ignition_marker(U, "opens the notebook and types")
-check("everything agreed but no validated walkthrough → NOT complete",
+check("agreements alone leave the server-sent and material items open",
       not db.check_and_complete_onboarding(U)
-      and db.get_onboarding_state(U)["missing"] == ["material_walkthrough"])
+      and db.get_onboarding_state(U)["missing"]
+      == ["expectation_setting", "material_alignment"])
+db.set_expectation_sent(U)
+check("expectation delivery is stamped once, idempotently",
+      db.get_onboarding_state(U)["missing"] == ["material_alignment"]
+      and (db.set_expectation_sent(U) or True)
+      and len(events_of("expectation_sent")) == 1)
 _mid = db.add_user_material(U, "link", title="karpathy",
                             source_url="https://yt.be/x")
+check("registering a material settles alignment by itself and "
+      "surfaces material_understanding",
+      db.get_onboarding_state(U)["material_status"] == "has_material"
+      and db.get_onboarding_state(U)["missing"]
+      == ["material_understanding"]
+      and len(events_of("material_aligned")) == 1)
 db.update_material_walkthrough(_mid, status="in_progress")
 check("a material alone is not enough — the sample must be validated",
-      db.get_onboarding_state(U)["missing"] == ["material_walkthrough"])
+      db.get_onboarding_state(U)["missing"] == ["material_understanding"])
 
 # ── 3. last field → completion flips, phase transitions ──────────────
 print("3) completion")
@@ -183,9 +203,11 @@ db.ensure_user_profile_row(U6)
 db.set_agreed_goal(U6, "g"); db.save_learning_path(U6, "d", "p", "c")
 db.set_ignition_marker(U6, "m")
 p_show, _ = sms._build_system_prompt("evening", U6)
-check("no material yet → the label reads the situation, three ways",
-      "FIRST read the conversation" in p_show
-      and "There IS no material yet" in p_show
+check("alignment unsettled → the focus settles what they study from, "
+      "with no_material as a good answer and no template parrot",
+      "This message's focus: settle what they actually study from"
+      in p_show
+      and "believe them" in p_show
       and "template parrot" in p_show
       and "do NOT send that link over SMS" in p_show)
 db.log_event(U6, "my_link_emailed", {"to": "x@y.z"}, source="emailer")
@@ -193,6 +215,38 @@ p_mail, _ = sms._build_system_prompt("evening", U6)
 check("once the link email went out, the focus points at the inbox",
       "point them at their INBOX" in p_mail
       and "메일함 봐봐" in p_mail)
+
+# alignment settled by conversation, in both directions
+U7 = "aligned-nofile"
+db.ensure_user_profile_row(U7)
+db.set_agreed_goal(U7, "g"); db.set_ignition_marker(U7, "m")
+db.set_expectation_sent(U7)
+db.set_material_status(U7, "has_material", source="analyze")
+p_named, _ = sms._build_system_prompt("evening", U7)
+check("has_material with nothing registered → focus asks to see or "
+      "name the thing",
+      db.get_onboarding_state(U7)["missing"][0] == "material_understanding"
+      and "they told you a material exists but nothing is registered"
+      in p_named)
+U8 = "aligned-none"
+db.ensure_user_profile_row(U8)
+db.set_agreed_goal(U8, "g"); db.set_ignition_marker(U8, "m")
+db.set_expectation_sent(U8)
+db.set_material_status(U8, "no_material", source="analyze")
+s8 = db.get_onboarding_state(U8)
+check("no_material skips understanding entirely — offer is next",
+      "material_understanding" not in s8["missing"]
+      and s8["missing"] == ["offer", "schedule"]
+      and "material_alignment" in s8["filled"])
+db.set_agreed_offer(U8, "매일 저녁 개념 하나씩 같이 정리")
+db.save_user_schedule(U8, sms.parse_schedule_windows("20:00-21:00"),
+                      raw_text="20:00-21:00", source="analyze")
+check("a no-material user can complete onboarding",
+      db.check_and_complete_onboarding(U8) is True)
+db.set_material_status(U8, "has_material", source="analyze")
+check("alignment may transition later — a no_material user can "
+      "acquire one",
+      db.get_onboarding_state(U8)["material_status"] == "has_material")
 _wm = db.add_user_material(U6, "file", title="정리본.docx",
                            extracted_text="...")
 db.set_material_digest(_wm, "two sections, ~40 recall items")
@@ -239,6 +293,25 @@ check("once agreed, every later prompt carries the promise verbatim",
 r_after, _ = sms._build_system_prompt_for_reply(U5)
 check("the reply path carries it too",
       "매주 워드파일에서 질문 뽑아 불시에 던져주기" in r_after)
+
+# ── the expectation message: server-sent, first, exactly once ───────
+print("expectation gate")
+UE = "expuser"
+db.ensure_user_profile_row(UE)
+t1 = sms._cron_tick_for_user(UE, "+15550009999", "evening")
+ev = [r for r in db.get_events(UE, limit=50) if r["kind"] == "sms_out"]
+check("first slot delivers the FIXED expectation text, not an LLM turn",
+      t1 is not None and t1.startswith("안녕, 나 Theo야.")
+      and len(ev) == 1
+      and json.loads(ev[0]["payload"]).get("server_sent") is True
+      and json.loads(ev[0]["payload"])["trigger"]
+      == "cron_evening_expectation")
+check("delivery checks the item off and stamps onboarding_started",
+      "expectation_setting" not in db.get_onboarding_state(UE)["missing"]
+      and db.get_onboarding_state(UE)["started_at"] is not None)
+t2 = sms._cron_tick_for_user(UE, "+15550009999", "evening")
+check("the next slot opens the conversation proper (LLM turn)",
+      t2 is not None and "안녕, 나 Theo야." not in t2)
 
 U2 = "veteran"   # deliberately NO ensure_user_profile_row: a forced
                  # completion used to log success and write nothing

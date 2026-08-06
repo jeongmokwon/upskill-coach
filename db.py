@@ -223,12 +223,38 @@ def init_db():
             # 'provisional' (inferred by the analysis pass) vs
             # 'confirmed' (the user said it). See set_ignition_marker.
             ("ignition_marker_status", "TEXT DEFAULT ''"),
+            # Checklist v2 (2026-08-06): when the fixed
+            # expectation-setting message was delivered, and the
+            # settled answer to "do they study from a material?"
+            # ('has_material' / 'no_material' / '' = not aligned yet).
+            ("expectation_sent_at", "TEXT DEFAULT ''"),
+            ("material_status", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.cursor().execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {ddl}")
                 conn.commit()
             except Exception:
                 conn.rollback()
+
+        # Checklist-v2 backfill, once: users already mid-onboarding
+        # never got (and should not retroactively get) the fixed
+        # expectation message — stamp them done. A registered material
+        # settles the alignment question by existing.
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE user_profiles SET expectation_sent_at = %s "
+                "WHERE onboarding_started_at IS NOT NULL "
+                "AND onboarding_started_at != '' "
+                "AND (expectation_sent_at IS NULL OR expectation_sent_at = '')",
+                (datetime.now().isoformat(),))
+            cur.execute(
+                "UPDATE user_profiles SET material_status = 'has_material' "
+                "WHERE (material_status IS NULL OR material_status = '') "
+                "AND user_id IN (SELECT DISTINCT user_id FROM user_materials)")
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
         # Migrate: messages.channel + messages.direction (added with SMS
         # tutor). channel='web' is the historical row type; 'sms' rows are
@@ -447,7 +473,7 @@ def init_db():
         # reaches 'validated' only when the coach produced a sample of
         # its offer (e.g. an insider-plausible question) and the user
         # confirmed it rings true — that validation is what the
-        # material_walkthrough onboarding field will key on.
+        # material_understanding onboarding field will key on.
         conn.cursor().execute("""
             CREATE TABLE IF NOT EXISTS user_materials (
                 id SERIAL PRIMARY KEY,
@@ -695,11 +721,28 @@ def init_db():
             ("phone", "TEXT DEFAULT ''"),
             ("status", "TEXT DEFAULT 'active'"),
             ("ignition_marker_status", "TEXT DEFAULT ''"),
+            # Checklist v2 — see Postgres branch for rationale.
+            ("expectation_sent_at", "TEXT DEFAULT ''"),
+            ("material_status", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {default}")
             except Exception:
                 pass
+        # Checklist-v2 backfill — see Postgres branch for rationale.
+        try:
+            conn.execute(
+                "UPDATE user_profiles SET expectation_sent_at = ? "
+                "WHERE onboarding_started_at IS NOT NULL "
+                "AND onboarding_started_at != '' "
+                "AND (expectation_sent_at IS NULL OR expectation_sent_at = '')",
+                (datetime.now().isoformat(),))
+            conn.execute(
+                "UPDATE user_profiles SET material_status = 'has_material' "
+                "WHERE (material_status IS NULL OR material_status = '') "
+                "AND user_id IN (SELECT DISTINCT user_id FROM user_materials)")
+        except Exception:
+            pass
         # SMS tutor migration — see Postgres branch above for rationale.
         for col, default in [
             ("channel", "TEXT DEFAULT 'web'"),
@@ -1996,6 +2039,45 @@ def set_agreed_offer(user_id, offer_text, source="analyze"):
     log_event(user_id, "offer_set", {"offer": offer_text}, source=source)
 
 
+def set_expectation_sent(user_id, source="sms"):
+    """Stamp the expectation-setting delivery (checklist v2 item 1).
+    Idempotent: an existing stamp is kept."""
+    ensure_user_profile_row(user_id)
+    prof = get_user_profile_by_id(user_id) or {}
+    if (prof.get("expectation_sent_at") or "").strip():
+        return
+    now = datetime.now().isoformat()
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET expectation_sent_at = {_P} "
+        f"WHERE user_id = {_P}", (now, user_id))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "expectation_sent", {}, source=source)
+
+
+def set_material_status(user_id, status, source="analyze"):
+    """Persist the settled answer to "do they study from a material?"
+    — 'has_material' or 'no_material'. Transitions are allowed (a
+    no-material user can acquire one later); same-value writes are
+    skipped."""
+    if status not in ("has_material", "no_material"):
+        raise ValueError(f"bad material_status {status!r}")
+    ensure_user_profile_row(user_id)
+    prof = get_user_profile_by_id(user_id) or {}
+    if (prof.get("material_status") or "").strip() == status:
+        return
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET material_status = {_P} "
+        f"WHERE user_id = {_P}", (status, user_id))
+    conn.commit()
+    conn.close()
+    print(f"  [DB] material_status for {user_id}: {status}", flush=True)
+    log_event(user_id, "material_aligned", {"status": status},
+              source=source)
+
+
 # ─── Learning materials + magic-link tokens (offer-loop arc) ────────
 
 MATERIAL_KINDS = ("file", "link", "named")
@@ -2033,6 +2115,10 @@ def add_user_material(user_id, kind, title="", source_url="",
               {"material_id": material_id, "kind": kind, "title": title,
                "source_url": source_url},
               source=source)
+    # A registered material IS the alignment answer (checklist v2):
+    # an upload settles 'has_material' more authoritatively than any
+    # conversation reading could.
+    set_material_status(user_id, "has_material", source=source)
     return material_id
 
 
@@ -2127,7 +2213,7 @@ def update_material_walkthrough(material_id, user_description=None,
 
 def has_validated_material(user_id):
     """True once any material's walkthrough reached 'validated' — the
-    mechanical fill condition for the material_walkthrough onboarding
+    mechanical fill condition for the material_understanding onboarding
     field."""
     conn = get_conn()
     cur = _execute(conn,
@@ -2475,54 +2561,76 @@ def mark_onboarding_started(user_id):
     return now
 
 
-# Order IS the onboarding arc (brief §7): discover the goal, widen it
-# into a path, TELL THEM WHAT THE COACH WILL DO and get that
-# confirmed, agree when to message, agree what "started" looks like,
-# then land one concrete task. The prompt shows only the first
+# Order IS the onboarding arc (checklist v2, 2026-08-06): set
+# expectations, discover the goal, agree what "started" looks like,
+# settle whether they study from a material, understand that material
+# (only if one exists), TELL THEM WHAT THE COACH WILL DO and get that
+# confirmed, agree when to message. The prompt shows only the first
 # unsettled item as the current focus.
+#
 # The order IS the arc. `bite` is deliberately NOT here: the first
 # concrete task belongs to the first study session, which happens
-# AFTER onboarding completes and the sequence plan exists.
+# AFTER onboarding completes and the sequence plan exists. `path`
+# (v1) is gone: live data showed it collapsing into a goal
+# restatement; the goal carries the direction.
 #
-# material_walkthrough sits BEFORE offer on purpose: the offer is
-# built FROM the walkthrough. The user shows Theo what they study
-# from (/my upload, a link, or just naming it), Theo leads a
-# walkthrough until it can produce a sample of its offer (an
-# insider-plausible question, a next-piece cut), and the user
-# confirming that sample is what fills the field. Onboarding
-# completion thus means: Theo understands its job for this user —
-# not merely that five values got collected.
-ONBOARDING_FIELDS = ("goal", "path", "ignition_marker",
-                     "material_walkthrough", "offer", "schedule")
+# - expectation_setting is SERVER-SENT: a fixed message identical
+#   for every user, checked off by delivery — never an LLM's job.
+# - material_alignment is the settled answer to "do they study from
+#   something?" — 'has_material' or 'no_material', both fine. Stored
+#   fact, not inference: the no-material parrot bug came from leaving
+#   this to per-turn guessing.
+# - material_understanding exists ONLY for has_material users, and
+#   sits BEFORE offer on purpose: the offer is built FROM the
+#   walkthrough. The user shows Theo the thing (/my upload, a link,
+#   or naming it), Theo leads a walkthrough until it can produce a
+#   sample of its offer, and the user confirming that sample is what
+#   fills the field. No-material users go straight to offer.
+ONBOARDING_FIELDS = ("expectation_setting", "goal", "ignition_marker",
+                     "material_alignment", "material_understanding",
+                     "offer", "schedule")
 
 
 def get_onboarding_state(user_id):
     """→ {'started_at', 'completed_at', 'missing': [...], 'filled':
-    [...]} — the checklist, computed mechanically from stored data."""
+    [...], 'material_status'} — the checklist, computed mechanically
+    from stored data. material_understanding is conditional: it only
+    appears (in either list) once alignment settled on has_material."""
     prof = get_user_profile_by_id(user_id) or {}
+    mat_status = (prof.get("material_status") or "").strip()
+    if not mat_status and get_user_materials(user_id):
+        # A registered material settles alignment by existing, even
+        # if the analyze pass never wrote the column.
+        mat_status = "has_material"
     filled = []
+    if (prof.get("expectation_sent_at") or "").strip():
+        filled.append("expectation_setting")
     if (prof.get("agreed_goal") or "").strip():
         filled.append("goal")
-    if get_current_path(user_id):
-        filled.append("path")
     if (prof.get("ignition_marker") or "").strip():
         filled.append("ignition_marker")
-    if has_validated_material(user_id):
-        filled.append("material_walkthrough")
+    if mat_status:
+        filled.append("material_alignment")
+    if mat_status == "has_material" and has_validated_material(user_id):
+        filled.append("material_understanding")
     if get_user_schedule(user_id):
         filled.append("schedule")
     if (prof.get("agreed_offer") or "").strip():
         filled.append("offer")
+    applicable = [f for f in ONBOARDING_FIELDS
+                  if f != "material_understanding"
+                  or mat_status == "has_material"]
     return {
         "started_at": prof.get("onboarding_started_at"),
         "completed_at": prof.get("onboarding_completed_at"),
+        "material_status": mat_status,
         "filled": filled,
-        "missing": [f for f in ONBOARDING_FIELDS if f not in filled],
+        "missing": [f for f in applicable if f not in filled],
     }
 
 
 def check_and_complete_onboarding(user_id, force=False):
-    """If all five fields are filled (or force=True, operator
+    """If every applicable field is filled (or force=True, operator
     override/backfill) and not yet completed: stamp completed_at,
     transition discovery→first_bite, emit events. Returns True if
     completion happened on THIS call."""

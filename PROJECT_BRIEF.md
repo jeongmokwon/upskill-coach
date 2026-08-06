@@ -257,10 +257,27 @@ onboarding step — the freshest window there is.
 
 Completion no longer means "fields collected"; it means **Theo
 understands its job for this user well enough that the user
-confirmed a sample of it.** `ONBOARDING_FIELDS = (goal, path,
-ignition_marker, material_walkthrough, offer, schedule)` — order IS
-the arc; `bite` is gone (the first task belongs to the first
-session, after a plan exists). The walkthrough: Theo-led, anchored
+confirmed a sample of it.** Checklist v2 (2026-08-06, from the
+husband-transcript review): `ONBOARDING_FIELDS =
+(expectation_setting, goal, ignition_marker, material_alignment,
+material_understanding, offer, schedule)` — order IS the arc.
+`bite` is gone (the first task belongs to the first session, after
+a plan exists) and `path` is gone (live data showed it collapsing
+into a goal restatement). **expectation_setting is server-sent**: a
+fixed message identical for every user
+(prompts/expectation_setting.md), delivered as Theo's first
+onboarding message by the cron/inbound gates, checked off by
+delivery — zero LLM variance; the activation welcome email
+(prompts/welcome_email.md) carries the same content plus the /my
+upload link. **material_alignment** stores the settled answer to
+"do they study from something?" (`material_status`:
+has_material/no_material — registering a material settles it
+automatically; analyze fills it from conversation; transitions
+allowed). No-material users skip **material_understanding** (the
+walkthrough, renamed) and go straight to offer — absence is a
+stored fact now, not a per-turn inference, which structurally
+retires the template-parrot failure. The walkthrough: Theo-led,
+anchored
 to the material (on screen when a session is live), elicits via
 EXAMPLES not abstractions, pins its questions to exact
 sections/pages, one question a turn. Exit is licensed ONLY by the

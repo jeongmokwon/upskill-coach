@@ -35,6 +35,9 @@ db.init_db()
 
 import sms  # noqa: E402
 
+db.ensure_user_profile_row("hub")
+db.set_expectation_sent("hub")   # scheduling, not expectation, under test
+
 U = "hub"
 PASS = []
 
