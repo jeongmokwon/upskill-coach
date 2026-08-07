@@ -26,8 +26,9 @@ Answer with ONLY a JSON object:
 message your answer rests on, or 'none' if the answer rests on the
 absence of something>"}
 
-Judge only what the question asks — not tone, not quality, not
-whether you would have written it differently."""
+Output the JSON FIRST — no analysis before it. Judge only what the
+question asks — not tone, not quality, not whether you would have
+written it differently."""
 
 
 def _one_vote(client, reply, judge):
@@ -35,8 +36,12 @@ def _one_vote(client, reply, judge):
         if judge.facts else ""
     msg = (f"{facts}The coach's message:\n---\n{reply}\n---\n\n"
            f"Question: {judge.question}")
+    # 400, not 200: verification-flavored questions tempt the grader
+    # into analysis first, and a cap mid-analysis means no JSON at
+    # all — which scores as a fail vote (observed: C6's digest check
+    # dropped 5/5 → 2/5 purely on truncated grader output).
     resp = client.messages.create(
-        model=JUDGE_MODEL, max_tokens=200, system=_SYSTEM,
+        model=JUDGE_MODEL, max_tokens=400, system=_SYSTEM,
         messages=[{"role": "user", "content": msg}])
     text = "".join(b.text for b in resp.content
                    if getattr(b, "type", "") == "text").strip()
