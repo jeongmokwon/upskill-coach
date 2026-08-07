@@ -383,5 +383,36 @@ check("a user whose focus is still the goal gets no email yet",
       not [e for e in db.get_events(GOALLESS, limit=20)
            if e["kind"] == "my_link_emailed"])
 
+# ── 11. schedule-tick isolation: a window fires ITS user only ───────
+print("11) schedule-tick isolation")
+from datetime import datetime as _dt
+
+db.ensure_user_profile_row("winA"); db.set_user_phone("winA", "+15550003311")
+db.ensure_user_profile_row("winB"); db.set_user_phone("winB", "+15550003312")
+for _u in ("winA", "winB"):
+    db.set_expectation_sent(_u)
+db.save_user_schedule("winA", _sms.parse_schedule_windows("09:00-10:00"),
+                      raw_text="09:00-10:00", source="test")
+db.save_user_schedule("winB", _sms.parse_schedule_windows("20:00-20:15"),
+                      raw_text="20:00-20:15", source="test")
+# winA needs prior thread for the morning slot's no_thread gate
+db.save_sms_message("winA", "user", "hi", "in")
+
+
+def _outs(u):
+    return [r for r in db.get_events(u, limit=50) if r["kind"] == "sms_out"]
+
+
+beforeA, beforeB = len(_outs("winA")), len(_outs("winB"))
+_sms.handle_schedule_tick(now=_dt.now().replace(hour=9, minute=1))
+check("9am tick fires the 9am user's window",
+      len(_outs("winA")) == beforeA + 1)
+check("— and ONLY that user (observed live: one user's window texted "
+      "the whole roster)",
+      len(_outs("winB")) == beforeB
+      and not [r for r in db.get_events("winB", limit=20)
+               if r["kind"] == "cron_tick"
+               and "09:00" in (r["payload"] or "")])
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

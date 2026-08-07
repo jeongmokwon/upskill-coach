@@ -2507,7 +2507,22 @@ def _schedule_tick_for_user(user_id, now=None):
         slot = "morning" if start_hour < 12 else "evening"
         print(f"[SMS] schedule-tick: window {token} → {slot} semantics",
               flush=True)
-        return handle_cron_tick(slot, window=token)
+        # THIS user's window fires THIS user only. It used to call
+        # handle_cron_tick (the M2 all-users fan-out) — a single-user-
+        # era leftover, observed live 2026-08-07: one user's 09:00
+        # window texted every user on the roster, and the night
+        # before, another user's 20:00 window double-sent the first
+        # (11 minutes after his own fixed evening cron).
+        phone = _phone_for(user_id)
+        if not phone:
+            print(f"[SMS] schedule-tick: no phone bound for {user_id} "
+                  f"— window {token} skipped", flush=True)
+            db.log_event(user_id, "cron_tick",
+                         {"slot": slot, "action": "skipped",
+                          "reason": "no_phone_bound", "window": token},
+                         source="cron")
+            return None
+        return _cron_tick_for_user(user_id, phone, slot, window=token)
     return None
 
 
