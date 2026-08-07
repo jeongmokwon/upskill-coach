@@ -724,10 +724,11 @@ def _build_materials_block(user_id):
             "shared — no file, no link — whatever the conversation "
             "says or promises. A promise to upload is not an upload. "
             "You have read NOTHING of theirs; never speak as if you "
-            "have. Until something actually arrives, speak of the "
-            "upload only as a future or open question — never in "
-            "words that presuppose it happened ('올려놓은 거' "
-            "assumes; '올렸어?' asks).")
+            "have. Only THEY can upload, and they have not: if you "
+            "mention the upload, ask whether they have done it yet "
+            "('자료 올렸어?') — never '올려놓은 거', which speaks as "
+            "if an upload (theirs, or worse, yours) already "
+            "happened.")
         # An empty page reads two ways, and only the stored alignment
         # tells them apart. Unsettled ('') means the question is still
         # open. Settled no_material means the emptiness IS the answer
@@ -1489,6 +1490,22 @@ _EXPECT_MARKER_RE = re.compile(r'\[EXPECT:\s*([a-z_]+)\s*\]', re.IGNORECASE)
 MAX_QUESTIONS = 1
 _QUESTION_RE = re.compile(r"[?？]")
 
+# The role-swap phrasing family: "~해놓은 거" speaks as the party who
+# DID the action ("문자 보내놓은 거 확인했어?" = I sent, you check).
+# Observed (eval C1, ~1/5 generations): "자료 올려놓은 거 확인했어?"
+# — the coach speaking as if IT had uploaded something, to a user
+# whose upload never arrived. Only the user can upload; with zero
+# materials registered this phrasing cannot be honest from anyone,
+# so it is mechanically checkable — the narrow-guard exception to
+# "hallucinations are judge work".
+_UPLOADED_THING_RE = re.compile(
+    r"올려\s*(?:놓은|둔|준)\s*(?:거|파일|자료)")
+_UPLOAD_GUARD_MSG = (
+    "Only the USER can upload, to their /my page — you never upload "
+    "anything, and nothing has been uploaded by anyone. If you "
+    "mention the upload, ask whether THEY have done it yet ('자료 "
+    "올렸어?'). Remove every reference to an already-uploaded thing.")
+
 # [HOLD: "reason"] — deliberate silence needs a recorded WHY. Sending
 # nothing is a real intervention; without a reason in the log the
 # operator cannot tell a considered hold from a broken pipeline.
@@ -1503,8 +1520,9 @@ def _process_hold_reason(text):
     return m.group(1).strip(), _HOLD_REASON_RE.sub("", text).strip()
 
 
-def check_send_guards(text, steps):
-    """→ list of violation strings ([] = clean)."""
+def check_send_guards(text, steps, user_id=None):
+    """→ list of violation strings ([] = clean). `user_id` enables
+    the state-conditioned guards (they read the DB)."""
     violations = []
     n = len(_QUESTION_RE.findall(text or ""))
     if n > MAX_QUESTIONS:
@@ -1516,6 +1534,9 @@ def check_send_guards(text, steps):
         violations.append(
             "missing [STEP: ...] — every message must record the "
             "coaching move(s) it plays.")
+    if (user_id and _UPLOADED_THING_RE.search(text or "")
+            and not db.get_user_materials(user_id)):
+        violations.append(_UPLOAD_GUARD_MSG)
     return violations
 
 
@@ -1591,7 +1612,7 @@ def generate_message(user_id, system_prompt, history, trigger,
                                "unanswered.")]
             continue
 
-        violations = check_send_guards(text, steps)
+        violations = check_send_guards(text, steps, user_id=user_id)
         # Two rewrite attempts for guard violations (was one): the
         # one-question rule failed through a single retry twice in
         # one live evening — both the draft AND its rewrite carried
@@ -1600,15 +1621,16 @@ def generate_message(user_id, system_prompt, history, trigger,
             break
         print(f"[SMS] guard violation, regenerating: {violations}",
               flush=True)
+        tail = "\nRewrite the SAME message."
+        if any("questions in one message" in v for v in violations):
+            tail += (" Keep the one most important question exactly; "
+                     "every other question must become a statement "
+                     "or disappear — do not merge them into a "
+                     "bigger question.")
         attempt_history = attempt_history + [
             {"role": "assistant", "content": raw},
             _server_turn("Your draft broke a hard rule:\n- "
-                         + "\n- ".join(violations)
-                         + "\nRewrite the SAME message. Keep the one "
-                           "most important question exactly; every "
-                           "other question must become a statement "
-                           "or disappear — do not merge them into a "
-                           "bigger question.")]
+                         + "\n- ".join(violations) + tail)]
 
     if violations:
         print(f"[SMS] ⚠️ sending despite violations: {violations}",
@@ -2043,7 +2065,7 @@ def finish_web_turn(user_id, session_id, raw_text, system_prompt,
     text = _strip_extraction_markers(user_id, text)
     if not text.strip():
         return ""
-    violations = check_send_guards(text, steps)
+    violations = check_send_guards(text, steps, user_id=user_id)
     if violations:
         db.log_event(user_id, "send_guard_violation",
                      {"violations": violations,
