@@ -40,13 +40,19 @@ def _one_vote(client, reply, judge):
         messages=[{"role": "user", "content": msg}])
     text = "".join(b.text for b in resp.content
                    if getattr(b, "type", "") == "text").strip()
-    try:
-        start, end = text.index("{"), text.rindex("}") + 1
-        parsed = json.loads(text[start:end])
-        return (str(parsed.get("answer", "")).strip().lower(),
-                str(parsed.get("evidence", ""))[:200])
-    except Exception:
-        return "unparseable", text[:200]
+    # The grader sometimes reasons in prose before/after the JSON;
+    # hunt for the answer object itself rather than trusting the
+    # outermost braces (observed: prose after the object made the
+    # first-to-last-brace span unparseable → a spurious fail vote).
+    import re as _re
+    for m in _re.finditer(r"\{[^{}]*\"answer\"[^{}]*\}", text, _re.S):
+        try:
+            parsed = json.loads(m.group(0))
+            return (str(parsed.get("answer", "")).strip().lower(),
+                    str(parsed.get("evidence", ""))[:200])
+        except Exception:
+            continue
+    return "unparseable", text[:200]
 
 
 def grade(reply, judge, client=None):
