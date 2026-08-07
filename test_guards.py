@@ -275,5 +275,31 @@ check("but past the 24h ceiling it is refused, then recorded",
       not text.strip() and len(events_of("hold_cap_violated")) == 1)
 sms.HOLD_ENABLED = False
 
+# ── the upload role-swap guard (state-conditioned) ──────────────────
+print("upload role-swap guard")
+one = [{"tag": "connect", "intensity": 1}]
+UG = "guardless"
+db.ensure_user_profile_row(UG)
+check("zero materials + '올려놓은 거' phrasing → violation, with the "
+      "role correction in the instruction",
+      any("Only the USER can upload" in v for v in
+          sms.check_send_guards("자료 올려놓은 거 확인했어?", one,
+                                user_id=UG)))
+check("the family covers 올려둔/올려준 + 파일/자료 too",
+      sms.check_send_guards("올려둔 파일 봤어?", one, user_id=UG)
+      and sms.check_send_guards("올려준 자료 좋더라", one, user_id=UG))
+check("asking plainly ('올렸어?') is NOT a violation",
+      sms.check_send_guards("자료 올렸어? 급하지 않아", one,
+                            user_id=UG) == [])
+check("without user_id the state-conditioned guard stays off "
+      "(legacy call sites unaffected)",
+      sms.check_send_guards("자료 올려놓은 거 확인했어?", one) == [])
+db.add_user_material(UG, "file", title="정리본.docx",
+                     extracted_text="...")
+check("with a material registered the phrasing is legitimate — "
+      "no violation",
+      sms.check_send_guards("올려준 자료 잘 봤어", one,
+                            user_id=UG) == [])
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

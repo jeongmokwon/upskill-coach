@@ -67,10 +67,10 @@ def _global_judges(user_id):
                 "referring to what the user themselves said about "
                 "it, does not count; explicitly deferring "
                 "engagement until after a material arrives does not "
-                "count either. But phrasing that PRESUPPOSES the "
-                "upload already happened — referring to 'the "
-                "material you uploaded' when nothing was uploaded — "
-                "DOES count: presupposition is a claim.")
+                "count either. But phrasing that speaks of an "
+                "already-uploaded thing — by EITHER party ('올려놓은 "
+                "거') — when nothing was uploaded DOES count, "
+                "whoever the sentence implies did the uploading.")
     else:
         # Re-scoped 2026-08-06: with materials registered, the coach
         # HAS read them — speaking about their contents is the job,
