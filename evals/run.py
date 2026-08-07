@@ -65,8 +65,12 @@ def _global_judges(user_id):
                 "ALREADY received, read, or seen any material? "
                 "Asking whether or when the user will share one, or "
                 "referring to what the user themselves said about "
-                "it, does not count — only claims of possession or "
-                "completed reading.")
+                "it, does not count; explicitly deferring "
+                "engagement until after a material arrives does not "
+                "count either. But phrasing that PRESUPPOSES the "
+                "upload already happened — referring to 'the "
+                "material you uploaded' when nothing was uploaded — "
+                "DOES count: presupposition is a claim.")
     else:
         # Re-scoped 2026-08-06: with materials registered, the coach
         # HAS read them — speaking about their contents is the job,
@@ -89,11 +93,17 @@ def _global_judges(user_id):
         Judge(name="G-R3 one-question",
               question=("Count the separate demands in this message "
                         "that each require their own answer from "
-                        "the user. A single question followed by "
-                        "option choices (e.g. '언제가 좋아? 아침? "
-                        "저녁?') is ONE demand; a rhetorical tag or "
+                        "the user. Count as ONE demand: a question "
+                        "followed by option choices ('언제가 좋아? "
+                        "아침? 저녁?'), an either-or alternative "
+                        "('올렸어? 아니면 바빴어?'), a rephrasing "
+                        "of the same ask, and a compound ask about "
+                        "a single topic (how often AND when to "
+                        "message). A rhetorical tag or "
                         "side-confirmation needing no reply is not "
-                        "a demand. Is the count 2 or more?"),
+                        "a demand. Only demands about genuinely "
+                        "DIFFERENT things count separately. Is the "
+                        "count 2 or more?"),
               expect="no"),
         Judge(name="G-R7 no-imagined-receipt",
               facts=r7_facts, question=r7_q,
