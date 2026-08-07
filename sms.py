@@ -71,6 +71,12 @@ MODEL = "claude-sonnet-4-5"
 # (compact synthesis of older turns + raw recent N), not a bigger N.
 HISTORY_LIMIT = 50
 
+# Below this the analysis pass's smalltalk_aversion read stays
+# advisory (no prompt block); at or above it the no-small-talk
+# block is enforced. Some pilot users visibly bounced off
+# chit-chat openers.
+SMALLTALK_AVERSION_THRESHOLD = 0.6
+
 # A reply of exactly one of these (case-insensitive, strip
 # punctuation) is treated as a meta-command, not conversation.
 SKIP_TOKENS = {"skip", "stop", "pause", "mute"}
@@ -593,6 +599,27 @@ def _build_context_blocks(user_id, focus_block=None):
         parts.append(facts.format_map(_SafeDict(**_build_placeholders(user_id))))
     except Exception as e:
         print(f"[SMS] ⚠️ user facts block failed: {e}", flush=True)
+    # Enforced only past the threshold — a weak or unjudged read
+    # renders nothing and the persona's default warmth applies. The
+    # value is a living judgment (analyze_turn re-reports it as
+    # conversation accumulates), so the block tracks the user, not
+    # a first impression.
+    try:
+        _aversion = (db.get_user_profile_by_id(user_id) or {}).get(
+            "smalltalk_aversion")
+        if _aversion is not None \
+                and _aversion >= SMALLTALK_AVERSION_THRESHOLD:
+            parts.append(
+                "## No small talk with this user\n\n"
+                "The accumulated conversation shows this user does "
+                "not want chit-chat (confidence "
+                f"{_aversion:.1f}). No weather, no how-was-your-day, "
+                "no filler openers. Warmth is fine, but it rides ON "
+                "the substance — open with the point. This is a "
+                "standing read, re-judged as conversation "
+                "accumulates.")
+    except Exception as e:
+        print(f"[SMS] ⚠️ smalltalk block failed: {e}", flush=True)
     try:
         mat_block = _build_materials_block(user_id)
         if mat_block:

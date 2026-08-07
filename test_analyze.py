@@ -281,6 +281,65 @@ analyze_turn.analyze(N)
 check("a second naming while one exists is ignored (no dup anchor)",
       len(db.get_user_materials(N)) == 1)
 
+# ── 3e. smalltalk aversion — a living judgment, prompt-enforced ──────
+print("3e) smalltalk aversion")
+S = "u_terse"
+db.ensure_user_profile_row(S)
+db.save_sms_message(S, "assistant", "좋은 아침! 오늘 하루 어때?", "out")
+db.save_sms_message(S, "user", "본론만.", "in")
+ToolFake.payload = {
+    "smalltalk_aversion": 0.8,
+    "step_completed": "not_applicable", "step_reason": "-",
+}
+res = analyze_turn.analyze(S)
+check("reported aversion stored + evented",
+      any(a.startswith("smalltalk_aversion") for a in res["applied"])
+      and (db.get_user_profile_by_id(S) or {}).get("smalltalk_aversion")
+      == 0.8
+      and len([r for r in db.get_events(S, limit=30)
+               if r["kind"] == "smalltalk_judged"]) == 1)
+
+ToolFake.payload = {
+    "smalltalk_aversion": 0.82,
+    "step_completed": "not_applicable", "step_reason": "-",
+}
+res = analyze_turn.analyze(S)
+check("re-report within 0.05 is skipped (no churn, no second event)",
+      res["applied"] == []
+      and (db.get_user_profile_by_id(S) or {}).get("smalltalk_aversion")
+      == 0.8
+      and len([r for r in db.get_events(S, limit=30)
+               if r["kind"] == "smalltalk_judged"]) == 1)
+
+ToolFake.payload = {
+    "smalltalk_aversion": 0.3,
+    "step_completed": "not_applicable", "step_reason": "-",
+}
+res = analyze_turn.analyze(S)
+check("a materially different re-report updates (early misread unsticks)",
+      any(a.startswith("smalltalk_aversion") for a in res["applied"])
+      and (db.get_user_profile_by_id(S) or {}).get("smalltalk_aversion")
+      == 0.3
+      and len([r for r in db.get_events(S, limit=30)
+               if r["kind"] == "smalltalk_judged"]) == 2)
+
+# prompt enforcement: at/above the threshold the block appears; below
+# it or unjudged, nothing renders
+db.set_smalltalk_aversion(S, 0.8, source="operator")
+ctx, _ = sms._build_context_blocks(S)
+check("aversion 0.8 → no-small-talk block in the prompt",
+      "## No small talk with this user" in ctx
+      and "confidence 0.8" in ctx)
+db.ensure_user_profile_row("u_chatty")
+db.set_smalltalk_aversion("u_chatty", 0.4, source="operator")
+ctx, _ = sms._build_context_blocks("u_chatty")
+check("aversion 0.4 (below threshold) → no block",
+      "## No small talk with this user" not in ctx)
+db.ensure_user_profile_row("u_unjudged")
+ctx, _ = sms._build_context_blocks("u_unjudged")
+check("unjudged (NULL) → no block",
+      "## No small talk with this user" not in ctx)
+
 # ── 4. step judgment rides the same call ─────────────────────────────
 print("4) step judgment")
 db.save_sequence_plan(U, [
