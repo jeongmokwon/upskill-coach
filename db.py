@@ -229,6 +229,13 @@ def init_db():
             # ('has_material' / 'no_material' / '' = not aligned yet).
             ("expectation_sent_at", "TEXT DEFAULT ''"),
             ("material_status", "TEXT DEFAULT ''"),
+            # How much this user does NOT want small talk, [0,1].
+            # A living judgment: the analysis pass re-reports it as
+            # conversation accumulates, so an early misread does not
+            # stick. NULL = not yet judged. Enforced in the prompt at
+            # SMALLTALK_AVERSION_THRESHOLD (sms.py) — some pilot
+            # users visibly bounced off chit-chat openers.
+            ("smalltalk_aversion", "REAL"),
         ]:
             try:
                 conn.cursor().execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {ddl}")
@@ -252,6 +259,22 @@ def init_db():
                 "UPDATE user_profiles SET material_status = 'has_material' "
                 "WHERE (material_status IS NULL OR material_status = '') "
                 "AND user_id IN (SELECT DISTINCT user_id FROM user_materials)")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
+        # Operator-seeded pilot values (live-pilot review, 2026-08);
+        # NULL-guarded so the analysis pass owns the field afterwards.
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE user_profiles SET smalltalk_aversion = 0.8 "
+                "WHERE user_id = 'chrisyu2' "
+                "AND smalltalk_aversion IS NULL")
+            cur.execute(
+                "UPDATE user_profiles SET smalltalk_aversion = 0.7 "
+                "WHERE user_id = 'jeongmo' "
+                "AND smalltalk_aversion IS NULL")
             conn.commit()
         except Exception:
             conn.rollback()
@@ -724,6 +747,8 @@ def init_db():
             # Checklist v2 — see Postgres branch for rationale.
             ("expectation_sent_at", "TEXT DEFAULT ''"),
             ("material_status", "TEXT DEFAULT ''"),
+            # Small-talk aversion — see Postgres branch for rationale.
+            ("smalltalk_aversion", "REAL"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {default}")
@@ -741,6 +766,19 @@ def init_db():
                 "UPDATE user_profiles SET material_status = 'has_material' "
                 "WHERE (material_status IS NULL OR material_status = '') "
                 "AND user_id IN (SELECT DISTINCT user_id FROM user_materials)")
+        except Exception:
+            pass
+        # Operator-seeded pilot values — see Postgres branch for
+        # rationale. NULL-guarded so analysis owns the field after.
+        try:
+            conn.execute(
+                "UPDATE user_profiles SET smalltalk_aversion = 0.8 "
+                "WHERE user_id = 'chrisyu2' "
+                "AND smalltalk_aversion IS NULL")
+            conn.execute(
+                "UPDATE user_profiles SET smalltalk_aversion = 0.7 "
+                "WHERE user_id = 'jeongmo' "
+                "AND smalltalk_aversion IS NULL")
         except Exception:
             pass
         # SMS tutor migration — see Postgres branch above for rationale.
@@ -2037,6 +2075,32 @@ def set_agreed_offer(user_id, offer_text, source="analyze"):
     print(f"  [DB] Agreed offer saved for {user_id}: {offer_text!r}",
           flush=True)
     log_event(user_id, "offer_set", {"offer": offer_text}, source=source)
+
+
+def set_smalltalk_aversion(user_id, value, source="analyze"):
+    """Persist the analysis pass's read of how much this user does
+    NOT want small talk, [0,1]. A living judgment, not an agreement:
+    re-reports overwrite earlier reads so a misjudged first
+    impression cannot stick. Re-reports within 0.05 of the stored
+    value are skipped — the model restates its read most turns and
+    the event log must not churn. Returns True when it wrote."""
+    value = max(0.0, min(1.0, float(value)))
+    ensure_user_profile_row(user_id)
+    prof = get_user_profile_by_id(user_id) or {}
+    prev = prof.get("smalltalk_aversion")
+    if prev is not None and abs(float(prev) - value) <= 0.05:
+        return False
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET smalltalk_aversion = {_P} "
+        f"WHERE user_id = {_P}", (value, user_id))
+    conn.commit()
+    conn.close()
+    print(f"  [DB] smalltalk_aversion for {user_id}: {value}",
+          flush=True)
+    log_event(user_id, "smalltalk_judged", {"value": value},
+              source=source)
+    return True
 
 
 def set_expectation_sent(user_id, source="sms"):
