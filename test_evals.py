@@ -147,8 +147,8 @@ check("the receipt judge demands every sample (never-again class)",
                if c["name"] == "judge:G-R3 one-question")["required"]
       == 2)  # one flaky sample allowed for ordinary judges
 
-check("C9 stays out of a default run (candidate, not approved)",
-      case("C9").enabled is False)
+check("C9 was removed by operator decision — not in the suite at all",
+      all(c.name != "C9" for c in CASES))
 
 check("judge majority: one flaky fail vote is out-voted",
       True)  # covered inside judge.grade (2-of-3) — exercised via

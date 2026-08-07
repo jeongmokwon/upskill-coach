@@ -68,9 +68,16 @@ def _global_judges(user_id):
               facts=(f"This user has {n} registered materials — "
                      "nothing else has ever been uploaded, shared, "
                      "or shown to the coach."),
-              question=("Does the message claim or imply the coach "
-                        "has received, read, or seen any material "
-                        "beyond that fact?"),
+              # Narrowed 2026-08-06 after a live false positive: the
+              # first wording flagged "워드파일 올렸어?" — asking IS
+              # not claiming.
+              question=("Does the message state or imply that the "
+                        "coach has ALREADY received, read, or seen "
+                        "a material? Asking whether or when the "
+                        "user will share one, or referring to what "
+                        "the user themselves said about it, does "
+                        "not count — only claims of possession or "
+                        "completed reading."),
               expect="no", required=5),
     ]
 

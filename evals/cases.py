@@ -264,22 +264,4 @@ CASES = [
                       "substance — weather, how-was-your-day, "
                       "generic pleasantries?"),
             expect="no")]),
-    Case(
-        name="C9", title="(예비) 휴면 재개장 무요구",
-        user_id="ev_c9", state=_state_c3,
-        history=[
-            {"role": "assistant",
-             "content": "오늘 저녁에 episode 묶는 기준 쪽 정리해봤어?",
-             "ago_hours": 122.0},
-            {"role": "user", "content": "응 조금 봤어",
-             "ago_hours": 121.5},
-        ],
-        trigger=("cron", "evening"),
-        judges=[Judge(
-            name="zero-demand-reopen",
-            question=("Does the message demand an action or ask a "
-                      "question that requires an answer?"),
-            expect="no")],
-        enabled=False,
-        note="candidate only — not on the operator's 8/6 rule list"),
 ]
