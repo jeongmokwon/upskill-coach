@@ -71,6 +71,12 @@ MODEL = "claude-sonnet-4-5"
 # (compact synthesis of older turns + raw recent N), not a bigger N.
 HISTORY_LIMIT = 50
 
+# Below this the analysis pass's smalltalk_aversion read stays
+# advisory (no prompt block); at or above it the no-small-talk
+# block is enforced. Some pilot users visibly bounced off
+# chit-chat openers.
+SMALLTALK_AVERSION_THRESHOLD = 0.6
+
 # A reply of exactly one of these (case-insensitive, strip
 # punctuation) is treated as a meta-command, not conversation.
 SKIP_TOKENS = {"skip", "stop", "pause", "mute"}
@@ -593,6 +599,27 @@ def _build_context_blocks(user_id, focus_block=None):
         parts.append(facts.format_map(_SafeDict(**_build_placeholders(user_id))))
     except Exception as e:
         print(f"[SMS] ⚠️ user facts block failed: {e}", flush=True)
+    # Enforced only past the threshold — a weak or unjudged read
+    # renders nothing and the persona's default warmth applies. The
+    # value is a living judgment (analyze_turn re-reports it as
+    # conversation accumulates), so the block tracks the user, not
+    # a first impression.
+    try:
+        _aversion = (db.get_user_profile_by_id(user_id) or {}).get(
+            "smalltalk_aversion")
+        if _aversion is not None \
+                and _aversion >= SMALLTALK_AVERSION_THRESHOLD:
+            parts.append(
+                "## No small talk with this user\n\n"
+                "The accumulated conversation shows this user does "
+                "not want chit-chat (confidence "
+                f"{_aversion:.1f}). No weather, no how-was-your-day, "
+                "no filler openers. Warmth is fine, but it rides ON "
+                "the substance — open with the point. This is a "
+                "standing read, re-judged as conversation "
+                "accumulates.")
+    except Exception as e:
+        print(f"[SMS] ⚠️ smalltalk block failed: {e}", flush=True)
     try:
         mat_block = _build_materials_block(user_id)
         if mat_block:
@@ -691,13 +718,34 @@ def _build_materials_block(user_id):
         # and the evening cron opened with "워드파일 올려놓은 거
         # 읽어봤어" about a file that was never uploaded. State the
         # emptiness explicitly.
-        return (
+        block = (
             "## Their materials — NONE\n\n"
             "Their /my page is empty right now. Nothing has been "
             "shared — no file, no link — whatever the conversation "
             "says or promises. A promise to upload is not an upload. "
             "You have read NOTHING of theirs; never speak as if you "
             "have.")
+        # An empty page reads two ways, and only the stored alignment
+        # tells them apart. Unsettled ('') means the question is still
+        # open. Settled no_material means the emptiness IS the answer
+        # — observed live: coaches kept treating it as a to-do and
+        # re-asking for an upload the user had already said cannot
+        # exist. This rider must stand in EVERY conversation, not just
+        # the alignment turn, so it lives here rather than in a focus.
+        if (db.get_onboarding_state(user_id)["material_status"]
+                == "no_material"):
+            block += (
+                "\n\n"
+                "And for THIS user, the empty page is not a gap: they "
+                "are SETTLED as studying without a material — a stored "
+                "decision, not something still missing. Never ask them "
+                "to upload, share, link, or register anything, in any "
+                "conversation, ever; the ask-to-upload move does not "
+                "exist for this user. Your offer works without a "
+                "material. If THEY bring up a material on their own, "
+                "engage with it naturally — the settled answer can "
+                "change, but only they change it.")
+        return block
     lines = ["## Their materials — what they study from",
              "",
              "Two readings live here: your one-time digest (what the "
@@ -1044,6 +1092,40 @@ def _walkthrough_label(user_id):
         "licenses nothing")
 
 
+def _offer_label(user_id):
+    """The offer focus: what Theo will do for them, ongoing. Branches
+    on where the raw material for the proposal comes from — a settled
+    no_material user has no walkthrough and no confirmed sample, so
+    pointing the coach at those left it with nothing to build from."""
+    if db.get_onboarding_state(user_id)["material_status"] != "no_material":
+        return ("what YOU will do for them, ongoing. PROPOSE it "
+                "— never ask them what you could do. Build it "
+                "directly from the walkthrough: their own words "
+                "about what they want, and the sample they "
+                "already confirmed. Usually the honest shape is "
+                "'that thing I just did that you said rings true "
+                "— I will keep doing it, like this, at your "
+                "times.' '내가 뭘 도와줄까?' is the failure mode: "
+                "it hands your job back to them and costs a long "
+                "answer they have no reason to write")
+    return ("what YOU will do for them, ongoing — knowing there is "
+            "no material walkthrough to build from here. Build the "
+            "proposal directly from their goal, their ignition "
+            "marker, and everything the conversation has shown you. "
+            "PROPOSE it proactively, within your capability stock: "
+            "showing up at their times, remembering, your own "
+            "knowledge, sitting with them in sessions they start. "
+            "If you are not yet confident what the right offer is, "
+            "do NOT ask an open '내가 뭘 도와줄까?' — that is the "
+            "failure mode here exactly as it is for material users; "
+            "it hands your job back to them. Instead ask ONE "
+            "targeted discovery question about where this learning "
+            "keeps failing in their actual days, and build the "
+            "proposal from the answer. And never ask them to "
+            "produce or upload a material — that rule stands here "
+            "too")
+
+
 def _build_onboarding_block(user_id):
     """The checklist block (P0-A): injected into every call while
     onboarding is incomplete, so the conversation keeps steering
@@ -1075,16 +1157,7 @@ def _build_onboarding_block(user_id):
              "schedule": "the times of day they want to hear from you",
              "material_alignment": _alignment_label(user_id),
              "material_understanding": _walkthrough_label(user_id),
-             "offer": "what YOU will do for them, ongoing. PROPOSE it "
-                      "— never ask them what you could do. Build it "
-                      "directly from the walkthrough: their own words "
-                      "about what they want, and the sample they "
-                      "already confirmed. Usually the honest shape is "
-                      "'that thing I just did that you said rings true "
-                      "— I will keep doing it, like this, at your "
-                      "times.' '내가 뭘 도와줄까?' is the failure mode: "
-                      "it hands your job back to them and costs a long "
-                      "answer they have no reason to write"}
+             "offer": _offer_label(user_id)}
     # expectation_setting is the server's job (a fixed message, sent
     # mechanically) — it is never the LLM's focus. Normally it is
     # already sent before any LLM call runs; the web-chat path is the
