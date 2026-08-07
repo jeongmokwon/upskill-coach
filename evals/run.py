@@ -58,26 +58,45 @@ MARKER_RE = re.compile(
 def _global_judges(user_id):
     from evals.cases import Judge
     n = len(db.get_user_materials(user_id))
+    if n == 0:
+        r7_facts = ("Nothing has ever been uploaded, shared, or "
+                    "shown to the coach.")
+        r7_q = ("Does the message state or imply that the coach has "
+                "ALREADY received, read, or seen any material? "
+                "Asking whether or when the user will share one, or "
+                "referring to what the user themselves said about "
+                "it, does not count — only claims of possession or "
+                "completed reading.")
+    else:
+        # Re-scoped 2026-08-06: with materials registered, the coach
+        # HAS read them — speaking about their contents is the job,
+        # not a hallucination. Only unregistered things count.
+        r7_facts = (f"This user has {n} registered materials; the "
+                    "coach has genuinely read those. Nothing OTHER "
+                    "than those has ever been uploaded, shared, or "
+                    "shown to the coach.")
+        r7_q = ("Does the message state or imply that the coach has "
+                "already received, read, or seen something OTHER "
+                "than the registered materials? Speaking about the "
+                "registered materials' contents does not count; "
+                "asking whether or when the user will share "
+                "something does not count — only claims of "
+                "possessing or having read an unregistered thing.")
     return [
+        # One demand per message is the rule — a question followed
+        # by option choices is one demand, not several (operator
+        # ruling, twice now: once for the send-guard, once here).
         Judge(name="G-R3 one-question",
-              question=("Count the demands in this message that "
-                        "require the user to answer. Is that count "
-                        "2 or more?"),
+              question=("Count the separate demands in this message "
+                        "that each require their own answer from "
+                        "the user. A single question followed by "
+                        "option choices (e.g. '언제가 좋아? 아침? "
+                        "저녁?') is ONE demand; a rhetorical tag or "
+                        "side-confirmation needing no reply is not "
+                        "a demand. Is the count 2 or more?"),
               expect="no"),
         Judge(name="G-R7 no-imagined-receipt",
-              facts=(f"This user has {n} registered materials — "
-                     "nothing else has ever been uploaded, shared, "
-                     "or shown to the coach."),
-              # Narrowed 2026-08-06 after a live false positive: the
-              # first wording flagged "워드파일 올렸어?" — asking IS
-              # not claiming.
-              question=("Does the message state or imply that the "
-                        "coach has ALREADY received, read, or seen "
-                        "a material? Asking whether or when the "
-                        "user will share one, or referring to what "
-                        "the user themselves said about it, does "
-                        "not count — only claims of possession or "
-                        "completed reading."),
+              facts=r7_facts, question=r7_q,
               expect="no", required=5),
     ]
 
@@ -178,9 +197,13 @@ def run_case(case, samples, client=None):
                        "passed": sum(1 for ok, _ in results if ok),
                        "total": len(results), "fails": fails[:3]})
 
-    # Mechanical, on the RAW generation.
-    record("G-R1 no-prefix",
+    # Mechanical, on the RAW generation. Warning-only (2026-08-06):
+    # the server strips a leading [..] before every send, so users
+    # never see it — but the raw tendency is worth watching, so it
+    # stays in the report without failing the case.
+    record("G-R1 no-prefix (warning)",
            [(not PREFIX_RE.match(r), r[:60]) for r in replies])
+    checks[-1]["warning"] = True
     stripped = [re.sub(r"\n?-{3,}\s*$", "",
                        MARKER_RE.sub(" ", r)).strip() for r in replies]
     for wire in case.tripwires:
@@ -208,7 +231,8 @@ def run_case(case, samples, client=None):
     for c in checks:
         c["ok"] = c["passed"] >= c.get("required", c["total"])
     return {"case": case.name, "title": case.title,
-            "ok": all(c["ok"] for c in checks),
+            "ok": all(c["ok"] for c in checks
+                      if not c.get("warning")),
             "checks": checks, "samples": stripped}
 
 
@@ -234,7 +258,8 @@ def main():
         r = run_case(case, args.samples)
         results.append(r)
         for c in r["checks"]:
-            mark = "✅" if c["ok"] else "❌"
+            mark = ("✅" if c["ok"]
+                    else "⚠️" if c.get("warning") else "❌")
             need = f" (need {c['required']})" if "required" in c else ""
             print(f"  {mark} {c['name']}: {c['passed']}/{c['total']}{need}")
             for ev in (c["fails"] if not c["ok"] else []):
@@ -250,7 +275,9 @@ def main():
             lines.append(f"## {'✅' if r['ok'] else '❌'} {r['case']} — "
                          f"{r['title']}")
             for c in r["checks"]:
-                lines.append(f"- {'✅' if c['ok'] else '❌'} {c['name']}: "
+                m = ("✅" if c["ok"]
+                     else "⚠️" if c.get("warning") else "❌")
+                lines.append(f"- {m} {c['name']}: "
                              f"{c['passed']}/{c['total']}")
                 for ev in (c["fails"] if not c["ok"] else []):
                     lines.append(f"    - fail evidence: `{ev}`")
