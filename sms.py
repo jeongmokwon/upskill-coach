@@ -724,7 +724,10 @@ def _build_materials_block(user_id):
             "shared — no file, no link — whatever the conversation "
             "says or promises. A promise to upload is not an upload. "
             "You have read NOTHING of theirs; never speak as if you "
-            "have.")
+            "have. Until something actually arrives, speak of the "
+            "upload only as a future or open question — never in "
+            "words that presuppose it happened ('올려놓은 거' "
+            "assumes; '올렸어?' asks).")
         # An empty page reads two ways, and only the stored alignment
         # tells them apart. Unsettled ('') means the question is still
         # open. Settled no_material means the emptiness IS the answer
