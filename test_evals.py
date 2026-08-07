@@ -124,8 +124,10 @@ r_bad = run_mod.run_case(case("C1"), samples=3, client=bad)
 names = {c["name"]: c for c in r_bad["checks"]}
 check("hallucinating sample trips the exact-string tripwire",
       not names["tripwire:올려놓은 거 읽어봤"]["ok"])
-check("and the leading time prefix fails G-R1 on the raw text",
-      not names["G-R1 no-prefix"]["ok"])
+check("the leading time prefix is flagged by G-R1 — as a warning "
+      "that cannot fail the case by itself (the server strips it)",
+      not names["G-R1 no-prefix (warning)"]["ok"]
+      and names["G-R1 no-prefix (warning)"].get("warning") is True)
 check("and the receipt judge fails it (expect no, got yes)",
       not names["judge:no-imagined-receipt"]["ok"]
       and r_bad["ok"] is False)
