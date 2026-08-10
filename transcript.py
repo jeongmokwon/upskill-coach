@@ -114,16 +114,44 @@ def parse_call(raw, user_id):
 
 def build_pool(calls, delivered):
     """Every text the flight recorder holds: delivered history plus
-    internal items (guard-rejected drafts, server instructions)."""
+    internal items (guard-rejected drafts, server instructions).
+
+    A guard-rejected draft and the rewrite instruction that follows
+    it in the retry window travel as a PAIR keyed by the draft:
+    rewrite instructions repeat the same wording for the same rule,
+    and content-dedup used to swallow every occurrence after the
+    first — the operator lost the WHY next to most drafts. Drafts
+    are unique per attempt, so pairing survives dedup."""
     pool = []
     for c in calls:
-        for m in c["window"]:
-            body = flatten_content(m["content"])
-            internal = ("<server_instruction>" in body
-                        or (m["role"] == "assistant"
-                            and bool(MARKER_RE.search(body))))
-            pool.append({"role": m["role"], "content": clean(body),
-                         "internal": internal, "ts": c["ts"]})
+        window = [{"role": m["role"],
+                   "content": flatten_content(m["content"])}
+                  for m in c["window"]]
+        for i, m in enumerate(window):
+            body = m["content"]
+            is_instruction = ("<server_instruction>" in body
+                              and m["role"] == "user")
+            is_draft = (m["role"] == "assistant"
+                        and bool(MARKER_RE.search(body)))
+            if is_instruction:
+                prev = window[i - 1] if i else None
+                if prev and prev["role"] == "assistant" \
+                        and MARKER_RE.search(prev["content"]):
+                    continue   # emitted as the preceding draft's pair
+                pool.append({"role": "user", "content": clean(body),
+                             "internal": True, "ts": c["ts"]})
+            elif is_draft:
+                nxt = window[i + 1] if i + 1 < len(window) else None
+                reason = (clean(nxt["content"])
+                          if nxt and nxt["role"] == "user"
+                          and "<server_instruction>" in nxt["content"]
+                          else None)
+                pool.append({"role": "assistant", "content": clean(body),
+                             "internal": True, "ts": c["ts"],
+                             "reason": reason})
+            else:
+                pool.append({"role": m["role"], "content": clean(body),
+                             "internal": False, "ts": c["ts"]})
         if c["response"]:
             pool.append({"role": "assistant",
                          "content": clean(c["response"]),
@@ -157,6 +185,11 @@ def render(user_id, merged):
         lines += [f"> {ln}" if ln.strip() else ">"
                   for ln in e["content"].strip().split("\n")]
         lines.append("")
+        if e.get("reason"):
+            lines.append("*└ 막은 사유 (서버 지시, 내부)*:")
+            lines += [f"> {ln}" if ln.strip() else ">"
+                      for ln in e["reason"].strip().split("\n")]
+            lines.append("")
     return "\n".join(lines)
 
 
