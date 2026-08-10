@@ -284,6 +284,25 @@ def init_db():
             conn.commit()
         except Exception:
             conn.rollback()
+        # Operator-seeded standing preference: the husband asked for
+        # English on 2026-08-07 and Korean kept leaking back (the
+        # request lived only in scrollable history). Guarded so the
+        # analyze pass owns the key afterwards.
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "INSERT INTO user_preferences "
+                "(user_id, key, value, evidence, ts, source) "
+                "SELECT 'chrisyu2', 'language', "
+                "'English — reply in English', "
+                "'그리고 앞으로는 영어로 대화하자 그게 나한테 더 편할것 같아', "
+                "%s, 'operator' "
+                "WHERE NOT EXISTS (SELECT 1 FROM user_preferences "
+                "WHERE user_id = 'chrisyu2' AND key = 'language')",
+                (datetime.now().isoformat(),))
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
         # Migrate: messages.channel + messages.direction (added with SMS
         # tutor). channel='web' is the historical row type; 'sms' rows are
@@ -532,6 +551,23 @@ def init_db():
                 user_id TEXT PRIMARY KEY,
                 token TEXT NOT NULL,
                 created_at TEXT NOT NULL
+            )
+        """)
+        # Standing interaction preferences ("앞으로는 영어로") — the
+        # relationship contract. User-stated rules about HOW to talk
+        # used to live only in scrollable history and leaked back
+        # (Korean returning after an explicit English request, the
+        # same greeting recurring). Append-only; latest row per key
+        # wins; every prompt renders the current set.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                evidence TEXT NOT NULL DEFAULT '',
+                ts TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'analyze'
             )
         """)
         # Screen co-viewing sessions (PR A of the session build).
@@ -793,6 +829,20 @@ def init_db():
                 "AND smalltalk_aversion IS NULL")
         except Exception:
             pass
+        # Operator-seeded standing preference — see Postgres branch.
+        try:
+            conn.execute(
+                "INSERT INTO user_preferences "
+                "(user_id, key, value, evidence, ts, source) "
+                "SELECT 'chrisyu2', 'language', "
+                "'English — reply in English', "
+                "'그리고 앞으로는 영어로 대화하자 그게 나한테 더 편할것 같아', "
+                "?, 'operator' "
+                "WHERE NOT EXISTS (SELECT 1 FROM user_preferences "
+                "WHERE user_id = 'chrisyu2' AND key = 'language')",
+                (datetime.now().isoformat(),))
+        except Exception:
+            pass
         # SMS tutor migration — see Postgres branch above for rationale.
         for col, default in [
             ("channel", "TEXT DEFAULT 'web'"),
@@ -958,6 +1008,16 @@ def init_db():
                 user_id TEXT PRIMARY KEY,
                 token TEXT NOT NULL,
                 created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                evidence TEXT NOT NULL DEFAULT '',
+                ts TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'analyze'
             );
 
             CREATE TABLE IF NOT EXISTS screen_sessions (
@@ -1940,7 +2000,8 @@ def set_agreed_bite(user_id, bite_text, source="llm_marker",
 _USER_SCOPED_TABLES = (
     "messages", "events", "observations", "screen_sessions",
     "user_materials", "user_notes", "sequence_plans", "learning_paths",
-    "user_schedule", "user_profile_briefs", "availability_snapshots",
+    "user_schedule", "user_preferences", "user_profile_briefs",
+    "availability_snapshots",
     "insights", "llm_calls", "user_consents", "user_state", "sessions",
 )
 
@@ -2185,6 +2246,47 @@ def get_pause(user_id):
     except ValueError:
         return None
     return until
+
+def set_user_preference(user_id, key, value, evidence="",
+                        source="analyze"):
+    """Append one standing-preference version. Latest row per key
+    wins. Returns True when it wrote (unchanged values are skipped —
+    analyze re-reports on every pass)."""
+    key = (key or "").strip().lower()[:60]
+    value = (value or "").strip()[:300]
+    if not key or not value:
+        return False
+    cur_val = get_user_preferences(user_id).get(key, {}).get("value")
+    if cur_val == value:
+        return False
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    _execute(conn,
+        f"INSERT INTO user_preferences (user_id, key, value, evidence, "
+        f" ts, source) VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P})",
+        (user_id, key, value, evidence[:300],
+         datetime.now().isoformat(), source))
+    conn.commit()
+    conn.close()
+    log_event(user_id, "preference_set",
+              {"key": key, "value": value, "evidence": evidence[:200]},
+              source=source)
+    return True
+
+
+def get_user_preferences(user_id):
+    """→ {key: {'value', 'evidence', 'ts'}} — latest row per key."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT key, value, evidence, ts FROM user_preferences "
+        f"WHERE user_id = {_P} ORDER BY id", (user_id,))
+    rows = _fetchall(cur)
+    conn.close()
+    out = {}
+    for r in rows:
+        out[r["key"]] = {"value": r["value"],
+                         "evidence": r["evidence"], "ts": r["ts"]}
+    return out
 
 
 # ─── Learning materials + magic-link tokens (offer-loop arc) ────────
