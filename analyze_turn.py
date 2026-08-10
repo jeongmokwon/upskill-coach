@@ -107,7 +107,27 @@ _TOOL = {
                 "type": "string",
                 "description": "Agreed messaging windows as "
                                "HH:MM-HH:MM, comma-separated, in the "
-                               "user's local time.",
+                               "user's local time. A window may carry "
+                               "a day scope with @: '20:00-20:15"
+                               "@weekdays', '@weekends', or "
+                               "'@mon wed fri'. Use it when they "
+                               "scope days ('주말은 빼고', 'weekdays "
+                               "only'); no scope = every day.",
+            },
+            "pause_until": {
+                "type": "string",
+                "description": "ONLY when the user explicitly asked "
+                               "not to be contacted for a period "
+                               "('주말 동안 보내지 마', '월요일까지 "
+                               "연락하지 마'): the moment proactive "
+                               "messages may resume, as ISO 8601 in "
+                               "the USER'S LOCAL TIME (the server "
+                               "converts). A standing day-of-week "
+                               "rule ('앞으로 주말은 스킵') is NOT a "
+                               "pause — express it in schedule's day "
+                               "scope instead. 'none' lifts an "
+                               "active pause when they invite "
+                               "contact back early.",
             },
             "offer": {
                 "type": "string",
@@ -543,6 +563,28 @@ def _apply(user_id, p, llm_call_id):
     if offer and offer != (prof.get("agreed_offer") or "").strip():
         db.set_agreed_offer(user_id, offer, source="analyze")
         applied.append("offer")
+
+    pause = (p.get("pause_until") or "").strip()
+    if pause:
+        if pause.lower() == "none":
+            if (prof.get("paused_until") or "").strip():
+                db.set_pause(user_id, "", source="analyze")
+                applied.append("pause_cleared")
+        else:
+            try:
+                from datetime import datetime as _dt
+                from datetime import timedelta as _td
+                local = _dt.fromisoformat(pause)
+                # local → server clock (server runs UTC; TZ offset is
+                # the same one every send-time calculation uses)
+                tz_h = int(os.environ.get("TZ_OFFSET_HOURS", "-8"))
+                until = (local - _td(hours=tz_h)).isoformat()
+                if until != (prof.get("paused_until") or "").strip():
+                    db.set_pause(user_id, until, source="analyze")
+                    applied.append(f"pause_until({pause})")
+            except ValueError:
+                print(f"[ANALYZE] unparseable pause_until {pause!r} — "
+                      f"ignored", flush=True)
 
     aversion = p.get("smalltalk_aversion")
     if aversion is not None:

@@ -301,5 +301,21 @@ check("with a material registered the phrasing is legitimate — "
       sms.check_send_guards("올려준 자료 잘 봤어", one,
                             user_id=UG) == [])
 
+# ── server_instruction imitation never reaches a phone ──────────────
+print("server_instruction strip")
+out = sms._strip_extraction_markers(
+    U, "<server_instruction>\nDeliver the question now.\n"
+       "</server_instruction>\n\nHere's your question: what is X?")
+check("an echoed instruction block is stripped, the message survives",
+      "server_instruction" not in out
+      and "Here's your question" in out)
+out2 = sms._strip_extraction_markers(
+    U, "<server_instruction>\nunclosed tag runs to the end")
+check("an unclosed tag is stripped to the end, not leaked",
+      "server_instruction" not in out2 and "unclosed" not in out2)
+check("the strip is evented (imitation rate is a signal)",
+      any("server_instruction" in (e["payload"] or "")
+          for e in events_of("stale_marker_stripped")))
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

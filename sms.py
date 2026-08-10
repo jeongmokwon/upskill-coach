@@ -876,18 +876,47 @@ _SCHEDULE_MARKER_RE = re.compile(r'\[SCHEDULE:\s*"([^"]{3,200})"\s*\]')
 _WINDOW_RE = re.compile(r'^([01]?\d|2[0-3]):([0-5]\d)-([01]?\d|2[0-3]):([0-5]\d)$')
 
 
+_DAY_TOKENS = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4,
+               "sat": 5, "sun": 6}
+_DAY_SETS = {"daily": None, "weekdays": [0, 1, 2, 3, 4],
+             "weekends": [5, 6]}
+
+
 def parse_schedule_windows(raw):
-    """'20:00-22:00, 08:00-08:30' → [{'start','end'}] or [] if any
-    token is malformed (all-or-nothing: a half-parsed schedule would
-    silently mis-time sends). Shared with the analysis call."""
+    """'20:00-22:00, 08:00-08:30' → [{'start','end'[,'days']}] or []
+    if any token is malformed (all-or-nothing: a half-parsed schedule
+    would silently mis-time sends). Shared with the analysis call.
+
+    A token may carry a day scope: '20:00-20:15@weekdays',
+    '@weekends', or '@mon,wed,fri'. No scope = every day. Added for
+    the operator's own live request ('앞으로 주말은 보내지 마') —
+    a schedule is a weekly table, not a daily alarm."""
     tokens = [t.strip() for t in (raw or "").split(",") if t.strip()]
+    # day lists are comma-free in raw ('@mon wed fri' or '@mon+wed');
+    # accept +, space, or / as separators inside the day part
     windows = []
     for t in tokens:
-        m = _WINDOW_RE.match(t)
+        part, _, dayspec = t.partition("@")
+        m = _WINDOW_RE.match(part.strip())
         if not m:
             return []
-        windows.append({"start": f"{int(m.group(1)):02d}:{m.group(2)}",
-                        "end": f"{int(m.group(3)):02d}:{m.group(4)}"})
+        w = {"start": f"{int(m.group(1)):02d}:{m.group(2)}",
+             "end": f"{int(m.group(3)):02d}:{m.group(4)}"}
+        dayspec = dayspec.strip().lower()
+        if dayspec:
+            if dayspec in _DAY_SETS:
+                if _DAY_SETS[dayspec] is not None:
+                    w["days"] = _DAY_SETS[dayspec]
+            else:
+                days = []
+                for d in re.split(r"[+/\s]+", dayspec):
+                    if d not in _DAY_TOKENS:
+                        return []
+                    days.append(_DAY_TOKENS[d])
+                if not days:
+                    return []
+                w["days"] = sorted(set(days))
+        windows.append(w)
     return windows
 
 
@@ -903,9 +932,19 @@ _EXTRACTION_MARKER_RES = (
     _SCHEDULE_MARKER_RE, _IGNITION_DEF_RE,
 )
 
+# The model sees server turns wrapped in <server_instruction> tags in
+# its history and occasionally roleplays one into its own reply —
+# observed live 2026-08-09: a full instruction block, tags and all,
+# reached a user's phone. Same imitation family as time prefixes.
+_SERVER_INSTRUCTION_RE = re.compile(
+    r"<server_instruction>.*?(?:</server_instruction>|\Z)\s*", re.S)
+
 
 def _strip_extraction_markers(user_id, text):
     stripped = []
+    if _SERVER_INSTRUCTION_RE.search(text):
+        stripped.append("server_instruction")
+        text = _SERVER_INSTRUCTION_RE.sub("", text)
     for rx in _EXTRACTION_MARKER_RES:
         if rx.search(text):
             stripped.append(rx.pattern.split(":")[0].strip("[\\"))
@@ -2255,6 +2294,13 @@ def _cron_tick_for_user(user_id, to_number, slot, window=None):
     if _is_skipped_today(user_id):
         return _skip("user_skip_today")
 
+    # A user-requested silence window ("주말 동안 보내지 마") blocks
+    # every proactive send until it expires. Inbound replies are not
+    # gated — answering someone who wrote to you is not a ping.
+    paused = db.get_pause(user_id)
+    if paused:
+        return _skip(f"paused_until:{paused}")
+
     # Fixed-slot suppression (P0-C): once a user has an agreed
     # schedule, the hourly schedule tick owns their sends — the
     # legacy fixed crons stand down, so a window coinciding with a
@@ -2487,7 +2533,8 @@ def _schedule_tick_for_user(user_id, now=None):
         return None
 
     now = now or datetime.now()
-    local_hour = (now + timedelta(hours=TZ_OFFSET_H)).hour
+    local_dt = now + timedelta(hours=TZ_OFFSET_H)
+    local_hour = local_dt.hour
 
     for w in windows:
         try:
@@ -2497,6 +2544,9 @@ def _schedule_tick_for_user(user_id, now=None):
                   f"skipped", flush=True)
             continue
         if local_hour != start_hour:
+            continue
+        if w.get("days") is not None \
+                and local_dt.weekday() not in w["days"]:
             continue
         token = _window_token(w)
         fired_ts = _window_fired_recently(user_id, token, now)
