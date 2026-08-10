@@ -27,6 +27,19 @@ import re
 import sys
 import urllib.parse
 import urllib.request
+from datetime import timezone
+from datetime import datetime as _dt
+from zoneinfo import ZoneInfo
+
+# DB timestamps are the Render server's clock (UTC). The operator
+# reads in Pacific; a 16:00Z morning send labeled "16:00Z" reads as
+# nonsense, so everything renders in America/Los_Angeles.
+_LA = ZoneInfo("America/Los_Angeles")
+
+
+def _local(ts):
+    return (_dt.fromisoformat(ts).replace(tzinfo=timezone.utc)
+            .astimezone(_LA))
 
 BASE = os.environ.get("THEO_BASE",
                       "https://upskill-coach-dmmu.onrender.com")
@@ -114,16 +127,44 @@ def parse_call(raw, user_id):
 
 def build_pool(calls, delivered):
     """Every text the flight recorder holds: delivered history plus
-    internal items (guard-rejected drafts, server instructions)."""
+    internal items (guard-rejected drafts, server instructions).
+
+    A guard-rejected draft and the rewrite instruction that follows
+    it in the retry window travel as a PAIR keyed by the draft:
+    rewrite instructions repeat the same wording for the same rule,
+    and content-dedup used to swallow every occurrence after the
+    first — the operator lost the WHY next to most drafts. Drafts
+    are unique per attempt, so pairing survives dedup."""
     pool = []
     for c in calls:
-        for m in c["window"]:
-            body = flatten_content(m["content"])
-            internal = ("<server_instruction>" in body
-                        or (m["role"] == "assistant"
-                            and bool(MARKER_RE.search(body))))
-            pool.append({"role": m["role"], "content": clean(body),
-                         "internal": internal, "ts": c["ts"]})
+        window = [{"role": m["role"],
+                   "content": flatten_content(m["content"])}
+                  for m in c["window"]]
+        for i, m in enumerate(window):
+            body = m["content"]
+            is_instruction = ("<server_instruction>" in body
+                              and m["role"] == "user")
+            is_draft = (m["role"] == "assistant"
+                        and bool(MARKER_RE.search(body)))
+            if is_instruction:
+                prev = window[i - 1] if i else None
+                if prev and prev["role"] == "assistant" \
+                        and MARKER_RE.search(prev["content"]):
+                    continue   # emitted as the preceding draft's pair
+                pool.append({"role": "user", "content": clean(body),
+                             "internal": True, "ts": c["ts"]})
+            elif is_draft:
+                nxt = window[i + 1] if i + 1 < len(window) else None
+                reason = (clean(nxt["content"])
+                          if nxt and nxt["role"] == "user"
+                          and "<server_instruction>" in nxt["content"]
+                          else None)
+                pool.append({"role": "assistant", "content": clean(body),
+                             "internal": True, "ts": c["ts"],
+                             "reason": reason})
+            else:
+                pool.append({"role": m["role"], "content": clean(body),
+                             "internal": False, "ts": c["ts"]})
         if c["response"]:
             pool.append({"role": "assistant",
                          "content": clean(c["response"]),
@@ -133,15 +174,17 @@ def build_pool(calls, delivered):
 
 
 def render(user_id, merged):
-    lines = [f"# {user_id} 전체 대화 (UTC 시각)", "",
+    lines = [f"# {user_id} 전체 대화 (Pacific 시각)", "",
              "(전송된 메시지는 이벤트 로그의 실제 타임스탬프 순. "
              "*내부* 항목은 유저에게 보이지 않은 것 — 가드에 걸린 "
              "초안과 서버 지시.)", ""]
     day = ""
     for e in merged:
-        if e["ts"][:10] != day:
-            day = e["ts"][:10]
-            lines += [f"## {day}", ""]
+        loc = _local(e["ts"])
+        if loc.strftime("%Y-%m-%d") != day:
+            day = loc.strftime("%Y-%m-%d")
+            wd = "월화수목금토일"[loc.weekday()]
+            lines += [f"## {day} ({wd})", ""]
         if e["internal"] and e["content"].lstrip().startswith("[HOLD"):
             who = "*Theo — 홀드 판단(안 보내기로 함), 내부*"
         elif e["internal"] and e["role"] == "assistant":
@@ -153,10 +196,15 @@ def render(user_id, merged):
         else:
             who = "**유저**"
         flag = "  ⚠️(잘림-미복원)" if e.get("partial") else ""
-        lines.append(f"{who}  `{e['ts'][11:16]}Z`{flag}:")
+        lines.append(f"{who}  `{loc.strftime('%H:%M')}`{flag}:")
         lines += [f"> {ln}" if ln.strip() else ">"
                   for ln in e["content"].strip().split("\n")]
         lines.append("")
+        if e.get("reason"):
+            lines.append("*└ 막은 사유 (서버 지시, 내부)*:")
+            lines += [f"> {ln}" if ln.strip() else ">"
+                      for ln in e["reason"].strip().split("\n")]
+            lines.append("")
     return "\n".join(lines)
 
 
@@ -172,7 +220,7 @@ def main():
 
     user_id = args.user_id
     skeleton, call_ids, delivered = parse_timeline(
-        fetch("/debug/timeline", user_id=user_id, limit=1000))
+        fetch("/debug/timeline", user_id=user_id, limit=1000, full=1))
     if not skeleton:
         sys.exit(f"no sms_in/sms_out events for {user_id}")
 
