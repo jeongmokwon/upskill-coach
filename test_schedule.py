@@ -179,5 +179,70 @@ check("status shows latest version's windows with fired-today flags",
       and by_win["21:00-21:30"]["fired_today"] is True
       and by_win["21:00-21:30"]["last_fired"] is not None)
 
+# ── day-scoped windows: a schedule is a weekly table ────────────────
+print("day scopes")
+check("@weekdays parses to mon-fri",
+      sms.parse_schedule_windows("20:00-20:15@weekdays")
+      == [{"start": "20:00", "end": "20:15", "days": [0, 1, 2, 3, 4]}])
+check("@mon wed fri parses; bad day token rejects the whole schedule",
+      sms.parse_schedule_windows("09:00-10:00@mon wed fri")[0]["days"]
+      == [0, 2, 4]
+      and sms.parse_schedule_windows("09:00-10:00@monday") == [])
+check("no scope stays day-free (daily), back-compat",
+      "days" not in sms.parse_schedule_windows("20:00-20:15")[0])
+
+UW = "weekdayer"
+db.ensure_user_profile_row(UW)
+db.set_user_phone(UW, "+15550004411")
+db.set_expectation_sent(UW)
+db.save_sms_message(UW, "user", "hi", "in")
+db.save_user_schedule(UW, sms.parse_schedule_windows("09:00-10:00@weekdays"),
+                      raw_text="09:00-10:00@weekdays", source="test")
+
+
+def _outs(u):
+    return [r for r in db.get_events(u, limit=50) if r["kind"] == "sms_out"]
+
+
+from datetime import datetime as _dt2
+import datetime as _dtmod
+# find a Saturday and a Monday at 9am local (TZ offset 0 in tests)
+base = _dt2.now().replace(hour=9, minute=1)
+sat = base + _dtmod.timedelta(days=(5 - base.weekday()) % 7)
+mon = base + _dtmod.timedelta(days=(0 - base.weekday()) % 7 or 7)
+before = len(_outs(UW))
+sms._schedule_tick_for_user(UW, now=sat)
+check("Saturday 9am: a weekdays-only window stays silent "
+      "(operator's live request: 앞으로 주말은 스킵)",
+      len(_outs(UW)) == before)
+sms._schedule_tick_for_user(UW, now=mon)
+check("Monday 9am: it fires",
+      len(_outs(UW)) == before + 1)
+
+# ── pause: a promised silence is a stored state, not theater ────────
+print("pause gate")
+from datetime import timedelta as _td2
+UP = "pauser"
+db.ensure_user_profile_row(UP)
+db.set_expectation_sent(UP)
+db.set_pause(UP, (_dt2.now() + _td2(days=2)).isoformat(), source="test")
+r = sms._cron_tick_for_user(UP, "+15550004412", "evening")
+check("active pause blocks the proactive send, with the reason "
+      "recorded (observed live: coach agreed to pause in words while "
+      "the cron kept firing)",
+      r is None
+      and any("paused_until" in (e["payload"] or "")
+              for e in db.get_events(UP, limit=10)
+              if e["kind"] == "cron_tick"))
+db.set_pause(UP, (_dt2.now() - _td2(hours=1)).isoformat(), source="test")
+check("an expired pause no longer blocks",
+      db.get_pause(UP) is None)
+db.set_pause(UP, (_dt2.now() + _td2(days=1)).isoformat(), source="test")
+db.set_pause(UP, "", source="analyze")
+check("'none' clears an active pause",
+      db.get_pause(UP) is None
+      and any(e["kind"] == "pause_cleared"
+              for e in db.get_events(UP, limit=10)))
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

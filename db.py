@@ -229,6 +229,12 @@ def init_db():
             # ('has_material' / 'no_material' / '' = not aligned yet).
             ("expectation_sent_at", "TEXT DEFAULT ''"),
             ("material_status", "TEXT DEFAULT ''"),
+            # User-requested silence window ("주말 동안 보내지
+            # 마"): ISO timestamp; proactive sends are gated
+            # until it passes. Observed live: the coach AGREED
+            # to pause in words while the cron kept firing — a
+            # promise needs state or it is theater.
+            ("paused_until", "TEXT DEFAULT ''"),
             # How much this user does NOT want small talk, [0,1].
             # A living judgment: the analysis pass re-reports it as
             # conversation accumulates, so an early misread does not
@@ -747,6 +753,12 @@ def init_db():
             # Checklist v2 — see Postgres branch for rationale.
             ("expectation_sent_at", "TEXT DEFAULT ''"),
             ("material_status", "TEXT DEFAULT ''"),
+            # User-requested silence window ("주말 동안 보내지
+            # 마"): ISO timestamp; proactive sends are gated
+            # until it passes. Observed live: the coach AGREED
+            # to pause in words while the cron kept firing — a
+            # promise needs state or it is theater.
+            ("paused_until", "TEXT DEFAULT ''"),
             # Small-talk aversion — see Postgres branch for rationale.
             ("smalltalk_aversion", "REAL"),
         ]:
@@ -2140,6 +2152,39 @@ def set_material_status(user_id, status, source="analyze"):
     print(f"  [DB] material_status for {user_id}: {status}", flush=True)
     log_event(user_id, "material_aligned", {"status": status},
               source=source)
+
+
+def set_pause(user_id, until_iso, source="analyze"):
+    """Persist a user-requested silence window. until_iso: ISO
+    timestamp (server clock) after which proactive sends resume;
+    '' clears the pause. Emits pause_set / pause_cleared."""
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE user_profiles SET paused_until = {_P} "
+        f"WHERE user_id = {_P}", (until_iso or "", user_id))
+    conn.commit()
+    conn.close()
+    if until_iso:
+        log_event(user_id, "pause_set", {"until": until_iso},
+                  source=source)
+    else:
+        log_event(user_id, "pause_cleared", {}, source=source)
+
+
+def get_pause(user_id):
+    """The active pause's expiry ISO string, or None when not paused
+    (never set, cleared, or expired)."""
+    prof = get_user_profile_by_id(user_id) or {}
+    until = (prof.get("paused_until") or "").strip()
+    if not until:
+        return None
+    try:
+        if datetime.now() >= datetime.fromisoformat(until):
+            return None
+    except ValueError:
+        return None
+    return until
 
 
 # ─── Learning materials + magic-link tokens (offer-loop arc) ────────
