@@ -172,7 +172,7 @@ def main():
 
     user_id = args.user_id
     skeleton, call_ids, delivered = parse_timeline(
-        fetch("/debug/timeline", user_id=user_id, limit=1000))
+        fetch("/debug/timeline", user_id=user_id, limit=1000, full=1))
     if not skeleton:
         sys.exit(f"no sms_in/sms_out events for {user_id}")
 

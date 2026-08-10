@@ -1130,13 +1130,17 @@ async def _debug_timeline_handler(request):
         limit = min(int(request.query.get("limit", "200")), 1000)
     except ValueError:
         limit = 200
+    # full=1 skips the scannability cap — transcript.py reads this
+    # endpoint programmatically and the cap was costing it message
+    # tails (7 unrestorable messages in one weekend pull).
+    full = request.query.get("full", "").strip() in ("1", "true")
 
     rows = db.get_events(user_id, limit=limit)
     lines = [f"# timeline for {user_id} — {len(rows)} events (oldest first)"]
     for r in rows:
         payload = r.get("payload") or "{}"
         # keep each line scannable; full payloads live in the table
-        if len(payload) > 300:
+        if not full and len(payload) > 300:
             payload = payload[:300] + "…"
         lines.append(f"{r['ts']}  [{r['source']}] {r['kind']}  {payload}")
     return web.Response(text="\n".join(lines) + "\n", content_type="text/plain")
