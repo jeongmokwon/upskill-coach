@@ -27,6 +27,19 @@ import re
 import sys
 import urllib.parse
 import urllib.request
+from datetime import timezone
+from datetime import datetime as _dt
+from zoneinfo import ZoneInfo
+
+# DB timestamps are the Render server's clock (UTC). The operator
+# reads in Pacific; a 16:00Z morning send labeled "16:00Z" reads as
+# nonsense, so everything renders in America/Los_Angeles.
+_LA = ZoneInfo("America/Los_Angeles")
+
+
+def _local(ts):
+    return (_dt.fromisoformat(ts).replace(tzinfo=timezone.utc)
+            .astimezone(_LA))
 
 BASE = os.environ.get("THEO_BASE",
                       "https://upskill-coach-dmmu.onrender.com")
@@ -161,15 +174,17 @@ def build_pool(calls, delivered):
 
 
 def render(user_id, merged):
-    lines = [f"# {user_id} 전체 대화 (UTC 시각)", "",
+    lines = [f"# {user_id} 전체 대화 (Pacific 시각)", "",
              "(전송된 메시지는 이벤트 로그의 실제 타임스탬프 순. "
              "*내부* 항목은 유저에게 보이지 않은 것 — 가드에 걸린 "
              "초안과 서버 지시.)", ""]
     day = ""
     for e in merged:
-        if e["ts"][:10] != day:
-            day = e["ts"][:10]
-            lines += [f"## {day}", ""]
+        loc = _local(e["ts"])
+        if loc.strftime("%Y-%m-%d") != day:
+            day = loc.strftime("%Y-%m-%d")
+            wd = "월화수목금토일"[loc.weekday()]
+            lines += [f"## {day} ({wd})", ""]
         if e["internal"] and e["content"].lstrip().startswith("[HOLD"):
             who = "*Theo — 홀드 판단(안 보내기로 함), 내부*"
         elif e["internal"] and e["role"] == "assistant":
@@ -181,7 +196,7 @@ def render(user_id, merged):
         else:
             who = "**유저**"
         flag = "  ⚠️(잘림-미복원)" if e.get("partial") else ""
-        lines.append(f"{who}  `{e['ts'][11:16]}Z`{flag}:")
+        lines.append(f"{who}  `{loc.strftime('%H:%M')}`{flag}:")
         lines += [f"> {ln}" if ln.strip() else ">"
                   for ln in e["content"].strip().split("\n")]
         lines.append("")
