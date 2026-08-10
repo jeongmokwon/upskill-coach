@@ -621,6 +621,20 @@ def _build_context_blocks(user_id, focus_block=None):
     except Exception as e:
         print(f"[SMS] ⚠️ smalltalk block failed: {e}", flush=True)
     try:
+        prefs = db.get_user_preferences(user_id)
+        if prefs:
+            plines = ["## Standing preferences (user-stated, binding)",
+                      "",
+                      "Rules this user has explicitly set for how you "
+                      "talk to them. They outrank your defaults and "
+                      "your own habits from earlier messages:"]
+            for k, v in prefs.items():
+                ev = f' — "{v["evidence"]}"' if v.get("evidence") else ""
+                plines.append(f"- {k}: {v['value']}{ev}")
+            parts.append("\n".join(plines))
+    except Exception as e:
+        print(f"[SMS] ⚠️ preferences block failed: {e}", flush=True)
+    try:
         mat_block = _build_materials_block(user_id)
         if mat_block:
             parts.append(mat_block)

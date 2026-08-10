@@ -372,5 +372,50 @@ check("and they change NOTHING (analysis owns those fields)",
 check("stripping is recorded for prompt-hygiene monitoring",
       len(events_of("stale_marker_stripped")) == 1)
 
+# ── standing preferences: the relationship contract ─────────────────
+print("standing preferences")
+UPF = "prefuser"
+db.ensure_user_profile_row(UPF)
+db.save_sms_message(UPF, "user",
+                    "앞으로는 영어로 대화하자 그게 더 편해", "in")
+ok = db.set_user_preference(
+    UPF, "language", "English — reply in English",
+    evidence="앞으로는 영어로 대화하자 그게 더 편해", source="analyze")
+check("a preference writes once and skips unchanged re-reports",
+      ok is True
+      and db.set_user_preference(
+          UPF, "language", "English — reply in English") is False
+      and db.get_user_preferences(UPF)["language"]["value"]
+      == "English — reply in English")
+check("latest wins on change",
+      db.set_user_preference(UPF, "language", "Korean again") is True
+      and db.get_user_preferences(UPF)["language"]["value"]
+      == "Korean again")
+
+# the verbatim guard, through _apply
+applied = analyze_turn._apply(UPF, {
+    "preferences": [
+        {"key": "opening", "value": "question first, no greetings",
+         "evidence_quote": "앞으로는 영어로 대화하자 그게 더 편해"},
+        {"key": "tone", "value": "formal",
+         "evidence_quote": "존댓말로 해주세요"},   # never said
+    ]}, "call-x")
+check("verified quote lands, invented quote is dropped and evented",
+      "preference(opening)" in applied
+      and "tone" not in db.get_user_preferences(UPF)
+      and any(r["kind"] == "preference_quote_rejected"
+              for r in db.get_events(UPF, limit=10)))
+
+import sms as _sms_pref
+p_pref, _ = _sms_pref._build_system_prompt("evening", UPF)
+check("the contract renders in the prompt, evidence attached",
+      "Standing preferences (user-stated, binding)" in p_pref
+      and "question first, no greetings" in p_pref)
+UNPF = "noprefs"
+db.ensure_user_profile_row(UNPF)
+check("no preferences → no block",
+      "Standing preferences" not in
+      _sms_pref._build_system_prompt("evening", UNPF)[0])
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

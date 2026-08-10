@@ -134,6 +134,32 @@ _TOOL = {
                 "description": "What the coach committed to doing for "
                                "them, that they confirmed.",
             },
+            "preferences": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "key": {"type": "string"},
+                        "value": {"type": "string"},
+                        "evidence_quote": {"type": "string"},
+                    },
+                    "required": ["key", "value", "evidence_quote"],
+                },
+                "description": "STANDING rules the user set about "
+                               "HOW to interact — explicit, durable "
+                               "requests ('앞으로는 영어로 하자', "
+                               "'인사 말고 질문부터 보내줘'), never "
+                               "one-off asks or your inferences. "
+                               "key: short slug (language, opening, "
+                               "message_length, question_style, "
+                               "rhythm...). value: the rule, "
+                               "compact, in English. evidence_quote: "
+                               "the user's VERBATIM words — the "
+                               "server verifies the quote against "
+                               "their actual messages and drops "
+                               "entries that do not match. Re-report "
+                               "when a rule changes; latest wins.",
+            },
             "material_description": {
                 "type": "string",
                 "description": "The user's OWN account of the newest "
@@ -399,7 +425,12 @@ Still missing: {', '.join(state['missing']) or '(nothing)'}
   not a verdict on the latest reply — one terse message from
   someone at work is context, not preference. Report it on real
   accumulated evidence only, and re-report when the picture
-  changes; the stored value is meant to move."""
+  changes; the stored value is meant to move.
+- preferences are the relationship contract: only what the user
+  explicitly SET as a standing rule. "영어로 대화하자" qualifies; a
+  single English message does not. These render at the top of every
+  coach prompt, so a wrong entry misdirects every future message —
+  omit when unsure."""
 
 
 def analyze(user_id, trigger="inbound", client=None):
@@ -585,6 +616,20 @@ def _apply(user_id, p, llm_call_id):
             except ValueError:
                 print(f"[ANALYZE] unparseable pause_until {pause!r} — "
                       f"ignored", flush=True)
+
+    for pref in (p.get("preferences") or []):
+        quote = (pref.get("evidence_quote") or "").strip()
+        if not _user_said(user_id, quote):
+            print(f"[ANALYZE] ⚠️ preference evidence not found in user "
+                  f"messages — dropped: {pref.get('key')!r}", flush=True)
+            db.log_event(user_id, "preference_quote_rejected",
+                         {"key": pref.get("key"),
+                          "quote": quote[:120]}, source="analyze")
+            continue
+        if db.set_user_preference(user_id, pref.get("key"),
+                                  pref.get("value"), evidence=quote,
+                                  source="analyze"):
+            applied.append(f"preference({pref.get('key')})")
 
     aversion = p.get("smalltalk_aversion")
     if aversion is not None:
