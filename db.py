@@ -1866,9 +1866,10 @@ def get_recent_sms_messages(user_id, limit=20, since=None,
     the current mode and cause the LLM to reconcile-then-hallucinate.
 
     `with_time=True` prefixes each turn with how long ago it was
-    ("[3시간 전] ..."). Observed failure without it: the coach
-    referenced a message sent four hours earlier as "어제" — history
-    carries no clock, so elapsed time was guessed.
+    ("[Wed 22:48, 3h ago] ..."). Observed failure without it: the
+    coach referenced a message sent four hours earlier as
+    "yesterday" — history carries no clock, so elapsed time was
+    guessed.
     """
     conn = get_conn()
     if since:
@@ -1895,7 +1896,7 @@ def get_recent_sms_messages(user_id, limit=20, since=None,
     import os as _os
     tz = int(_os.environ.get("TZ_OFFSET_HOURS", "-8"))
     now = datetime.now()
-    days_kr = ["월", "화", "수", "목", "금", "토", "일"]
+    days_en = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     out = []
     for r in rows:
         label = ""
@@ -1907,20 +1908,20 @@ def get_recent_sms_messages(user_id, limit=20, since=None,
                     datetime.fromisoformat(str(ts).replace("Z", ""))
                 mins = (now - when).total_seconds() / 60.0
                 if mins < 90:
-                    rel = f"{max(1, round(mins))}분 전"
+                    rel = f"{max(1, round(mins))}m ago"
                 elif mins < 60 * 36:
-                    rel = f"{round(mins / 60)}시간 전"
+                    rel = f"{round(mins / 60)}h ago"
                 else:
-                    rel = f"{round(mins / 1440)}일 전"
+                    rel = f"{round(mins / 1440)}d ago"
                 # Absolute stamp alongside the relative one: with only
-                # "35시간 전" the model had to do calendar arithmetic to
+                # "35h ago" the model had to do calendar arithmetic to
                 # place a turn, and got it wrong twice (calling a
-                # 4-hour-old message "어제", and a Wednesday-night
-                # exchange "어젯밤" on a Friday).
+                # 4-hour-old message "yesterday", and a Wednesday-
+                # night exchange "last night" on a Friday).
                 local = when + timedelta(hours=tz)
-                abs_kr = (f"{days_kr[local.weekday()]}요일 "
+                abs_en = (f"{days_en[local.weekday()]} "
                           f"{local.strftime('%H:%M')}")
-                label = f"[{abs_kr}, {rel}] "
+                label = f"[{abs_en}, {rel}] "
             except Exception:
                 label = ""
         out.append({"role": r["role"], "content": label + r["content"]})
