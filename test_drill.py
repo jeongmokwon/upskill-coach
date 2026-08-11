@@ -340,11 +340,19 @@ check("a question that ships its own answer key is held, twice-"
 
 # ── 4c. preview mode is read-only ───────────────────────────────────
 print("4c) preview mode")
+open_pv = db.get_open_prediction(U3)
+ctx_pv_reask = drill.prepare_scheduled_question(U3, record=False)
+check("preview of an open question re-asks with the EXISTING "
+      "prediction (still nothing written)",
+      ctx_pv_reask["reask"]
+      and ctx_pv_reask["prediction_id"] == open_pv["id"])
+db.score_prediction(open_pv["id"], "missed")   # close it out
 n_preds_before = len(db.get_predictions(U3))
 ctx_pv = drill.prepare_scheduled_question(U3, record=False)
-check("record=False assembles the same ctx with NO prediction "
-      "written (operator preview is read-only)",
+check("record=False on a fresh selection writes NO prediction "
+      "(operator preview is read-only)",
       ctx_pv is not None and ctx_pv["prediction_id"] is None
+      and not ctx_pv["reask"]
       and len(db.get_predictions(U3)) == n_preds_before)
 
 # ── 5. non-drill users untouched ────────────────────────────────────
