@@ -540,7 +540,7 @@ def _conversation_contract_block():
     return (
         "## Everything below this line is the conversation itself\n\n"
         "The turns that follow are the real exchange with this user, "
-        "verbatim, oldest first. The `[수요일 22:48, 2일 전]` prefixes "
+        "verbatim, oldest first. The `[Wed 22:48, 2d ago]` prefixes "
         "are the server's annotation of when each turn happened — the "
         "user did not type those.\n\n"
         "Turns wrapped in `<server_instruction>` are NOT from the user. "
@@ -734,20 +734,6 @@ def _build_drill_prompt(user_id, drill_ctx):
              drill.question_block(drill_ctx),
              mode_prompt.format_map(_SafeDict(**fields)),
              _conversation_contract_block()]
-    # Standing preferences repeated NEXT TO the task: the block at
-    # the top renders fine and still got ignored in the smoke test
-    # (the question came out Korean against an English-only rule).
-    # Proximity to the instruction the model is about to execute is
-    # the lever that works.
-    try:
-        prefs = db.get_user_preferences(user_id)
-        if prefs:
-            parts.append(
-                "## Standing preferences (they bind THIS message)\n"
-                + "\n".join(
-                    f"- {k}: {v['value']}" for k, v in prefs.items()))
-    except Exception as e:
-        print(f"[SMS] ⚠️ drill prefs reminder failed: {e}", flush=True)
     return "\n\n---\n\n".join(parts), versions
 
 

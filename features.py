@@ -122,6 +122,8 @@ def render_features(feats):
         parts.append(f"silence={feats['silence_streak_days']}d")
     if feats["reply_latency"]:
         parts.append(f"last_reply={feats['reply_latency']}")
-    parts.append(f"signal={feats['user_signal']}")
-    parts.append(f"phase={feats['phase']}")
+    # signal (tired/engaged/resistant) and phase are deliberately NOT
+    # rendered: signal is a crude mechanics heuristic from the
+    # wellness-aware era, never a real analysis of the user, and
+    # phase already renders (in words) in the user-facts block.
     return " · ".join(parts)
