@@ -399,6 +399,21 @@ def _prompt_name_for_slot(slot, phase):
     return None
 
 
+def _language_rule(user_id):
+    """The outbound-language instruction. An explicit user
+    preference (any preference key that looks language-shaped)
+    wins; the default is English."""
+    try:
+        for k, v in (db.get_user_preferences(user_id) or {}).items():
+            if "lang" in k.lower() or "언어" in k:
+                return (f"**Write every outbound message in the "
+                        f"language this user explicitly asked for: "
+                        f"{v['value']}.**")
+    except Exception as e:
+        print(f"[SMS] ⚠️ language rule failed: {e}", flush=True)
+    return "**Write every outbound message in English.**"
+
+
 def _build_placeholders(user_id):
     """Assemble the placeholder dict used by shared + slot prompts.
 
@@ -427,6 +442,24 @@ def _build_placeholders(user_id):
                 if phase_state.get("ignition_marker_status") == "provisional"
                 else ""))
             if phase_state["ignition_marker"] else "(not yet defined)"),
+        # The language rule: an explicit user preference wins;
+        # otherwise English (pilots are effectively all English —
+        # the blanket Korean mandate this replaces was what the
+        # standing preference kept losing to).
+        "language_rule": _language_rule(user_id),
+        # The offer-stock discipline matters while the standing
+        # offer is being negotiated; once onboarding is complete
+        # the promise is set and the paragraph is dead weight.
+        "offer_discipline": (
+            "" if _onboarding_done(user_id) else
+            "Every offer you make must be executable with ONLY the "
+            "stock above. If the thing that would truly help is not "
+            "in it, offer the nearest real thing and name the edge "
+            "honestly — \"I can't work from the file directly, but "
+            "with what you've shared I can get this far\" beats a "
+            "promise you cannot keep. An unkept promise is worse "
+            "than none: this list is why the user can trust a "
+            "\"will do\" from you at all."),
         # Goal discipline splits on whether a goal EXISTS, not on
         # onboarding completion — a goal agreed on day 2 of
         # discovery is already settled fact while other checklist
@@ -642,8 +675,7 @@ def _build_context_blocks(user_id, focus_block=None):
             plines = ["## Standing preferences (user-stated, binding)",
                       "",
                       "Rules this user has explicitly set for how you "
-                      "talk to them. They outrank your defaults and "
-                      "your own habits from earlier messages:"]
+                      "talk to them:"]
             for k, v in prefs.items():
                 ev = f' — "{v["evidence"]}"' if v.get("evidence") else ""
                 plines.append(f"- {k}: {v['value']}{ev}")
@@ -787,13 +819,7 @@ def _build_materials_block(user_id):
             "## Their materials — NONE\n\n"
             "Their /my page is empty right now. Nothing has been "
             "shared — no file, no link — whatever the conversation "
-            "says or promises. A promise to upload is not an upload. "
-            "You have read NOTHING of theirs; never speak as if you "
-            "have. Only THEY can upload, and they have not: if you "
-            "mention the upload, ask whether they have done it yet "
-            "('자료 올렸어?') — never '올려놓은 거', which speaks as "
-            "if an upload (theirs, or worse, yours) already "
-            "happened.")
+            "says or promises. A promise to upload is not an upload.")
         # An empty page reads two ways, and only the stored alignment
         # tells them apart. Unsettled ('') means the question is still
         # open. Settled no_material means the emptiness IS the answer
