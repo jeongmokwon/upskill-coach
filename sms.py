@@ -179,14 +179,37 @@ def send_sms(to_number, body, user_id=None):
                          {"error": str(e)[:300], "part_index": i,
                           "to": to_addr}, source="sms")
             break
-        # Gap between messages so they arrive in order on the user's
-        # device. Twilio doesn't guarantee order across back-to-back
-        # API calls. WhatsApp Sandbox additionally rate-limits to one
-        # message every 3 seconds — slower gap there avoids throttling
-        # on the second bubble.
+        # Ordering gate between bubbles. A fixed 1s gap was not
+        # enough: Korean text is UCS-2 (67 chars/segment), so a long
+        # first bubble rides 4-6 SMS segments and can take several
+        # seconds longer through the carrier than the short second
+        # bubble — field report (2026-08-11): the husband's weekend
+        # two-bubble sends arrived reversed, repeatedly. Wait until
+        # Twilio reports the first bubble handed off (sent/delivered)
+        # before releasing the next, then a settle gap; on timeout
+        # send anyway — a late bubble beats a dropped one.
         if i < len(parts) - 1:
-            time.sleep(3.5 if _channel_prefix() else 1.0)
+            _await_bubble_handoff(client, msg.sid)
+            time.sleep(3.5 if _channel_prefix() else 1.5)
     return last_sid
+
+
+def _await_bubble_handoff(client, sid, timeout=10.0):
+    """Poll one message's status until Twilio reports it handed off
+    to the carrier (or terminally failed), bounded by `timeout`."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            status = client.messages(sid).fetch().status
+        except Exception as e:
+            print(f"[SMS] bubble status poll failed: {e}", flush=True)
+            return
+        if status in ("sent", "delivered", "read", "failed",
+                      "undelivered"):
+            return
+        time.sleep(0.7)
+    print(f"[SMS] ⚠️ bubble {sid} not handed off after {timeout}s — "
+          f"sending next anyway", flush=True)
 
 
 def verify_twilio_signature(url, params, signature):
