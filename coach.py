@@ -3249,6 +3249,34 @@ async def _material_admin_handler(request):
     return web.Response(status=400, text="unknown action")
 
 
+async def _track_admin_handler(request):
+    """Operator-only track edits (CRON_SECRET). First use: renaming
+    the imported track — '회사 PDF' was an operator placeholder and
+    the name renders into every drill prompt.
+
+    POST /debug/track?secret=..&id=1&action=rename&name=<url-encoded>
+    """
+    import db
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret", "").strip()
+                or request.query.get("secret", "").strip())
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+    tid = request.query.get("id", "").strip()
+    action = request.query.get("action", "").strip()
+    if not tid.isdigit():
+        return web.Response(status=400, text="numeric id required")
+    if action == "rename":
+        name = request.query.get("name", "").strip()
+        if not name:
+            return web.Response(status=400, text="name required")
+        old = db.rename_track(int(tid), name)
+        if old is None:
+            return web.Response(status=404, text="no track")
+        return web.Response(text=f"track {tid}: '{old}' → '{name}'\n")
+    return web.Response(status=400, text="unknown action")
+
+
 async def _ledger_import_handler(request):
     """Operator-only v3 ledger backfill (CRON_SECRET). The rehearsal
     replayed a user's history offline and produced the ledgers as
@@ -3878,6 +3906,7 @@ def start_ws_server():
         app.router.add_post("/session/message/stream", _session_stream_handler)
         app.router.add_post("/debug/material", _material_admin_handler)
         app.router.add_post("/debug/import-ledgers", _ledger_import_handler)
+        app.router.add_post("/debug/track", _track_admin_handler)
         app.router.add_get("/notes", _notes_handler)
         app.router.add_post("/notes", _notes_handler)
         app.router.add_get("/plan", _plan_handler)

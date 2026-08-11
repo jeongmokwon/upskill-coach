@@ -2501,6 +2501,25 @@ def create_track(user_id, name, mode="drill", authority="file_wins",
     return track_id
 
 
+def rename_track(track_id, name):
+    """→ old name, or None if no such track. The name renders into
+    every drill prompt, so it should be in the user's own words —
+    first use: replacing the operator's import placeholder."""
+    conn = get_conn()
+    cur = _execute(conn, f"SELECT * FROM tracks WHERE id = {_P}",
+                   (track_id,))
+    row = _fetchone(cur)
+    if not row:
+        conn.close(); return None
+    _execute(conn, f"UPDATE tracks SET name = {_P} WHERE id = {_P}",
+             (name, track_id))
+    conn.commit(); conn.close()
+    log_event(row["user_id"], "track_renamed",
+              {"track_id": track_id, "old": row["name"], "new": name},
+              source="admin")
+    return row["name"]
+
+
 def get_tracks(user_id, mode=None):
     conn = get_conn()
     q = f"SELECT * FROM tracks WHERE user_id = {_P} AND status = 'active'"
