@@ -188,11 +188,15 @@ plain = db.get_recent_sms_messages(U, limit=10)
 timed = db.get_recent_sms_messages(U, limit=10, with_time=True)
 check("default rendering unchanged (no labels)",
       all(not m["content"].startswith("[") for m in plain))
-check("4h-old turn labeled with weekday, clock AND relative",
-      any("4시간 전] " in m["content"] and "요일 " in m["content"]
+check("4h-old turn labeled with weekday, clock AND relative "
+      "(English — the prompt is English-native)",
+      any("4h ago] " in m["content"]
+          and any(d in m["content"] for d in
+                  ("Mon ", "Tue ", "Wed ", "Thu ", "Fri ", "Sat ",
+                   "Sun "))
           for m in timed))
 check("20min-old turn labeled in minutes",
-      any("20분 전] " in m["content"] for m in timed))
+      any("20m ago] " in m["content"] for m in timed))
 check("content preserved after the label",
       any(m["content"].endswith("오늘 할게") for m in timed))
 
