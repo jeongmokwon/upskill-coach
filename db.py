@@ -570,6 +570,116 @@ def init_db():
                 source TEXT NOT NULL DEFAULT 'analyze'
             )
         """)
+        # ─── v3 ledgers (C-layer; design doc C_DESIGN_V3) ───
+        # tracks: one user runs several relationships with the coach
+        # (the PDF drill now; a bar-exam track or a companion track
+        # only when the USER tells the coach directly — never from
+        # operator hearsay).
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS tracks (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                mode TEXT NOT NULL DEFAULT 'drill',
+                authority TEXT NOT NULL DEFAULT 'file_wins',
+                exam_date TEXT DEFAULT '',
+                performance_stage TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL
+            )
+        """)
+        # 문제 은행: every item carries a verbatim anchor from its
+        # source — an item that cannot quote its origin does not
+        # exist (the Rule 102(d)(1)/GS2 fabrications were exactly
+        # unanchored claims reaching the user).
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS knowledge_items (
+                id SERIAL PRIMARY KEY,
+                track_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                anchor_type TEXT NOT NULL,
+                anchor_quote TEXT NOT NULL DEFAULT '',
+                section_hint TEXT DEFAULT '',
+                stem TEXT NOT NULL,
+                elements_json TEXT NOT NULL DEFAULT '[]',
+                kind TEXT DEFAULT '',
+                est_difficulty INTEGER DEFAULT 2,
+                status TEXT NOT NULL DEFAULT 'untested',
+                source TEXT NOT NULL DEFAULT 'extraction',
+                created_at TEXT NOT NULL
+            )
+        """)
+        # 오답노트: per-element grading + the confidence read from
+        # the user's own hedging language ("I am not sure about the
+        # third one" hedged exactly where he was wrong).
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS attempts (
+                id SERIAL PRIMARY KEY,
+                item_id INTEGER,
+                track_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'drill',
+                question TEXT NOT NULL DEFAULT '',
+                answer_verbatim TEXT NOT NULL DEFAULT '',
+                elements_json TEXT NOT NULL DEFAULT '[]',
+                verdict TEXT NOT NULL DEFAULT '',
+                self_confidence TEXT DEFAULT '',
+                confidence_marker TEXT DEFAULT '',
+                note TEXT DEFAULT ''
+            )
+        """)
+        # 가르쳐준 것 장부: deliberate teachings/corrections only —
+        # a wrong drill answer is 오답노트 material, not truth.
+        # Truth order: user correction > file > model knowledge.
+        # Conflicts with file/canon become conversation items, never
+        # silent absorption.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS taught_ledger (
+                id SERIAL PRIMARY KEY,
+                track_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                quote TEXT NOT NULL,
+                teaching TEXT NOT NULL,
+                kind TEXT DEFAULT '',
+                conflict_flag TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'active'
+            )
+        """)
+        # 사람 노트: condition→response style observations with
+        # evidence and confidence. NEVER whole-person grades — a
+        # verdict in the prompt bends the coach's tone downward.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS person_notes (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                observation TEXT NOT NULL,
+                evidence TEXT DEFAULT '',
+                confidence TEXT NOT NULL DEFAULT 'low',
+                status TEXT NOT NULL DEFAULT 'active'
+            )
+        """)
+        # 예측 장부: recorded BEFORE the answer, then immutable —
+        # only the scoring fields are written once when the actual
+        # arrives. The grader never sees these rows (isolation, same
+        # discipline as the eval judge). KPIs live here: 적중률 and
+        # 파악 속도.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS predictions (
+                id SERIAL PRIMARY KEY,
+                item_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                predicted_verdict TEXT NOT NULL,
+                predicted_difficulty INTEGER,
+                reason TEXT DEFAULT '',
+                scored_at TEXT DEFAULT '',
+                actual_verdict TEXT DEFAULT '',
+                hit INTEGER
+            )
+        """)
         # Screen co-viewing sessions (PR A of the session build).
         # One row per user-initiated screen share on /my. Raw frames
         # are NEVER stored — they live in memory for the seconds the
@@ -1019,6 +1129,86 @@ def init_db():
                 ts TEXT NOT NULL,
                 source TEXT NOT NULL DEFAULT 'analyze'
             );
+
+            CREATE TABLE IF NOT EXISTS tracks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                mode TEXT NOT NULL DEFAULT 'drill',
+                authority TEXT NOT NULL DEFAULT 'file_wins',
+                exam_date TEXT DEFAULT '',
+                performance_stage TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'active',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS knowledge_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                anchor_type TEXT NOT NULL,
+                anchor_quote TEXT NOT NULL DEFAULT '',
+                section_hint TEXT DEFAULT '',
+                stem TEXT NOT NULL,
+                elements_json TEXT NOT NULL DEFAULT '[]',
+                kind TEXT DEFAULT '',
+                est_difficulty INTEGER DEFAULT 2,
+                status TEXT NOT NULL DEFAULT 'untested',
+                source TEXT NOT NULL DEFAULT 'extraction',
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id INTEGER,
+                track_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                source TEXT NOT NULL DEFAULT 'drill',
+                question TEXT NOT NULL DEFAULT '',
+                answer_verbatim TEXT NOT NULL DEFAULT '',
+                elements_json TEXT NOT NULL DEFAULT '[]',
+                verdict TEXT NOT NULL DEFAULT '',
+                self_confidence TEXT DEFAULT '',
+                confidence_marker TEXT DEFAULT '',
+                note TEXT DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS taught_ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                quote TEXT NOT NULL,
+                teaching TEXT NOT NULL,
+                kind TEXT DEFAULT '',
+                conflict_flag TEXT DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'active'
+            );
+
+            CREATE TABLE IF NOT EXISTS person_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                observation TEXT NOT NULL,
+                evidence TEXT DEFAULT '',
+                confidence TEXT NOT NULL DEFAULT 'low',
+                status TEXT NOT NULL DEFAULT 'active'
+            );
+
+            CREATE TABLE IF NOT EXISTS predictions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                item_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                predicted_verdict TEXT NOT NULL,
+                predicted_difficulty INTEGER,
+                reason TEXT DEFAULT '',
+                scored_at TEXT DEFAULT '',
+                actual_verdict TEXT DEFAULT '',
+                hit INTEGER
+            );
+
 
             CREATE TABLE IF NOT EXISTS screen_sessions (
                 session_id TEXT PRIMARY KEY,
@@ -2001,7 +2191,8 @@ _USER_SCOPED_TABLES = (
     "messages", "events", "observations", "screen_sessions",
     "user_materials", "user_notes", "sequence_plans", "learning_paths",
     "user_schedule", "user_preferences", "user_profile_briefs",
-    "availability_snapshots",
+    "availability_snapshots", "tracks", "knowledge_items", "attempts",
+    "taught_ledger", "person_notes", "predictions",
     "insights", "llm_calls", "user_consents", "user_state", "sessions",
 )
 
@@ -2287,6 +2478,225 @@ def get_user_preferences(user_id):
         out[r["key"]] = {"value": r["value"],
                          "evidence": r["evidence"], "ts": r["ts"]}
     return out
+
+
+# ─── v3 ledgers: accessors ──────────────────────────────────────────
+
+def create_track(user_id, name, mode="drill", authority="file_wins",
+                 exam_date="", performance_stage="", source="operator"):
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    cur = _execute(conn,
+        f"INSERT INTO tracks (user_id, name, mode, authority, exam_date, "
+        f" performance_stage, status, created_at) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, 'active', {_P})"
+        + (" RETURNING id" if DB_TYPE == "postgres" else ""),
+        (user_id, name, mode, authority, exam_date, performance_stage,
+         datetime.now().isoformat()))
+    track_id = _fetchone(cur)["id"] if DB_TYPE == "postgres" else cur.lastrowid
+    conn.commit(); conn.close()
+    log_event(user_id, "track_created",
+              {"track_id": track_id, "name": name, "mode": mode},
+              source=source)
+    return track_id
+
+
+def get_tracks(user_id, mode=None):
+    conn = get_conn()
+    q = f"SELECT * FROM tracks WHERE user_id = {_P} AND status = 'active'"
+    args = [user_id]
+    if mode:
+        q += f" AND mode = {_P}"; args.append(mode)
+    cur = _execute(conn, q + " ORDER BY id", tuple(args))
+    rows = _fetchall(cur); conn.close()
+    return rows
+
+
+def add_knowledge_item(track_id, user_id, stem, anchor_type,
+                       anchor_quote="", section_hint="", elements=None,
+                       kind="", est_difficulty=2, source="extraction"):
+    """An item that cannot quote its origin does not exist: file_chunk
+    and conversation items REQUIRE an anchor_quote."""
+    if anchor_type in ("file_chunk", "conversation") \
+            and not (anchor_quote or "").strip():
+        raise ValueError("anchored item without anchor_quote")
+    conn = get_conn()
+    cur = _execute(conn,
+        f"INSERT INTO knowledge_items (track_id, user_id, anchor_type, "
+        f" anchor_quote, section_hint, stem, elements_json, kind, "
+        f" est_difficulty, status, source, created_at) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, "
+        f" 'untested', {_P}, {_P})"
+        + (" RETURNING id" if DB_TYPE == "postgres" else ""),
+        (track_id, user_id, anchor_type, anchor_quote, section_hint,
+         stem, json.dumps(elements or [], ensure_ascii=False), kind,
+         est_difficulty, source, datetime.now().isoformat()))
+    item_id = _fetchone(cur)["id"] if DB_TYPE == "postgres" else cur.lastrowid
+    conn.commit(); conn.close()
+    return item_id
+
+
+def get_knowledge_items(track_id, status=None):
+    conn = get_conn()
+    q = f"SELECT * FROM knowledge_items WHERE track_id = {_P}"
+    args = [track_id]
+    if status:
+        q += f" AND status = {_P}"; args.append(status)
+    cur = _execute(conn, q + " ORDER BY id", tuple(args))
+    rows = _fetchall(cur); conn.close()
+    for r in rows:
+        try: r["elements"] = json.loads(r["elements_json"])
+        except Exception: r["elements"] = []
+    return rows
+
+
+def set_item_status(item_id, status, source="server"):
+    """untested|learning|solid|suspended — 'suspended' is the user's
+    '이건 그만 물어봐', one sentence retires an item."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT user_id FROM knowledge_items WHERE id = {_P}", (item_id,))
+    row = _fetchone(cur)
+    _execute(conn,
+        f"UPDATE knowledge_items SET status = {_P} WHERE id = {_P}",
+        (status, item_id))
+    conn.commit(); conn.close()
+    if row:
+        log_event(row["user_id"], "item_status_set",
+                  {"item_id": item_id, "status": status}, source=source)
+
+
+def record_attempt(track_id, user_id, verdict, question="",
+                   answer_verbatim="", elements=None, item_id=None,
+                   source="drill", self_confidence="",
+                   confidence_marker="", note="", ts=None):
+    conn = get_conn()
+    cur = _execute(conn,
+        f"INSERT INTO attempts (item_id, track_id, user_id, ts, source, "
+        f" question, answer_verbatim, elements_json, verdict, "
+        f" self_confidence, confidence_marker, note) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, "
+        f" {_P}, {_P}, {_P})"
+        + (" RETURNING id" if DB_TYPE == "postgres" else ""),
+        (item_id, track_id, user_id, ts or datetime.now().isoformat(),
+         source, question, answer_verbatim,
+         json.dumps(elements or [], ensure_ascii=False), verdict,
+         self_confidence, confidence_marker, note))
+    attempt_id = _fetchone(cur)["id"] if DB_TYPE == "postgres" else cur.lastrowid
+    conn.commit(); conn.close()
+    log_event(user_id, "attempt_recorded",
+              {"attempt_id": attempt_id, "item_id": item_id,
+               "verdict": verdict, "source": source}, source="server")
+    return attempt_id
+
+
+def get_attempts(track_id, limit=200):
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM attempts WHERE track_id = {_P} "
+        f"ORDER BY ts DESC LIMIT {_P}", (track_id, limit))
+    rows = _fetchall(cur); conn.close()
+    for r in rows:
+        try: r["elements"] = json.loads(r["elements_json"])
+        except Exception: r["elements"] = []
+    return rows
+
+
+def add_taught(track_id, user_id, quote, teaching, kind="",
+               conflict_flag="", ts=None):
+    conn = get_conn()
+    _execute(conn,
+        f"INSERT INTO taught_ledger (track_id, user_id, ts, quote, "
+        f" teaching, kind, conflict_flag, status) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, 'active')",
+        (track_id, user_id, ts or datetime.now().isoformat(), quote,
+         teaching, kind, conflict_flag))
+    conn.commit(); conn.close()
+    log_event(user_id, "taught_recorded",
+              {"track_id": track_id, "teaching": teaching[:120],
+               "conflict": bool(conflict_flag)}, source="server")
+
+
+def get_taught(track_id):
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM taught_ledger WHERE track_id = {_P} "
+        f"AND status = 'active' ORDER BY id", (track_id,))
+    rows = _fetchall(cur); conn.close()
+    return rows
+
+
+def add_person_note(user_id, observation, evidence="",
+                    confidence="low", ts=None):
+    conn = get_conn()
+    _execute(conn,
+        f"INSERT INTO person_notes (user_id, ts, observation, evidence, "
+        f" confidence, status) VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, "
+        f" 'active')",
+        (user_id, ts or datetime.now().isoformat(), observation,
+         evidence, confidence))
+    conn.commit(); conn.close()
+
+
+def get_person_notes(user_id):
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM person_notes WHERE user_id = {_P} "
+        f"AND status = 'active' ORDER BY id", (user_id,))
+    rows = _fetchall(cur); conn.close()
+    return rows
+
+
+def record_prediction(item_id, user_id, predicted_verdict,
+                      predicted_difficulty=None, reason=""):
+    """Written BEFORE the answer exists. There is deliberately no
+    update accessor for the prediction fields — score_prediction fills
+    the outcome ONCE and refuses re-scoring. A prediction edited after
+    the fact makes the KPI a lie."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"INSERT INTO predictions (item_id, user_id, ts, "
+        f" predicted_verdict, predicted_difficulty, reason) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P})"
+        + (" RETURNING id" if DB_TYPE == "postgres" else ""),
+        (item_id, user_id, datetime.now().isoformat(), predicted_verdict,
+         predicted_difficulty, reason))
+    pred_id = _fetchone(cur)["id"] if DB_TYPE == "postgres" else cur.lastrowid
+    conn.commit(); conn.close()
+    return pred_id
+
+
+def score_prediction(pred_id, actual_verdict):
+    """One-shot: scoring an already-scored prediction raises."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM predictions WHERE id = {_P}", (pred_id,))
+    row = _fetchone(cur)
+    if not row:
+        conn.close(); raise ValueError(f"no prediction {pred_id}")
+    if (row["scored_at"] or "").strip():
+        conn.close()
+        raise ValueError(f"prediction {pred_id} already scored")
+    hit = 1 if row["predicted_verdict"] == actual_verdict else 0
+    _execute(conn,
+        f"UPDATE predictions SET scored_at = {_P}, actual_verdict = {_P}, "
+        f" hit = {_P} WHERE id = {_P}",
+        (datetime.now().isoformat(), actual_verdict, hit, pred_id))
+    conn.commit(); conn.close()
+    return bool(hit)
+
+
+def prediction_stats(user_id):
+    """→ {'scored', 'hits', 'accuracy'} — the KPI surface."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT COUNT(*) AS n, COALESCE(SUM(hit), 0) AS h "
+        f"FROM predictions WHERE user_id = {_P} AND scored_at != ''",
+        (user_id,))
+    row = _fetchone(cur); conn.close()
+    n, h = row["n"] or 0, row["h"] or 0
+    return {"scored": n, "hits": h,
+            "accuracy": round(h / n, 3) if n else None}
 
 
 # ─── Learning materials + magic-link tokens (offer-loop arc) ────────
