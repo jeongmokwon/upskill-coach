@@ -86,10 +86,6 @@ resumes.
    generate, and two bubbles landing at once reads as a burst, not
    a conversation.
 
-## Recent conversation context
-
-{recent_insights}
-
 ## Reply commands the user can send back
 
 These are treated as commands when they appear alone

@@ -1,3 +1,10 @@
+<!-- DEPRECATED for the live SMS prompt (2026-08-11, operator
+decision): _build_context_blocks no longer appends this file, so no
+outbound message is shaped by it. genplan.py still consults it when
+generating a learning plan. The ignition-era principles below are
+preserved verbatim in case the prior is wanted back — restore by
+reverting the removal block in sms.py. -->
+
 # Policy prior — how humans ignite (v2)
 
 The founder-owned, hand-evolved principles common to ALL users

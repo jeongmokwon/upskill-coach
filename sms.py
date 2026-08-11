@@ -649,16 +649,12 @@ def _build_context_blocks(user_id, focus_block=None):
 
     versions = {}
     parts = []
-    if _onboarding_done(user_id):
-        # The policy prior is about running an intervention. During
-        # onboarding there is nothing to intervene on yet — the job is
-        # to find out who this person is.
-        try:
-            prior, h_prior = _read_prompt_versioned("prior")
-            versions["prior"] = h_prior
-            parts.append(prior)
-        except Exception as e:
-            print(f"[SMS] ⚠️ prior block failed: {e}", flush=True)
+    # Policy prior REMOVED from live assembly (operator decision,
+    # 2026-08-11): it was rendering only post-onboarding, and the
+    # line-by-line prompt review judged it dead weight for the drill
+    # era. prompts/prior.md is kept, marked deprecated — restore by
+    # reverting this block if the ignition principles are needed
+    # again.
     try:
         profile = notes_mod.render_profile_block(user_id)
         if profile:

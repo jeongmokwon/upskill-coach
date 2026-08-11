@@ -131,8 +131,9 @@ db.check_and_complete_onboarding(U, force=True)
 done, done_versions = sms._build_system_prompt("evening", U)
 check("completion brings back the moves on the notes",
       "validate@2, micro_ask@1" in done)
-check("completion brings back the prior, the anchors and rules 2-8",
-      "Policy prior" in done and "prior" in done_versions
+check("completion brings back the anchors and rules 2-8 — but NOT "
+      "the prior (removed from the SMS prompt 2026-08-11)",
+      "Policy prior" not in done and "prior" not in done_versions
       and "Choose the move FIRST" in done and "### Vocabulary" in done
       and "One cognitive altitude at a time" in done)
 
