@@ -427,6 +427,27 @@ def _build_placeholders(user_id):
                 if phase_state.get("ignition_marker_status") == "provisional"
                 else ""))
             if phase_state["ignition_marker"] else "(not yet defined)"),
+        # Goal discipline splits on whether a goal EXISTS, not on
+        # onboarding completion — a goal agreed on day 2 of
+        # discovery is already settled fact while other checklist
+        # fields are still open. Pre-agreement, the stale signup
+        # self-report renders as a labeled clue; post-agreement it
+        # leaves the prompt entirely (dead text that only existed
+        # to be warned about).
+        "stale_selfreport_line": (
+            "" if (phase_state["agreed_goal"] or "").strip() else
+            "- Old onboarding self-report, likely stale — do NOT "
+            "treat as the goal: "
+            f"{profile.get('goal') or '(none)'} / studying: "
+            f"{profile.get('studying') or '(none)'}"),
+        "goal_discipline": (
+            "The AGREED GOAL is settled fact. Never re-open it from "
+            "scratch — reference it in passing; re-asking reads as "
+            "amnesia."
+            if (phase_state["agreed_goal"] or "").strip() else
+            "No goal has been agreed yet. If asked, say so honestly "
+            "— never invent one from conversation vibes or the "
+            "stale self-report above."),
         # 1-indexed day count for the LLM's "Day X of 3" awareness.
         "discovery_day": db.days_in_discovery(user_id) + 1,
         "recent_screen": _format_recent_screen(user_id),
