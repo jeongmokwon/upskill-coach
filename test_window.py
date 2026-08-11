@@ -148,8 +148,11 @@ check("an old override ages out like a real message would",
 print("3) clock")
 block = sms._clock_block()
 now_local = datetime.now() + timedelta(hours=sms.TZ_OFFSET_H)
-check("states the user's wall clock in words",
-      now_local.strftime("%H:%M") in block and "요일" in block)
+check("states the user's wall clock in words (English — the prompt "
+      "is English-native)",
+      now_local.strftime("%H:%M") in block
+      and ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+           "Saturday", "Sunday"][now_local.weekday()] in block)
 check("states the hour and stops — no standing order to greet",
       "must make sense at this hour" not in block
       and len(block) < 200)

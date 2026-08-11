@@ -458,13 +458,16 @@ def _clock_block():
     says no social warm-up is needed."""
     now_local = datetime.now() + timedelta(hours=TZ_OFFSET_H)
     hour = now_local.hour
-    part = ("한밤중" if hour < 5 else "이른 아침" if hour < 8
-            else "아침" if hour < 11 else "한낮" if hour < 14
-            else "오후" if hour < 17 else "초저녁" if hour < 20
-            else "밤" if hour < 23 else "늦은 밤")
-    weekday = ["월", "화", "수", "목", "금", "토", "일"][now_local.weekday()]
+    part = ("the middle of the night" if hour < 5
+            else "early morning" if hour < 8
+            else "morning" if hour < 11 else "midday" if hour < 14
+            else "afternoon" if hour < 17
+            else "early evening" if hour < 20
+            else "evening" if hour < 23 else "late night")
+    weekday = ["Monday", "Tuesday", "Wednesday", "Thursday",
+               "Friday", "Saturday", "Sunday"][now_local.weekday()]
     return (f"## Right now, for this user\n\n"
-            f"It is **{now_local.strftime('%H:%M')} on {weekday}요일 "
+            f"It is **{now_local.strftime('%H:%M')} on {weekday} "
             f"({part})** where they are.")
 
 
