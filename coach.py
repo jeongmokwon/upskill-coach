@@ -3249,6 +3249,77 @@ async def _material_admin_handler(request):
     return web.Response(status=400, text="unknown action")
 
 
+async def _prompt_preview_handler(request):
+    """Operator-only (CRON_SECRET): assemble the EXACT prompt a
+    scheduled send would put in front of the model for a real user,
+    without sending, recording, or logging anything. Read-only —
+    in drill preview mode no prediction is written (predictions
+    never render into the prompt, so the preview is byte-identical
+    to a real send's assembly).
+
+    GET /debug/prompt-preview?secret=..&user_id=chrisyu2&slot=morning
+    """
+    import db
+    import drill
+    import sms
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret", "").strip()
+                or request.query.get("secret", "").strip())
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+    user_id = request.query.get("user_id", "").strip()
+    slot = request.query.get("slot", "morning").strip()
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+
+    drill_ctx = None
+    if slot in ("morning", "evening", "nudge"):
+        try:
+            drill_ctx = drill.prepare_scheduled_question(
+                user_id, record=False)
+        except Exception as e:
+            return web.Response(
+                status=500, text=f"drill prepare failed: {e}")
+    if drill_ctx:
+        trigger = f"cron_{slot}_drill"
+        system_prompt, versions = sms._build_drill_prompt(
+            user_id, drill_ctx)
+    else:
+        trigger = f"cron_{slot}"
+        system_prompt, versions = sms._build_system_prompt(
+            slot, user_id)
+    if system_prompt is None:
+        return web.Response(text=f"(slot {slot}: no prompt for this "
+                                 f"user's state — the send would "
+                                 f"skip)")
+
+    phase_state = db.get_user_phase(user_id)
+    history = db.get_recent_sms_messages(
+        user_id, limit=sms.HISTORY_LIMIT,
+        since=phase_state["phase_started_at"], with_time=True)
+    if not history:
+        history = [sms._server_turn(
+            f"The scheduled {slot} send is firing and there is no "
+            f"prior thread with this user — this is your first "
+            f"message to them. Write it.")]
+    elif history[-1]["role"] == "assistant":
+        history.append(sms._server_turn(
+            f"The scheduled {slot} send is firing. The user has not "
+            f"written since the last turn above. Write the next "
+            f"message."))
+
+    bar = "═" * 60
+    out = (f"# prompt preview — user: {user_id}, trigger: {trigger}, "
+           f"model: {sms.MODEL}\n"
+           f"# prompt versions: "
+           f"{json.dumps(versions, ensure_ascii=False)}\n\n"
+           f"{bar}\nSYSTEM PROMPT\n{bar}\n\n{system_prompt}\n\n"
+           f"{bar}\nMESSAGES\n{bar}\n\n"
+           + json.dumps(history, ensure_ascii=False, indent=1))
+    return web.Response(text=out, content_type="text/plain",
+                        charset="utf-8")
+
+
 async def _track_admin_handler(request):
     """Operator-only track edits (CRON_SECRET). First use: renaming
     the imported track — '회사 PDF' was an operator placeholder and
@@ -3907,6 +3978,7 @@ def start_ws_server():
         app.router.add_post("/debug/material", _material_admin_handler)
         app.router.add_post("/debug/import-ledgers", _ledger_import_handler)
         app.router.add_post("/debug/track", _track_admin_handler)
+        app.router.add_get("/debug/prompt-preview", _prompt_preview_handler)
         app.router.add_get("/notes", _notes_handler)
         app.router.add_post("/notes", _notes_handler)
         app.router.add_get("/plan", _plan_handler)
