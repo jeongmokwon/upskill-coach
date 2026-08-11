@@ -2686,6 +2686,35 @@ def score_prediction(pred_id, actual_verdict):
     return bool(hit)
 
 
+def get_predictions(user_id, limit=200):
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM predictions WHERE user_id = {_P} "
+        f"ORDER BY id DESC LIMIT {_P}", (user_id, limit))
+    rows = _fetchall(cur); conn.close()
+    return rows
+
+
+def get_open_prediction(user_id, within_hours=48):
+    """The outstanding drill question: the latest unscored
+    prediction, if it's still fresh. One row is the whole open-
+    question state — a prediction exists exactly when a question was
+    asked, and scored_at fills exactly when it was answered."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM predictions WHERE user_id = {_P} "
+        f"AND scored_at = '' ORDER BY id DESC LIMIT 1", (user_id,))
+    row = _fetchone(cur); conn.close()
+    if not row:
+        return None
+    try:
+        age_h = (datetime.now()
+                 - datetime.fromisoformat(row["ts"])).total_seconds() / 3600
+    except Exception:
+        return None
+    return row if age_h < within_hours else None
+
+
 def prediction_stats(user_id):
     """→ {'scored', 'hits', 'accuracy'} — the KPI surface."""
     conn = get_conn()

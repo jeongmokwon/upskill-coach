@@ -668,6 +668,27 @@ def _build_context_blocks(user_id, focus_block=None):
     return "\n\n---\n\n".join(parts), versions
 
 
+def _build_drill_prompt(user_id, drill_ctx):
+    """Planner prompt for a scheduled drill-question send: the usual
+    context blocks (clock, profile, standing preferences — the
+    English rule rides here) + shared persona + the server-selected
+    item + the drill mode prompt. The item block precedes the mode
+    prompt so 'ask THIS' is established before 'here's how to ask'."""
+    import drill
+    shared, h_shared = _read_prompt_versioned("sms_shared")
+    mode_prompt, h_mode = _read_prompt_versioned("sms_drill")
+    fields = _build_placeholders(user_id)
+    context, ctx_versions = _build_context_blocks(user_id)
+    versions = {"sms_shared": h_shared, "sms_drill": h_mode,
+                **ctx_versions}
+    parts = [context,
+             shared.format_map(_SafeDict(**fields)),
+             drill.question_block(drill_ctx),
+             mode_prompt.format_map(_SafeDict(**fields)),
+             _conversation_contract_block()]
+    return "\n\n---\n\n".join(parts), versions
+
+
 def _build_system_prompt(slot, user_id):
     """Assemble the full planner prompt for a scheduled slot:
     prior (A) + shared persona/rules + notes (B) + trajectory (C) +
@@ -1953,11 +1974,21 @@ def _reply_to_inbound(user_id, from_number, body, my_msg_id):
     import analyze_turn
     analyze_turn.analyze(user_id, trigger="inbound")
 
+    # v3 four-signals pass: if an open drill question is outstanding
+    # and this message answers it, grade BEFORE the reply is written —
+    # the attempt, the prediction score, and the item status land in
+    # the ledgers, and the reply prompt gets the verdict plus the
+    # anchor quote so any correction comes from the user's own
+    # material, never model memory.
+    import drill
+    drill_graded = drill.grade_if_answering(user_id)
+
     # Use the phase-specific evening prompt for inbound replies too —
     # the LLM should be in the same mode whether the user is replying
     # to a scheduled ping or texting spontaneously.
     ensure_my_link_delivered(user_id)
-    system_prompt, prompt_versions = _build_system_prompt_for_reply(user_id)
+    system_prompt, prompt_versions = _build_system_prompt_for_reply(
+        user_id, drill_graded=drill_graded)
 
     reply_text, steps, expect, llm_call_id, _hold = generate_message(
         user_id, system_prompt, history, "inbound_reply",
@@ -1995,7 +2026,7 @@ def _reply_to_inbound(user_id, from_number, body, my_msg_id):
     return reply_text
 
 
-def _build_system_prompt_for_reply(user_id):
+def _build_system_prompt_for_reply(user_id, drill_graded=None):
     """Shared persona + phase-specific mode prompt, with placeholders
     filled — used for inbound conversational replies.
 
@@ -2017,6 +2048,9 @@ def _build_system_prompt_for_reply(user_id):
     versions = {"sms_shared": h_shared, mode_name: h_mode,
                 **ctx_versions}
     parts = [context, rendered_shared]
+    if drill_graded:
+        import drill
+        parts.append(drill.graded_reply_block(drill_graded))
     parts += _phase_gated_blocks(user_id, versions)
     parts.append(rendered_mode)
     # Judging ignition is a question about an inbound reply, so it is
@@ -2331,12 +2365,15 @@ def _cron_tick_for_user(user_id, to_number, slot, window=None):
     if slot == "morning":
         # Skip if there's no prior conversation IN THE CURRENT PHASE.
         # We scope to phase-timer to prevent a "morning!" ping that
-        # references stale pre-phase context.
+        # references stale pre-phase context. A drill user is exempt:
+        # their morning send is a bank question, which needs no
+        # thread to stand on.
+        import drill
         phase_state = db.get_user_phase(user_id)
         recent = db.get_recent_sms_messages(
             user_id, limit=1, since=phase_state["phase_started_at"]
         )
-        if not recent:
+        if not recent and not drill.active_drill_track(user_id):
             return _skip("no_thread_this_phase")
 
     if whatsapp_window_closed(user_id):
@@ -2389,7 +2426,31 @@ def _cron_tick_for_user(user_id, to_number, slot, window=None):
                      source="cron")
         return text
 
-    system_prompt, prompt_versions = _build_system_prompt(slot, user_id)
+    # v3 drill engine (출제 전환): a user with an active drill track
+    # gets today's bank question instead of the generic slot prompt.
+    # The old morning prompt says "this is not a study slot" — for a
+    # drill user, the morning question IS the product, so the drill
+    # branch owns the send. Selection is code, the prediction is
+    # recorded before the question exists, and the planner only
+    # phrases the served item.
+    drill_ctx = None
+    if slot in ("morning", "evening", "nudge"):
+        try:
+            import drill
+            drill_ctx = drill.prepare_scheduled_question(user_id)
+        except Exception as e:
+            print(f"[SMS] ⚠️ drill prepare failed for {user_id}: {e}",
+                  flush=True)
+            db.log_event(user_id, "drill_error",
+                         {"where": "prepare", "error": str(e)[:300]},
+                         source="cron")
+    if drill_ctx:
+        trigger = f"cron_{slot}_drill"
+        system_prompt, prompt_versions = _build_drill_prompt(
+            user_id, drill_ctx)
+    else:
+        trigger = f"cron_{slot}"
+        system_prompt, prompt_versions = _build_system_prompt(slot, user_id)
     if system_prompt is None:
         return _skip("no_prompt_for_state")
 
@@ -2417,7 +2478,7 @@ def _cron_tick_for_user(user_id, to_number, slot, window=None):
             f"message."))
 
     text, steps, expect, llm_call_id, hold_reason = generate_message(
-        user_id, system_prompt, history, f"cron_{slot}",
+        user_id, system_prompt, history, trigger,
         max_tokens=500, prompt_versions=prompt_versions)
     if text is None:
         return None
@@ -2463,13 +2524,21 @@ def _cron_tick_for_user(user_id, to_number, slot, window=None):
                   "decision_id": fire_decision_id, **win_extra},
                  source="cron")
     db.log_event(user_id, "sms_out",
-                 {"text": text, "trigger": f"cron_{slot}",
+                 {"text": text, "trigger": trigger,
                   "prompt_versions": prompt_versions,
                   "llm_call_id": llm_call_id,
                   "steps": steps, "expect": expect,
                   "phase": db.get_user_phase(user_id)["phase"],
                   **win_extra},
                  source="cron")
+    if drill_ctx:
+        db.log_event(user_id, "drill_question_sent",
+                     {"item_id": drill_ctx["item"]["id"],
+                      "prediction_id": drill_ctx["prediction_id"],
+                      "reask": drill_ctx["reask"],
+                      "why": drill_ctx["why"],
+                      "llm_call_id": llm_call_id, **win_extra},
+                     source="cron")
     return text
 
 
