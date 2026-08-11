@@ -24,8 +24,7 @@ import os
 import sys
 import urllib.request
 
-BASE = os.environ.get("THEO_BASE",
-                      "https://upskill-coach-dmmu.onrender.com")
+BASE = os.environ.get("THEO_BASE", "https://www.learningtheo.com")
 
 
 def load_json(path):
