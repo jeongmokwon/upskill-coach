@@ -234,13 +234,18 @@ def _last_graded_attempt(user_id, track_id, within_days=7):
     return None
 
 
-def prepare_scheduled_question(user_id, client=None):
+def prepare_scheduled_question(user_id, client=None, record=True):
     """Everything the send path needs to fire a drill question, or
     None if this user isn't a drill user / has nothing to ask.
 
     If an open question is still unanswered (< OPEN_QUESTION_H), the
     same item is re-asked and NO second prediction is recorded — one
     question, one prediction, one scoring.
+
+    record=False is the preview mode (operator prompt inspection):
+    selection runs read-only and NO prediction is written — the
+    prediction never renders into the prompt, so the preview is
+    byte-identical to what a real send would assemble.
     """
     track = active_drill_track(user_id)
     if not track:
@@ -259,7 +264,8 @@ def prepare_scheduled_question(user_id, client=None):
     item, why = select_item(user_id, track["id"])
     if item is None:
         return None
-    pred_id = _predict(user_id, item, track["id"], client=client)
+    pred_id = (_predict(user_id, item, track["id"], client=client)
+               if record else None)
     return {"track": track, "item": item, "prediction_id": pred_id,
             "reask": False, "why": why, "last_graded": last_graded}
 

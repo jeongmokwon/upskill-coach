@@ -338,6 +338,15 @@ check("a question that ships its own answer key is held, twice-"
       and events_of(U3, "cron_tick")[-1]["payload"]["reason"]
       == "drill_answer_leak")
 
+# ── 4c. preview mode is read-only ───────────────────────────────────
+print("4c) preview mode")
+n_preds_before = len(db.get_predictions(U3))
+ctx_pv = drill.prepare_scheduled_question(U3, record=False)
+check("record=False assembles the same ctx with NO prediction "
+      "written (operator preview is read-only)",
+      ctx_pv is not None and ctx_pv["prediction_id"] is None
+      and len(db.get_predictions(U3)) == n_preds_before)
+
 # ── 5. non-drill users untouched ────────────────────────────────────
 print("5) non-drill users")
 U5 = "plain"
