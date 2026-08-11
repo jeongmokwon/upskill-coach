@@ -430,24 +430,26 @@ def _build_placeholders(user_id):
         # Goal discipline splits on whether a goal EXISTS, not on
         # onboarding completion — a goal agreed on day 2 of
         # discovery is already settled fact while other checklist
-        # fields are still open. Pre-agreement, the stale signup
-        # self-report renders as a labeled clue; post-agreement it
-        # leaves the prompt entirely (dead text that only existed
-        # to be warned about).
+        # fields are still open. The signup-form line renders only
+        # while there is no agreed goal AND the user actually typed
+        # something at signup: a warning about empty data is noise,
+        # and 'onboarding self-report' is developer vocabulary the
+        # coach can't map to anything.
         "stale_selfreport_line": (
-            "" if (phase_state["agreed_goal"] or "").strip() else
-            "- Old onboarding self-report, likely stale — do NOT "
-            "treat as the goal: "
-            f"{profile.get('goal') or '(none)'} / studying: "
-            f"{profile.get('studying') or '(none)'}"),
+            f"- What they typed on the signup form (context only — "
+            f"NOT an agreed goal): "
+            f"{' / '.join(s for s in (profile.get('goal'), profile.get('studying')) if s and s.strip())}"
+            if not (phase_state["agreed_goal"] or "").strip()
+            and ((profile.get("goal") or "").strip()
+                 or (profile.get("studying") or "").strip())
+            else ""),
         "goal_discipline": (
             "The AGREED GOAL is settled fact. Never re-open it from "
             "scratch — reference it in passing; re-asking reads as "
             "amnesia."
             if (phase_state["agreed_goal"] or "").strip() else
-            "No goal has been agreed yet. If asked, say so honestly "
-            "— never invent one from conversation vibes or the "
-            "stale self-report above."),
+            "No goal has been agreed yet — never assert one; "
+            "discovering it is what these conversations are for."),
         # 1-indexed day count for the LLM's "Day X of 3" awareness.
         "discovery_day": db.days_in_discovery(user_id) + 1,
         "recent_screen": _format_recent_screen(user_id),
