@@ -51,7 +51,12 @@ _W_MISSED = 30       # the user missed this exact item before
 _W_PARTIAL = 20      # partially — second branches, list tails
 _W_UNTESTED = 4      # × est_difficulty: hard unseen material first
 _W_KIND_MISS = 8     # the user misses this KIND of structure
-_RECENT_DAYS = 3     # asked within this window → stand down
+# Asked within this window → stand down. 7 days, not 3 (operator
+# call, 2026-08-11): at 0-3 questions/day a 3-day gap re-serves
+# material while the first exposure is still fresh; the intended
+# retry rhythm is a 7-14 day window (proper spacing comes with
+# FSRS later — this constant is the crude stand-in).
+_RECENT_DAYS = 7
 
 
 def active_drill_track(user_id):
@@ -157,10 +162,10 @@ before the question goes out and scored against the real answer — \
 it is the coach's accountability metric, so predict what you \
 actually believe, not what would look supportive.
 
-Base rates from this user's history: fluent on core mechanics; \
-misses concentrate on second branches of comparisons, tails of \
-multi-part lists, rarely-used exceptions, and attributions \
-(which rule number says what)."""
+Everything you know about this user is in the data provided — \
+their attempt history (what they missed, element by element) and \
+the style notes. Derive their weak structures from that record; \
+you have no other knowledge of them."""
 
 
 def _predict(user_id, item, track_id, client=None):
