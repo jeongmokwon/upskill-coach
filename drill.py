@@ -23,6 +23,7 @@ only confirming misses.
 
 import json
 import os
+import re
 from datetime import datetime, timedelta
 
 import anthropic
@@ -210,6 +211,29 @@ def _predict(user_id, item, track_id, client=None):
             f"(fallback: prediction call failed: {str(e)[:120]})")
 
 
+def _last_graded_attempt(user_id, track_id, within_days=7):
+    """The most recent item-linked attempt, with ITS item's anchor —
+    so the next question's send can close the loop on it without
+    inventing facts. (Observed in the smoke test: the second send
+    'corrected' the user's answer from model memory and fabricated
+    a citation the anchor contradicts.)"""
+    for a in db.get_attempts(track_id, limit=10):
+        if not a.get("item_id"):
+            continue
+        h = _age_hours(a["ts"])
+        if h is None or h > within_days * 24:
+            return None
+        item = next((i for i in db.get_knowledge_items(track_id)
+                     if i["id"] == a["item_id"]), None)
+        if not item:
+            return None
+        return {"stem": item["stem"], "verdict": a["verdict"],
+                "anchor_quote": item["anchor_quote"],
+                "missed": [e["name"] for e in a.get("elements", [])
+                           if e.get("verdict") in ("miss", "partial")]}
+    return None
+
+
 def prepare_scheduled_question(user_id, client=None):
     """Everything the send path needs to fire a drill question, or
     None if this user isn't a drill user / has nothing to ask.
@@ -223,19 +247,21 @@ def prepare_scheduled_question(user_id, client=None):
         return None
     open_pred = db.get_open_prediction(
         user_id, within_hours=OPEN_QUESTION_H)
+    last_graded = _last_graded_attempt(user_id, track["id"])
     if open_pred:
         item = next((i for i in db.get_knowledge_items(track["id"])
                      if i["id"] == open_pred["item_id"]), None)
         if item:
             return {"track": track, "item": item,
                     "prediction_id": open_pred["id"], "reask": True,
-                    "why": "yesterday's question is still open"}
+                    "why": "yesterday's question is still open",
+                    "last_graded": last_graded}
     item, why = select_item(user_id, track["id"])
     if item is None:
         return None
     pred_id = _predict(user_id, item, track["id"], client=client)
     return {"track": track, "item": item, "prediction_id": pred_id,
-            "reask": False, "why": why}
+            "reask": False, "why": why, "last_graded": last_graded}
 
 
 def question_block(ctx):
@@ -263,7 +289,45 @@ def question_block(ctx):
             "This question is STILL OPEN from a previous send — they "
             "never answered. Re-raise it lightly (one line of 'still "
             "curious about...'), don't pretend it's new.")
+    lg = ctx.get("last_graded")
+    if lg:
+        lines += [
+            "",
+            f"Their previous drill answer (on: {lg['stem']}) was "
+            f"already graded server-side: {lg['verdict']}"
+            + (f", weaker on {', '.join(lg['missed'])}" if lg["missed"]
+               else "") + ".",
+            "If you close that loop before today's question, ground "
+            "every factual claim in ITS anchor:",
+            f"\"{lg['anchor_quote']}\"" if lg["anchor_quote"] else
+            "(no anchor — canonical item)",
+            "Anything that anchor does not settle, do NOT assert — "
+            "not a name, not a year, not a case. Model memory is how "
+            "fabrications happen; say you'd check the document "
+            "instead.",
+        ]
     return "\n".join(lines)
+
+
+def leaks_answer(text, item):
+    """True if a drill-question draft contains the answer key: the
+    anchor quote, or a majority of the rubric elements verbatim.
+    Observed in the smoke test — the model narrated its planning
+    ('The anchor shows these are Berkshire Hathaway (1996), ...')
+    straight into the outgoing message. A leaked question is worse
+    than no question: it grades as a fake 'complete' and poisons
+    the ledgers."""
+    t = re.sub(r"\s+", " ", text or "").lower()
+    anchor = re.sub(r"\s+", " ", item.get("anchor_quote") or "").lower()
+    if len(anchor) >= 12 and anchor in t:
+        return True
+    els = [re.sub(r"\s+", " ", e).lower()
+           for e in item.get("elements", [])]
+    els = [e for e in els if len(e) >= 8]
+    if not els:
+        return False
+    hits = sum(1 for e in els if e in t)
+    return hits >= max(2, (len(els) + 1) // 2)
 
 
 _GRADE_TOOL = {

@@ -686,6 +686,20 @@ def _build_drill_prompt(user_id, drill_ctx):
              drill.question_block(drill_ctx),
              mode_prompt.format_map(_SafeDict(**fields)),
              _conversation_contract_block()]
+    # Standing preferences repeated NEXT TO the task: the block at
+    # the top renders fine and still got ignored in the smoke test
+    # (the question came out Korean against an English-only rule).
+    # Proximity to the instruction the model is about to execute is
+    # the lever that works.
+    try:
+        prefs = db.get_user_preferences(user_id)
+        if prefs:
+            parts.append(
+                "## Standing preferences (they bind THIS message)\n"
+                + "\n".join(
+                    f"- {k}: {v['value']}" for k, v in prefs.items()))
+    except Exception as e:
+        print(f"[SMS] ⚠️ drill prefs reminder failed: {e}", flush=True)
     return "\n\n---\n\n".join(parts), versions
 
 
@@ -2482,6 +2496,40 @@ def _cron_tick_for_user(user_id, to_number, slot, window=None):
         max_tokens=500, prompt_versions=prompt_versions)
     if text is None:
         return None
+
+    # Answer-leak guard (drill sends only): a question that contains
+    # its own answer key grades as a fake 'complete' and poisons the
+    # ledgers. One rewrite attempt; if the rewrite still leaks, hold
+    # the send — no question beats an answer-key question.
+    if drill_ctx and text.strip():
+        import drill
+        if drill.leaks_answer(text, drill_ctx["item"]):
+            db.log_event(user_id, "drill_answer_leak",
+                         {"draft": text[:300], "llm_call_id": llm_call_id,
+                          "item_id": drill_ctx["item"]["id"],
+                          "attempt": 1}, source="cron")
+            history = history + [
+                {"role": "assistant", "content": text},
+                _server_turn(
+                    "Your draft contains the answer key (anchor "
+                    "contents / rubric elements). Rewrite: ONLY the "
+                    "question, nothing the user is supposed to "
+                    "retrieve themselves.")]
+            text, steps, expect, llm_call_id, hold_reason = \
+                generate_message(user_id, system_prompt, history,
+                                 f"{trigger}_leak_retry",
+                                 max_tokens=500,
+                                 prompt_versions=prompt_versions)
+            if text is None:
+                return None
+            if drill.leaks_answer(text, drill_ctx["item"]):
+                db.log_event(user_id, "drill_answer_leak",
+                             {"draft": text[:300],
+                              "llm_call_id": llm_call_id,
+                              "item_id": drill_ctx["item"]["id"],
+                              "attempt": 2, "held": True},
+                             source="cron")
+                return _skip("drill_answer_leak")
     _check_plan_deviation(user_id, steps)
     if db.check_and_complete_onboarding(user_id):
         import genplan
