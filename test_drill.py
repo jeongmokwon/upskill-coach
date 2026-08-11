@@ -288,6 +288,56 @@ check("an explicit correction of the coach lands in the taught "
       any(t["kind"] == "correction_of_coach"
           for t in db.get_taught(t3)))
 
+# ── 4b. answer-leak guard + loop-closing anchor ─────────────────────
+print("4b) leak guard & loop-closing anchor")
+item3_row = db.get_knowledge_items(t3)[0]
+check("leaks_answer: anchor verbatim or majority-of-rubric = leak; "
+      "a clean question is not",
+      drill.leaks_answer("the anchor shows greater of 1% of "
+                         "outstanding or average weekly", item3_row)
+      and drill.leaks_answer("covers 1% outstanding and the 4-week "
+                             "average", item3_row)
+      and not drill.leaks_answer("a client wants to sell restricted "
+                                 "stock — what do you check?",
+                                 item3_row))
+
+# item3 went solid on the 'complete' above — give the bank a fresh
+# item so selection has something to serve.
+item3b = db.add_knowledge_item(
+    t3, U3, stem="Regulation BTR blackout trading ban",
+    anchor_type="file_chunk",
+    anchor_quote="no directors or officers may trade during the "
+                 "pension blackout",
+    elements=["blackout period definition", "pension fund condition"],
+    kind="exception", est_difficulty=3)
+DrillFake.payload = {"predicted_verdict": "partial",
+                     "predicted_difficulty": 3, "reason": "r"}
+ctx_lg = drill.prepare_scheduled_question(U3)
+check("prepare carries the last graded attempt WITH its anchor "
+      "(loop-closing stays inside the material)",
+      ctx_lg["last_graded"]
+      and ctx_lg["last_graded"]["anchor_quote"]
+      == "greater of 1% of outstanding or average weekly"
+      and "greater of 1% of outstanding"
+      in drill.question_block(ctx_lg))
+
+leaky = ("reminder: no directors or officers may trade during the "
+         "pension blackout — now, when does that apply?\n"
+         "[STEP: spark_curiosity@2]")
+DrillFake.planner_text = leaky
+n_leak_before = len(events_of(U3, "drill_answer_leak"))
+sent_leak = sms._cron_tick_for_user(U3, "+15550002222", "evening")
+DrillFake.planner_text = ("a client wants to sell restricted stock "
+                          "next week — what do you check before "
+                          "they can?\n[STEP: connect@1]"
+                          "\n[EXPECT: reply]")
+check("a question that ships its own answer key is held, twice-"
+      "checked, and logged",
+      sent_leak is None
+      and len(events_of(U3, "drill_answer_leak")) - n_leak_before == 2
+      and events_of(U3, "cron_tick")[-1]["payload"]["reason"]
+      == "drill_answer_leak")
+
 # ── 5. non-drill users untouched ────────────────────────────────────
 print("5) non-drill users")
 U5 = "plain"
