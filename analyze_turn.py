@@ -150,8 +150,16 @@ _TOOL = {
                                "requests ('앞으로는 영어로 하자', "
                                "'인사 말고 질문부터 보내줘'), never "
                                "one-off asks or your inferences. "
+                               "CONTENT preferences for generated "
+                               "material count fully: what to draw "
+                               "questions from ('Article I 위주로 "
+                               "하자' → key drill_scope) and what "
+                               "kind of questions they want ('drill "
+                               "me on details that are not easily "
+                               "memorizable' → key drill_style). "
                                "key: short slug (language, opening, "
                                "message_length, question_style, "
+                               "drill_scope, drill_style, "
                                "rhythm...). value: the rule, "
                                "compact, in English. evidence_quote: "
                                "the user's VERBATIM words — the "
@@ -428,9 +436,14 @@ Still missing: {', '.join(state['missing']) or '(nothing)'}
   changes; the stored value is meant to move.
 - preferences are the relationship contract: only what the user
   explicitly SET as a standing rule. "영어로 대화하자" qualifies; a
-  single English message does not. These render at the top of every
-  coach prompt, so a wrong entry misdirects every future message —
-  omit when unsure."""
+  single English message does not. Content preferences count the
+  same way: what material to draw questions from ("Article I
+  위주로 하자" → drill_scope) and what kind of questions they want
+  ("details that are not easily memorizable" → drill_style) are
+  standing rules about the product itself — when the user later
+  widens or changes the scope, re-report and latest wins. These
+  render at the top of every coach prompt, so a wrong entry
+  misdirects every future message — omit when unsure."""
 
 
 def analyze(user_id, trigger="inbound", client=None):
