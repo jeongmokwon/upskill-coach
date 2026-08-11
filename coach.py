@@ -3249,6 +3249,91 @@ async def _material_admin_handler(request):
     return web.Response(status=400, text="unknown action")
 
 
+async def _ledger_import_handler(request):
+    """Operator-only v3 ledger backfill (CRON_SECRET). The rehearsal
+    replayed a user's history offline and produced the ledgers as
+    review documents; once approved, this pushes them into production
+    so v3 starts warm instead of re-deriving months of signal.
+
+    POST /debug/import-ledgers?secret=..
+    body: {"user_id": .., "track": {"name", "mode", "authority",
+           "exam_date", "performance_stage"},
+           "items": [..], "attempts": [..], "taught": [..],
+           "person_notes": [..]}
+    Refuses a duplicate track name for the user — re-running an
+    import must not double every ledger row.
+    """
+    import db
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret", "").strip()
+                or request.query.get("secret", "").strip())
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+    body = await request.json()
+    user_id = (body.get("user_id") or "").strip()
+    track = body.get("track") or {}
+    name = (track.get("name") or "").strip()
+    if not user_id or not name:
+        return web.Response(status=400,
+                            text="user_id and track.name required")
+    if any(t["name"] == name for t in db.get_tracks(user_id)):
+        return web.Response(
+            status=409, text=f"track '{name}' already exists for "
+                             f"{user_id} — import refused")
+    track_id = db.create_track(
+        user_id, name, mode=track.get("mode", "drill"),
+        authority=track.get("authority", "file_wins"),
+        exam_date=track.get("exam_date", ""),
+        performance_stage=track.get("performance_stage", ""),
+        source="backfill")
+    counts = {"items": 0, "attempts": 0, "taught": 0,
+              "person_notes": 0}
+    skipped = []
+    for it in body.get("items") or []:
+        try:
+            db.add_knowledge_item(
+                track_id, user_id, stem=it.get("stem", ""),
+                anchor_type=it.get("anchor_type", "file_chunk"),
+                anchor_quote=it.get("anchor_quote", ""),
+                section_hint=it.get("section_hint", ""),
+                elements=it.get("elements"),
+                kind=it.get("kind", ""),
+                est_difficulty=it.get("est_difficulty", 2),
+                source="backfill")
+            counts["items"] += 1
+        except ValueError as e:
+            skipped.append(f"item '{it.get('stem', '')[:40]}': {e}")
+    for a in body.get("attempts") or []:
+        db.record_attempt(
+            track_id, user_id, verdict=a.get("verdict", ""),
+            question=a.get("question", ""),
+            answer_verbatim=a.get("answer_verbatim", ""),
+            elements=a.get("elements"),
+            source=a.get("source", "drill"),
+            self_confidence=a.get("self_confidence", ""),
+            confidence_marker=a.get("confidence_marker", ""),
+            note=a.get("note", ""), ts=a.get("ts"))
+        counts["attempts"] += 1
+    for t in body.get("taught") or []:
+        db.add_taught(track_id, user_id, quote=t.get("quote", ""),
+                      teaching=t.get("teaching", ""),
+                      kind=t.get("kind", ""),
+                      conflict_flag=t.get("conflict_flag", ""),
+                      ts=t.get("ts"))
+        counts["taught"] += 1
+    for p in body.get("person_notes") or []:
+        db.add_person_note(user_id, p.get("observation", ""),
+                           evidence=p.get("evidence", ""),
+                           confidence=p.get("confidence", "low"),
+                           ts=p.get("ts"))
+        counts["person_notes"] += 1
+    db.log_event(user_id, "ledgers_imported",
+                 {"track_id": track_id, **counts,
+                  "skipped": len(skipped)}, source="admin")
+    return web.json_response({"ok": True, "track_id": track_id,
+                              "counts": counts, "skipped": skipped})
+
+
 async def _session_stop_handler(request):
     import db
     user_id, _tok = _my_auth(request)
@@ -3792,6 +3877,7 @@ def start_ws_server():
         app.router.add_post("/session/consent", _session_consent_handler)
         app.router.add_post("/session/message/stream", _session_stream_handler)
         app.router.add_post("/debug/material", _material_admin_handler)
+        app.router.add_post("/debug/import-ledgers", _ledger_import_handler)
         app.router.add_get("/notes", _notes_handler)
         app.router.add_post("/notes", _notes_handler)
         app.router.add_get("/plan", _plan_handler)
