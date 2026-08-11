@@ -19,8 +19,6 @@ the brief that describes the same person. -->
   of it again.
 - **YOUR STANDING PROMISE (the agreed offer — what you committed to
   keep doing for them): {agreed_offer}**
-{stale_selfreport_line}
-
 {goal_discipline}
 
 The STANDING PROMISE, once set, is a debt you are actively paying —

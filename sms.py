@@ -430,19 +430,9 @@ def _build_placeholders(user_id):
         # Goal discipline splits on whether a goal EXISTS, not on
         # onboarding completion — a goal agreed on day 2 of
         # discovery is already settled fact while other checklist
-        # fields are still open. The signup-form line renders only
-        # while there is no agreed goal AND the user actually typed
-        # something at signup: a warning about empty data is noise,
-        # and 'onboarding self-report' is developer vocabulary the
-        # coach can't map to anything.
-        "stale_selfreport_line": (
-            f"- What they typed on the signup form (context only — "
-            f"NOT an agreed goal): "
-            f"{' / '.join(s for s in (profile.get('goal'), profile.get('studying')) if s and s.strip())}"
-            if not (phase_state["agreed_goal"] or "").strip()
-            and ((profile.get("goal") or "").strip()
-                 or (profile.get("studying") or "").strip())
-            else ""),
+        # fields are still open. (The profile goal/studying columns
+        # are NOT surfaced here: nothing in the SMS product writes
+        # them — they hold legacy-app boilerplate at best.)
         "goal_discipline": (
             "The AGREED GOAL is settled fact. Never re-open it from "
             "scratch — reference it in passing; re-asking reads as "
