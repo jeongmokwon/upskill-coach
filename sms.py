@@ -708,7 +708,7 @@ def _build_context_blocks(user_id, focus_block=None):
         print(f"[SMS] ⚠️ materials block failed: {e}", flush=True)
     try:
         notes_block = notes_mod.render_notes_block(
-            user_id, profile=False, moves=_onboarding_done(user_id))
+            user_id, profile=False, moves=False)
         if notes_block:
             parts.append(notes_block)
     except Exception as e:
@@ -802,10 +802,13 @@ def _phase_gated_blocks(user_id, versions):
     plan: hard rules 2-8 and the full step vocabulary. During
     onboarding they are replaced by rule 1 (already in sms_shared)
     and the compact tag list."""
+    # Step vocabulary and the compact tag list removed from assembly
+    # (exp/step-surface-removal): the 17-move lexicon was biasing
+    # every message toward coaching-move shapes.
     if not _onboarding_done(user_id):
-        return [_step_compact_block()]
+        return []
     out = []
-    for name in ("sms_hard_rules_full", "sms_step_vocabulary"):
+    for name in ("sms_hard_rules_full",):
         try:
             text, h = _read_prompt_versioned(name)
             versions[name] = h
@@ -1588,10 +1591,8 @@ def check_send_guards(text, steps, user_id=None):
             f"{n} questions in one message — ask exactly one. Keep the "
             f"single most important question and drop the rest (they "
             f"can come in later turns).")
-    if not steps:
-        violations.append(
-            "missing [STEP: ...] — every message must record the "
-            "coaching move(s) it plays.")
+    # (missing-[STEP:] violation removed — step tagging retired with
+    # the step surfaces, exp/step-surface-removal.)
     if (user_id and _UPLOADED_THING_RE.search(text or "")
             and not db.get_user_materials(user_id)):
         violations.append(_UPLOAD_GUARD_MSG)
