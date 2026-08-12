@@ -2534,11 +2534,20 @@ def get_tracks(user_id, mode=None):
 
 def add_knowledge_item(track_id, user_id, stem, anchor_type,
                        anchor_quote="", section_hint="", elements=None,
-                       kind="", est_difficulty=2, source="extraction"):
+                       kind="", est_difficulty=2, source="extraction",
+                       status="untested"):
     """An item that cannot quote its origin does not exist: file_chunk
-    and conversation items REQUIRE an anchor_quote."""
+    and conversation items REQUIRE an anchor_quote.
+
+    One deliberate exception: status='needs_anchor' — the holding pen
+    for items whose grounding must come from the USER ('your file
+    doesn't state this compactly — where would you point a
+    colleague?'). Anchorless items may exist there and ONLY there;
+    selection never circulates them, and leaving the pen requires a
+    real anchor."""
     if anchor_type in ("file_chunk", "conversation") \
-            and not (anchor_quote or "").strip():
+            and not (anchor_quote or "").strip() \
+            and status != "needs_anchor":
         raise ValueError("anchored item without anchor_quote")
     conn = get_conn()
     cur = _execute(conn,
@@ -2546,14 +2555,41 @@ def add_knowledge_item(track_id, user_id, stem, anchor_type,
         f" anchor_quote, section_hint, stem, elements_json, kind, "
         f" est_difficulty, status, source, created_at) "
         f"VALUES ({_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, {_P}, "
-        f" 'untested', {_P}, {_P})"
+        f" {_P}, {_P}, {_P})"
         + (" RETURNING id" if DB_TYPE == "postgres" else ""),
         (track_id, user_id, anchor_type, anchor_quote, section_hint,
          stem, json.dumps(elements or [], ensure_ascii=False), kind,
-         est_difficulty, source, datetime.now().isoformat()))
+         est_difficulty, status, source, datetime.now().isoformat()))
     item_id = _fetchone(cur)["id"] if DB_TYPE == "postgres" else cur.lastrowid
     conn.commit(); conn.close()
     return item_id
+
+
+def set_attempt_item(attempt_id, item_id):
+    """Link an attempt to its bank item (seed imports create items
+    FROM answered questions, then point the original attempts at
+    them)."""
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE attempts SET item_id = {_P} WHERE id = {_P}",
+        (item_id, attempt_id))
+    conn.commit(); conn.close()
+
+
+def delete_track_items(track_id):
+    """Wipe a track's bank (rebank). Attempts keep their rows —
+    their item_id links are cleared so history survives the wipe
+    without dangling references."""
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE attempts SET item_id = NULL WHERE track_id = {_P}",
+        (track_id,))
+    cur = _execute(conn,
+        f"DELETE FROM knowledge_items WHERE track_id = {_P}",
+        (track_id,))
+    n = cur.rowcount
+    conn.commit(); conn.close()
+    return n
 
 
 def get_knowledge_items(track_id, status=None):
