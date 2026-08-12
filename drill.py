@@ -72,13 +72,25 @@ def _age_hours(ts):
         return None
 
 
-def select_item(user_id, track_id):
-    """Pick the next item to drill. Returns (item, why) or (None, reason).
+def _recent_item_ids(user_id, attempts):
+    """Items touched within the stand-down window (감쇠)."""
+    recent = set()
+    for p in db.get_predictions(user_id, limit=200):
+        h = _age_hours(p["ts"])
+        if h is not None and h < _RECENT_DAYS * 24:
+            recent.add(p["item_id"])
+    for a in attempts:
+        h = _age_hours(a["ts"])
+        if h is not None and h < _RECENT_DAYS * 24:
+            recent.add(a.get("item_id"))
+    return recent
 
-    Deterministic given the ledgers: same state, same pick — a
-    selection you can rerun on your laptop to see why Theo asked
-    what it asked.
-    """
+
+def select_item(user_id, track_id):
+    """Deterministic FALLBACK selection (weight arithmetic). The
+    live path is rank_select — this runs when the ranking call
+    fails, and stays rerunnable on a laptop. Returns (item, why) or
+    (None, reason)."""
     items = [i for i in db.get_knowledge_items(track_id)
              if i["status"] in _ASKABLE]
     if not items:
@@ -132,6 +144,124 @@ def select_item(user_id, track_id):
     pick = max(fresh, key=lambda i: (miss_score(i)[0], -i["id"]))
     _, why = miss_score(pick)
     return pick, ", ".join(why) or "rotation"
+
+
+_RANK_TOOL = {
+    "name": "submit_selection",
+    "description": "Choose the one item to drill next.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "item_id": {"type": "integer"},
+            "p_miss": {"type": "string",
+                       "enum": ["high", "medium", "low"]},
+            "why": {"type": "string",
+                    "description": "One line tying the pick to THIS "
+                                   "user's record — which past miss "
+                                   "or stated preference makes this "
+                                   "the item worth drilling now."},
+        },
+        "required": ["item_id", "p_miss", "why"],
+    },
+}
+
+_RANK_SYSTEM = """You are the selection brain of a learning coach. \
+From the candidate bank items, choose the ONE to drill next for \
+THIS user, using their attempt record, their style notes, and their \
+standing content preferences (the preferences govern scope and \
+style — obey them).
+
+mode=likely_miss (the default): pick the item this user is MOST \
+LIKELY TO GET WRONG that is worth knowing — their record shows \
+which structures slip (derive it from the record, e.g. numbers, \
+attributions, list tails). A detail they'd miss beats a concept \
+they hold.
+
+mode=likely_hit_probe: this turn verifies the prediction system in \
+the other direction — pick the item they are most likely to get \
+RIGHT."""
+
+
+def rank_select(user_id, track, client=None):
+    """② the live selection: code narrows candidates, the model
+    ranks them against the user's record, notes, and content
+    preferences. Falls back to the deterministic scorer on any
+    failure — a selection call must never cost the user their
+    question."""
+    track_id = track["id"]
+    items = [i for i in db.get_knowledge_items(track_id)
+             if i["status"] in _ASKABLE]
+    if not items:
+        return None, "no askable items"
+    attempts = db.get_attempts(track_id, limit=500)
+    fresh = [i for i in items
+             if i["id"] not in _recent_item_ids(user_id, attempts)] \
+        or items
+    if len(fresh) == 1:
+        return fresh[0], "only fresh candidate"
+    n_preds = len(db.get_predictions(user_id, limit=500))
+    probe = bool(n_preds) and n_preds % LIKELY_HIT_EVERY \
+        == LIKELY_HIT_EVERY - 1
+    last_by_item = {}
+    for a in reversed(attempts):
+        if a.get("item_id"):
+            last_by_item[a["item_id"]] = a["verdict"]
+    payload = {
+        "mode": "likely_hit_probe" if probe else "likely_miss",
+        "candidates": [
+            {"item_id": i["id"], "stem": i["stem"], "kind": i["kind"],
+             "est_difficulty": i["est_difficulty"],
+             "status": i["status"],
+             "last_verdict": last_by_item.get(i["id"], "never asked")}
+            for i in fresh[:15]],
+        "attempt_record": _record_summary(track_id),
+        "style_notes": [n["observation"]
+                        for n in db.get_person_notes(user_id)][-12:],
+        "content_preferences": _prefs_block(user_id),
+    }
+    try:
+        client = client or anthropic.Anthropic()
+        resp = client.messages.create(
+            model=MODEL, max_tokens=400, system=_RANK_SYSTEM,
+            messages=[{"role": "user", "content":
+                       json.dumps(payload, ensure_ascii=False)}],
+            tools=[_RANK_TOOL],
+            tool_choice={"type": "tool", "name": "submit_selection"})
+        p = next((b.input for b in resp.content
+                  if getattr(b, "type", "") == "tool_use"), None)
+        db.save_llm_call(user_id, "drill_select", MODEL, _RANK_SYSTEM,
+                         [{"role": "user", "content": "(candidates)"}],
+                         {}, json.dumps(p, ensure_ascii=False)
+                         if p else "")
+        pick = next((i for i in fresh
+                     if i["id"] == (p or {}).get("item_id")), None)
+        if pick is None:
+            raise ValueError(
+                f"invalid item_id {(p or {}).get('item_id')}")
+        mode = "probe: " if probe else ""
+        return pick, (f"{mode}p_miss={p.get('p_miss')} — "
+                      f"{p.get('why', '')}")
+    except Exception as e:
+        print(f"[DRILL] ⚠️ rank_select failed ({e}) — falling back "
+              f"to scorer", flush=True)
+        db.log_event(user_id, "drill_error",
+                     {"where": "rank_select", "error": str(e)[:200]},
+                     source="server")
+        item, why = select_item(user_id, track_id)
+        return item, f"(fallback scoring) {why}"
+
+
+def person_block(user_id, limit=10):
+    """④ the person ledger, rendered for the question-writing
+    prompt: how this user answers, what phrasing works — shaping
+    input, never content to recite at them."""
+    notes = db.get_person_notes(user_id)
+    if not notes:
+        return ""
+    lines = ["## How this user answers (person ledger — use it to "
+             "shape the question; never recite it at them)"]
+    lines += [f"- {n['observation']}" for n in notes[-limit:]]
+    return "\n".join(lines)
 
 
 _PREDICT_TOOL = {
@@ -266,7 +396,7 @@ def prepare_scheduled_question(user_id, client=None, record=True):
                     "prediction_id": open_pred["id"], "reask": True,
                     "why": "yesterday's question is still open",
                     "last_graded": last_graded}
-    item, why = select_item(user_id, track["id"])
+    item, why = rank_select(user_id, track, client=client)
     if item is None:
         return None
     pred_id = (_predict(user_id, item, track["id"], client=client)
@@ -343,6 +473,11 @@ THE USER'S STANDING CONTENT PREFERENCES (these govern what you mine):
 THE USER'S RECORD (mine MORE of what this record shows them missing \
 — and skip concept-level material they demonstrably hold):
 {record}
+
+THE USER'S STYLE NOTES (how they answer — calibrate stems and \
+elements to the person, e.g. precise fact patterns for someone who \
+clarifies setups before answering):
+{notes}
 
 Rules:
 - anchor_quote MUST be a verbatim passage (8-25 words) copied \
@@ -450,9 +585,11 @@ def generate_items(user_id, track, n, client=None):
     existing = db.get_knowledge_items(track["id"])
     client = client or anthropic.Anthropic()
 
+    notes = [p["observation"] for p in db.get_person_notes(user_id)]
     system = _MINE_SYSTEM.format(
         n=n, prefs=_prefs_block(user_id),
-        record=_record_summary(track["id"]))
+        record=_record_summary(track["id"]),
+        notes="\n".join(f"- {o}" for o in notes[-12:]) or "(none yet)")
     user_msg = ("EXISTING BANK STEMS (do not duplicate):\n"
                 + "\n".join(f"- {i['stem']}" for i in existing)
                 + f"\n\nMATERIAL:\n{source}")
