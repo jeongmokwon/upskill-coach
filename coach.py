@@ -3320,6 +3320,63 @@ async def _prompt_preview_handler(request):
                         charset="utf-8")
 
 
+async def _rebank_handler(request):
+    """Operator-only bank rebuild (CRON_SECRET): wipe a track's
+    items and import a reviewed set, linking seed items to the
+    attempts they were born from. First use: replacing the
+    rehearsal-mined 28 (generic, off-scope) with the reviewed
+    seed+mined set built by the contents module.
+
+    POST /debug/rebank?secret=..
+    body: {"user_id", "track_id", "wipe": true, "items": [
+        {stem, anchor_type, anchor_quote, section_hint, elements,
+         kind, est_difficulty, status, link_attempt_ids: [..]}]}
+    """
+    import db
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret", "").strip()
+                or request.query.get("secret", "").strip())
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+    body = await request.json()
+    user_id = (body.get("user_id") or "").strip()
+    track_id = body.get("track_id")
+    items = body.get("items") or []
+    if not user_id or not track_id or not items:
+        return web.Response(
+            status=400, text="user_id, track_id, items required")
+    if not any(t["id"] == track_id for t in db.get_tracks(user_id)):
+        return web.Response(status=404,
+                            text=f"no track {track_id} for {user_id}")
+    wiped = db.delete_track_items(track_id) if body.get("wipe") else 0
+    counts = {"wiped": wiped, "added": 0, "linked": 0, "skipped": []}
+    for it in items:
+        try:
+            item_id = db.add_knowledge_item(
+                track_id, user_id, stem=it.get("stem", ""),
+                anchor_type=it.get("anchor_type", "file_chunk"),
+                anchor_quote=it.get("anchor_quote", ""),
+                section_hint=it.get("section_hint", ""),
+                elements=it.get("elements"),
+                kind=it.get("kind", ""),
+                est_difficulty=it.get("est_difficulty", 2),
+                status=it.get("status", "untested"),
+                source="rebank")
+        except ValueError as e:
+            counts["skipped"].append(
+                f"{it.get('stem', '')[:50]}: {e}")
+            continue
+        counts["added"] += 1
+        for aid in it.get("link_attempt_ids") or []:
+            db.set_attempt_item(int(aid), item_id)
+            counts["linked"] += 1
+    db.log_event(user_id, "bank_rebuilt",
+                 {"track_id": track_id, **{k: v for k, v in
+                  counts.items() if k != "skipped"},
+                  "skipped": len(counts["skipped"])}, source="admin")
+    return web.json_response({"ok": True, **counts})
+
+
 async def _track_admin_handler(request):
     """Operator-only track edits (CRON_SECRET). First use: renaming
     the imported track — '회사 PDF' was an operator placeholder and
@@ -3978,6 +4035,7 @@ def start_ws_server():
         app.router.add_post("/debug/material", _material_admin_handler)
         app.router.add_post("/debug/import-ledgers", _ledger_import_handler)
         app.router.add_post("/debug/track", _track_admin_handler)
+        app.router.add_post("/debug/rebank", _rebank_handler)
         app.router.add_get("/debug/prompt-preview", _prompt_preview_handler)
         app.router.add_get("/notes", _notes_handler)
         app.router.add_post("/notes", _notes_handler)

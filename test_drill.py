@@ -55,6 +55,7 @@ class DrillFake:
     planner_text = ("a client wants to sell restricted stock next "
                     "week — what do you check before they can?\n"
                     "[STEP: connect@1]\n[EXPECT: reply]")
+    planner_queue = []      # scripted multi-call sequences pop first
     planner_system = ""
     seen = []
 
@@ -74,10 +75,13 @@ class DrillFake:
                     input = DrillFake.payload
             else:
                 DrillFake.planner_system = kwargs.get("system", "")
+                _t = (DrillFake.planner_queue.pop(0)
+                      if DrillFake.planner_queue
+                      else DrillFake.planner_text)
 
                 class _B:
                     type = "text"
-                    text = DrillFake.planner_text
+                    text = _t
 
             class _R:
                 content = [_B()]
@@ -367,6 +371,150 @@ check("no track → morning keeps the old thread-keeping gate (skip)",
       == "no_thread_this_phase")
 check("no track → inbound grading is a no-op",
       drill.grade_if_answering(U5) is None)
+
+# ── 6. contents module + rebank ─────────────────────────────────────
+print("6) contents module")
+U6 = "bank6"
+db.ensure_user_profile_row(U6)
+t6 = db.create_track(U6, "PDF", mode="drill")
+
+try:
+    db.add_knowledge_item(t6, U6, stem="no anchor, no pen",
+                          anchor_type="file_chunk")
+    check("anchorless item outside the needs_anchor pen still raises",
+          False)
+except ValueError:
+    check("anchorless item outside the needs_anchor pen still raises",
+          True)
+held = db.add_knowledge_item(t6, U6, stem="ask the user for grounding",
+                             anchor_type="file_chunk",
+                             status="needs_anchor")
+live = db.add_knowledge_item(t6, U6, stem="normal item",
+                             anchor_type="canonical", kind="concept",
+                             est_difficulty=2)
+pick6, _ = drill.select_item(U6, t6)
+check("needs_anchor items exist but never circulate",
+      pick6["id"] == live
+      and all(i["id"] != held
+              for i in [pick6]))
+
+a6 = db.record_attempt(t6, U6, "partial", item_id=live,
+                       question="q", answer_verbatim="ans")
+wiped = db.delete_track_items(t6)
+check("wipe clears the bank but keeps attempts (links nulled)",
+      wiped == 2 and db.get_knowledge_items(t6) == []
+      and db.get_attempts(t6)[0]["item_id"] is None)
+
+MATERIAL = ("Section 1. The cooling-off period for former "
+            "affiliates is three months after affiliate status "
+            "ends. Section 2. The volume limit is the greater of "
+            "one percent of outstanding or four-week average "
+            "weekly volume reported.")
+db.add_user_material(U6, "file", title="notes.docx",
+                     extracted_text=MATERIAL)
+good = {"stem": "cooling-off for former affiliates",
+        "anchor_quote": "cooling-off period for former affiliates "
+                        "is three months",
+        "section_hint": "s1", "elements": ["three months",
+                                           "after status ends"],
+        "kind": "numeric_comparison", "est_difficulty": 3}
+bad = {"stem": "volume limit calculation",
+       "anchor_quote": "the volume cap is 1% or the 4-week ADTV",
+       "section_hint": "s2", "elements": ["greater-of"],
+       "kind": "numeric_comparison", "est_difficulty": 2}
+fixed = dict(bad, anchor_quote="greater of one percent of "
+                               "outstanding or four-week average")
+DrillFake.planner_queue = [json.dumps([good, bad]),
+                           json.dumps([fixed])]
+added = drill.generate_items(U6, db.get_tracks(U6)[0], 5)
+stems6 = [i["stem"] for i in db.get_knowledge_items(t6)]
+check("mine → verify → re-anchor once: paraphrased anchor fixed via "
+      "retry, both items land as untested",
+      added == 2 and sorted(stems6) == ["cooling-off for former "
+                                        "affiliates",
+                                        "volume limit calculation"]
+      and all(i["status"] == "untested"
+              for i in db.get_knowledge_items(t6)))
+check("bank_refilled event records the intake audit",
+      events_of(U6, "bank_refilled")[-1]["payload"]["added"] == 2)
+
+DrillFake.planner_queue = [json.dumps([bad]), json.dumps([bad])]
+added2 = drill.generate_items(U6, db.get_tracks(U6)[0], 3)
+check("an anchor that still fails after retry is dropped, not "
+      "trusted",
+      added2 == 0 and len(db.get_knowledge_items(t6)) == 2)
+
+topped = []
+real_gen = drill.generate_items
+drill.generate_items = lambda u, t, n, client=None: topped.append(n)
+import time as _t
+drill._topup_if_low(U6, db.get_tracks(U6)[0])
+for _ in range(50):
+    if topped:
+        break
+    _t.sleep(0.05)
+drill.generate_items = real_gen
+check("low inventory triggers a background top-up to target "
+      "(2 untested → asks for 18)",
+      topped == [drill.BANK_TARGET - 2])
+
+# ── 7. rebank endpoint ──────────────────────────────────────────────
+print("7) rebank endpoint")
+import asyncio  # noqa: E402
+
+os.environ["CRON_SECRET"] = "s3cret"
+import coach  # noqa: E402
+from aiohttp.test_utils import make_mocked_request  # noqa: E402
+REBANK = {
+    "user_id": U6, "track_id": t6, "wipe": True,
+    "items": [
+        {"stem": "seed from his answer", "anchor_type": "file_chunk",
+         "anchor_quote": "volume limit is the greater of one percent",
+         "elements": ["a"], "kind": "numeric_comparison",
+         "est_difficulty": 2, "status": "learning",
+         "link_attempt_ids": [a6]},
+        {"stem": "held for his grounding",
+         "anchor_type": "file_chunk", "anchor_quote": "",
+         "elements": ["b"], "kind": "concept", "est_difficulty": 2,
+         "status": "needs_anchor"},
+        {"stem": "fresh mined", "anchor_type": "file_chunk",
+         "anchor_quote": "four-week average weekly volume",
+         "elements": ["c"], "kind": "procedure", "est_difficulty": 2,
+         "status": "untested"},
+        {"stem": "broken: anchorless but not held",
+         "anchor_type": "file_chunk", "anchor_quote": "",
+         "elements": [], "kind": "concept", "est_difficulty": 1,
+         "status": "untested"},
+    ],
+}
+
+
+def hit_rebank(body):
+    req = make_mocked_request("POST", "/debug/rebank?secret=s3cret")
+
+    async def _json():
+        return body
+    req.json = _json
+
+    async def go():
+        return await coach._rebank_handler(req)
+    return asyncio.run(go())
+
+
+r6 = hit_rebank(REBANK)
+j6 = json.loads(r6.text)
+rows6 = db.get_knowledge_items(t6)
+check("rebank: wipe + reviewed set in one call, statuses preserved",
+      r6.status == 200 and j6["wiped"] == 2 and j6["added"] == 3
+      and sorted(i["status"] for i in rows6)
+      == ["learning", "needs_anchor", "untested"])
+check("seed item linked back to the attempt it was born from",
+      j6["linked"] == 1
+      and db.get_attempts(t6)[0]["item_id"]
+      == next(i["id"] for i in rows6
+              if i["stem"] == "seed from his answer"))
+check("anchorless non-hold item refused and reported",
+      len(j6["skipped"]) == 1 and "anchor" in j6["skipped"][0])
 
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

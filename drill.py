@@ -320,6 +320,218 @@ def question_block(ctx):
     return "\n".join(lines)
 
 
+# ── contents generation — the bank's production line ────────────────
+#
+# The bank is inventory, and inventory drains: every graded answer
+# moves an item out of 'untested'. This module is the matching
+# production side — user-agnostic by design (the husband's instance
+# is with_material over his PDF; a future track may be a textbook
+# range or a canonical exam). Called with n at init (~20) and then
+# rolling: the low-water check after each grading tops the bank
+# back up in the background.
+
+BANK_TARGET = 20     # standing inventory of untested items
+BANK_LOW_WATER = 5   # below this, grading triggers a background top-up
+_MAX_MINE_PER_CALL = 12
+
+_MINE_SYSTEM = """You are the contents-creation module of a learning \
+coach. Mine {n} NEW question-bank items from the user's own material.
+
+THE USER'S STANDING CONTENT PREFERENCES (these govern what you mine):
+{prefs}
+
+THE USER'S RECORD (mine MORE of what this record shows them missing \
+— and skip concept-level material they demonstrably hold):
+{record}
+
+Rules:
+- anchor_quote MUST be a verbatim passage (8-25 words) copied \
+EXACTLY from the material. The server verifies by exact substring \
+match and rejects the item otherwise. Never paraphrase inside the \
+quote.
+- Do NOT duplicate the existing bank stems (provided).
+- elements = the pieces a complete answer must contain, calibrated \
+to what a senior practitioner answering a colleague must say.
+- Output ONLY a JSON array (escape internal double quotes):
+[{{"stem": ..., "anchor_quote": ..., "section_hint": ..., \
+"elements": [...], "kind": "numeric_comparison|multi_part|exception\
+|attribution|procedure|concept", "est_difficulty": 1-4}}]"""
+
+_REANCHOR_SYSTEM = """Each item below was REJECTED because its \
+anchor_quote is not an exact substring of the material — it was \
+paraphrased. For each item, find a real verbatim passage (8-25 \
+words, copied character-for-character) that grounds the same stem, \
+and return the SAME items with only anchor_quote corrected. If the \
+material truly has no passage for a stem, drop that item. Output \
+ONLY the JSON array (escape internal double quotes)."""
+
+
+def _norm_text(s):
+    s = (s or "").replace("“", '"').replace("”", '"')
+    s = s.replace("‘", "'").replace("’", "'")
+    s = s.replace("–", "-").replace("—", "-")
+    return re.sub(r"\s+", " ", s).lower()
+
+
+def _material_text(user_id):
+    """The with_material source: extracted text of the user's file
+    materials. '' when the track has nothing to mine from."""
+    try:
+        mats = db.get_user_materials(user_id)
+    except Exception:
+        return ""
+    return "\n\n".join(
+        (m.get("extracted_text") or "") for m in mats
+        if m.get("kind") == "file"
+        and (m.get("extracted_text") or "").strip())
+
+
+def _record_summary(track_id):
+    lines = []
+    for a in db.get_attempts(track_id, limit=40):
+        missed = [e["name"] for e in a.get("elements", [])
+                  if e.get("verdict") != "hit"]
+        lines.append(
+            f"- [{a['source']}/{a['verdict']}] {a['question'][:110]}"
+            + (f" — weaker on: {'; '.join(missed)}" if missed else ""))
+    return "\n".join(lines) or "(no attempts yet)"
+
+
+def _prefs_block(user_id):
+    try:
+        prefs = db.get_user_preferences(user_id)
+    except Exception:
+        prefs = {}
+    if not prefs:
+        return "(none stated — mine broadly, hardest-to-retain first)"
+    return "\n".join(f"- {k}: {v['value']}" for k, v in prefs.items())
+
+
+def _json_array_call(client, system, user, max_tokens):
+    """One model call that must yield a JSON array; one re-ask on
+    invalid JSON (observed: unescaped quotes inside verbatim legal
+    anchors)."""
+    messages = [{"role": "user", "content": user}]
+    for attempt in (1, 2):
+        resp = client.messages.create(
+            model=MODEL, max_tokens=max_tokens, system=system,
+            messages=messages)
+        text = "".join(b.text for b in resp.content
+                       if getattr(b, "type", "") == "text")
+        s = text.find("[")
+        try:
+            return json.loads(text[s:text.rfind("]") + 1])
+        except (json.JSONDecodeError, ValueError) as e:
+            if attempt == 2:
+                raise
+            messages = messages + [
+                {"role": "assistant", "content": text},
+                {"role": "user", "content":
+                 f"Your output is invalid JSON ({e}). Re-output the "
+                 f"ENTIRE array as strict valid JSON — escape every "
+                 f'internal double quote inside strings as \\".'}]
+
+
+def generate_items(user_id, track, n, client=None):
+    """Mine up to n new items into the track's bank. Returns the
+    number actually added. Anchors are verified as verbatim
+    substrings of the material BY CODE — mine → verify → re-anchor
+    once → drop what still fails. Fabrication dies at intake, not
+    at grading."""
+    n = min(n, _MAX_MINE_PER_CALL)
+    if n <= 0:
+        return 0
+    source = _material_text(user_id)
+    if not source.strip():
+        print(f"[DRILL] no material text for {user_id} — "
+              f"bank top-up skipped", flush=True)
+        return 0
+    norm_source = _norm_text(source)
+    existing = db.get_knowledge_items(track["id"])
+    client = client or anthropic.Anthropic()
+
+    system = _MINE_SYSTEM.format(
+        n=n, prefs=_prefs_block(user_id),
+        record=_record_summary(track["id"]))
+    user_msg = ("EXISTING BANK STEMS (do not duplicate):\n"
+                + "\n".join(f"- {i['stem']}" for i in existing)
+                + f"\n\nMATERIAL:\n{source}")
+    try:
+        mined = _json_array_call(client, system, user_msg, 8000)
+    except Exception as e:
+        print(f"[DRILL] ⚠️ mine call failed for {user_id}: {e}",
+              flush=True)
+        db.log_event(user_id, "drill_error",
+                     {"where": "generate_items", "error": str(e)[:300]},
+                     source="server")
+        return 0
+
+    def anchored(items):
+        ok, bad = [], []
+        for it in items:
+            q = _norm_text(it.get("anchor_quote", ""))
+            (ok if q and q in norm_source else bad).append(it)
+        return ok, bad
+
+    ok, bad = anchored(mined)
+    if bad:
+        try:
+            fixed = _json_array_call(
+                client, _REANCHOR_SYSTEM,
+                "REJECTED ITEMS:\n"
+                + json.dumps(bad, ensure_ascii=False)
+                + f"\n\nMATERIAL:\n{source}", 6000)
+            re_ok, still_bad = anchored(fixed)
+            ok += re_ok
+        except Exception as e:
+            print(f"[DRILL] re-anchor call failed: {e}", flush=True)
+            still_bad = bad
+    else:
+        still_bad = []
+
+    added = 0
+    seen = {_norm_text(i["stem"]) for i in existing}
+    for it in ok[:n]:
+        if _norm_text(it.get("stem", "")) in seen:
+            continue
+        try:
+            db.add_knowledge_item(
+                track["id"], user_id, stem=it.get("stem", ""),
+                anchor_type="file_chunk",
+                anchor_quote=it.get("anchor_quote", ""),
+                section_hint=it.get("section_hint", ""),
+                elements=it.get("elements"),
+                kind=it.get("kind", ""),
+                est_difficulty=it.get("est_difficulty", 2),
+                source="contents_module")
+            added += 1
+        except ValueError:
+            continue
+    db.log_event(user_id, "bank_refilled",
+                 {"track_id": track["id"], "requested": n,
+                  "added": added, "rejected": len(still_bad)},
+                 source="server")
+    print(f"[DRILL] bank refilled for {user_id}: +{added} "
+          f"(requested {n}, {len(still_bad)} dropped unanchored)",
+          flush=True)
+    return added
+
+
+def _topup_if_low(user_id, track):
+    """The rolling production trigger: consumption happens through
+    grading, so grading checks the untested inventory and refills in
+    the background when it runs low."""
+    untested = db.get_knowledge_items(track["id"], status="untested")
+    if len(untested) >= BANK_LOW_WATER:
+        return
+    need = BANK_TARGET - len(untested)
+    import threading
+    threading.Thread(target=generate_items,
+                     args=(user_id, track, need), daemon=True).start()
+    print(f"[DRILL] bank low ({len(untested)} untested) — "
+          f"background top-up of {need} started", flush=True)
+
+
 def leaks_answer(text, item):
     """True if a drill-question draft contains the answer key: the
     anchor quote, or a majority of the rubric elements verbatim.
@@ -479,6 +691,10 @@ def grade_if_answering(user_id, client=None):
         db.set_item_status(
             item["id"], "solid" if verdict == "complete" else "learning",
             source="drill")
+        try:
+            _topup_if_low(user_id, track)
+        except Exception as e:
+            print(f"[DRILL] top-up check failed: {e}", flush=True)
         if (g.get("style_note") or "").strip() \
                 and (g.get("style_evidence") or "").strip():
             db.add_person_note(user_id, g["style_note"].strip(),
