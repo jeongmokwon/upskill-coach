@@ -750,9 +750,18 @@ def _build_drill_prompt(user_id, drill_ctx):
                 **ctx_versions}
     parts = [context,
              shared.format_map(_SafeDict(**fields)),
-             drill.question_block(drill_ctx),
-             mode_prompt.format_map(_SafeDict(**fields)),
-             _conversation_contract_block()]
+             drill.question_block(drill_ctx)]
+    # ④ the person ledger shapes HOW the question is asked —
+    # placed right beside the item so both are in hand when the
+    # question gets written.
+    try:
+        pblock = drill.person_block(user_id)
+        if pblock:
+            parts.append(pblock)
+    except Exception as e:
+        print(f"[SMS] ⚠️ person block failed: {e}", flush=True)
+    parts += [mode_prompt.format_map(_SafeDict(**fields)),
+              _conversation_contract_block()]
     return "\n\n---\n\n".join(parts), versions
 
 

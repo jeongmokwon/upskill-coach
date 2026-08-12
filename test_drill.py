@@ -51,6 +51,7 @@ class DrillFake:
     `payload`; plain calls (the planner) return the scripted
     question text."""
     payload = None
+    payload_by_tool = {}   # route by forced tool name when set
     fail = False
     planner_text = ("a client wants to sell restricted stock next "
                     "week — what do you check before they can?\n"
@@ -69,10 +70,13 @@ class DrillFake:
             if kwargs.get("tools"):
                 if DrillFake.fail:
                     raise RuntimeError("api down")
+                _name = kwargs["tools"][0]["name"]
+                _p = DrillFake.payload_by_tool.get(_name,
+                                                   DrillFake.payload)
 
                 class _B:
                     type = "tool_use"
-                    input = DrillFake.payload
+                    input = _p
             else:
                 DrillFake.planner_system = kwargs.get("system", "")
                 _t = (DrillFake.planner_queue.pop(0)
@@ -515,6 +519,72 @@ check("seed item linked back to the attempt it was born from",
               if i["stem"] == "seed from his answer"))
 check("anchorless non-hold item refused and reported",
       len(j6["skipped"]) == 1 and "anchor" in j6["skipped"][0])
+
+# ── 8. ② rank selection + ④ person block ───────────────────────────
+print("8) rank select + person block")
+U8 = "rank8"
+db.ensure_user_profile_row(U8)
+t8 = db.create_track(U8, "PDF", mode="drill")
+i_hard8 = db.add_knowledge_item(t8, U8, stem="tail of the safe "
+                                "harbor list", anchor_type="canonical",
+                                kind="multi_part", est_difficulty=4)
+i_easy8 = db.add_knowledge_item(t8, U8, stem="basic concept",
+                                anchor_type="canonical",
+                                kind="concept", est_difficulty=1)
+db.add_person_note(U8, "clarifies the fact pattern before answering "
+                       "→ give precise setups", evidence="ev",
+                   confidence="high")
+db.set_user_preference(U8, "drill_scope", "Article I focus",
+                       evidence="Article I", source="t")
+
+DrillFake.payload_by_tool = {
+    "submit_selection": {"item_id": i_easy8, "p_miss": "high",
+                         "why": "matches his list-tail slips"}}
+track8 = db.get_tracks(U8)[0]
+pick8, why8 = drill.rank_select(U8, track8)
+check("② the model's ranked pick wins, with p_miss + record-tied "
+      "reason",
+      pick8["id"] == i_easy8 and "p_miss=high" in why8
+      and "list-tail" in why8)
+rank_call = json.loads(
+    [k for k in DrillFake.seen if k.get("tools")
+     and k["tools"][0]["name"] == "submit_selection"][-1]
+    ["messages"][0]["content"])
+check("ranking sees the record, the person notes, AND the content "
+      "preferences",
+      "attempt_record" in rank_call
+      and any("precise setups" in s
+              for s in rank_call["style_notes"])
+      and "Article I focus" in rank_call["content_preferences"])
+
+DrillFake.payload_by_tool = {
+    "submit_selection": {"item_id": 99999, "p_miss": "low",
+                         "why": "hallucinated id"}}
+pick8b, why8b = drill.rank_select(U8, track8)
+check("invalid pick → deterministic scorer fallback, labeled",
+      pick8b is not None and why8b.startswith("(fallback scoring)"))
+DrillFake.payload_by_tool = {}
+
+ctx8 = {"track": track8, "item": db.get_knowledge_items(t8)[0],
+        "prediction_id": 1, "reask": False, "why": "w"}
+sp8, _ = sms._build_drill_prompt(U8, ctx8)
+check("④ the person ledger rides in the question-writing prompt",
+      "How this user answers" in sp8 and "precise setups" in sp8)
+
+db.add_user_material(U8, "file", title="m.docx",
+                     extracted_text="The safe harbor requires notice "
+                                    "to the exchange within ten days "
+                                    "of the transaction closing.")
+DrillFake.planner_queue = [json.dumps([{
+    "stem": "safe harbor notice window",
+    "anchor_quote": "notice to the exchange within ten days",
+    "section_hint": "s1", "elements": ["ten days", "to the exchange"],
+    "kind": "numeric_comparison", "est_difficulty": 2}])]
+drill.generate_items(U8, track8, 1)
+mine_sys = [k for k in DrillFake.seen if not k.get("tools")
+            and "contents-creation" in k.get("system", "")][-1]["system"]
+check("mining also reads the person ledger now",
+      "STYLE NOTES" in mine_sys and "precise setups" in mine_sys)
 
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
