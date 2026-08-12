@@ -117,6 +117,16 @@ sms.send_sms("+15550009999", "one bubble only", user_id="bub")
 check("no split → no polls, no gap",
       len([t for t in timeline if t[0] == "poll"]) == 0 and not sleeps)
 
+# ── edge separators shaved ──────────────────────────────────────────
+print("2b) edge separators")
+timeline.clear(); sleeps.clear()
+sms.send_sms("+15550009999", "---\n\nack line\n---\nthe question",
+             user_id="bub")
+sends2b = [t for t in timeline if t[0] == "send"]
+check("a LEADING '---' never reaches the user's first line "
+      "(observed in the PR-A smoke run)",
+      len(sends2b) == 2 and sends2b[0][2].startswith("ack line"))
+
 # ── timeout: stuck first bubble doesn't block forever ───────────────
 print("3) timeout")
 timeline.clear(); sleeps.clear()

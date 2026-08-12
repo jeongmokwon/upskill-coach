@@ -150,6 +150,14 @@ def send_sms(to_number, body, user_id=None):
         print(f"[SMS] skipping send — Twilio not configured. Would have sent: {body[:80]}...", flush=True)
         return None
 
+    # A separator at the very edge is a model tic (a '---' with no
+    # first bubble): the splitter requires \n before it, so a leading
+    # one would ride into the user's first SMS line verbatim —
+    # observed in the PR-A smoke run. Shave the edges first.
+    body = body.strip()
+    body = re.sub(r"^(?:\s*---\s*\n)+", "", body)
+    body = re.sub(r"(?:\n\s*---\s*)+$", "", body)
+
     # Split on a line that is exactly '---' (with optional surrounding
     # whitespace). Leaves '---' inside code/text alone.
     parts = re.split(r"\n\s*---\s*\n", body.strip())
