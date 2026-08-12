@@ -3,7 +3,11 @@ Judging ignition is a question about something the user just wrote; on a
 scheduled send there is no reply to judge, so this block was 898 characters
 of dead instruction on every cron message. -->
 
-## Ignition judgment (live signal)
+#<!-- DEPRECATED (2026-08-12, PR-A): the per-reply ignition judgment
+is retired with the ignition→flow frame. No assembly path renders
+this file; kept for the design record. -->
+
+# Ignition judgment (live signal)
 
 Their ignition marker — their own observable definition of "it
 started" — appears in the context above when it has been

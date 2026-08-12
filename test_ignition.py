@@ -1,25 +1,21 @@
-"""
-Ignition instrumentation tests.
+"""Ignition retirement suite (2026-08-12, PR-A).
 
-Run: ./venv/bin/python test_ignition.py  (sqlite; anthropic mocked,
-Twilio unconfigured)
+Run: ./venv/bin/python test_ignition.py  (sqlite)
 
-Covers: per-user ignition marker persistence ([IGNITION_DEF:] →
-user_profiles + event), real-time judgment ([IGNITION: n] →
-ignition_judgment event with trigger + marker context), stripping of
-both markers from user-visible text, placeholder exposure to prompts,
-and the end-to-end inbound reply path.
+The ignition→flow frame is shelved: these tests pin the RETIRED
+state so a regression (an ignition block sneaking back into a
+prompt, a marker writing state again) fails loudly. The original
+ignition test suite lives in git history with the machinery.
 """
 
-import json
 import os
 import tempfile
 
 os.environ.pop("DATABASE_URL", None)
-os.environ["TUTOR_USER_ID"] = "test_user"
-os.environ["TUTOR_USER_PHONE"] = "+15550001111"
+os.environ["TUTOR_USER_ID"] = "ig"
+os.environ["TUTOR_USER_PHONE"] = "+15550002222"
 os.environ.pop("TWILIO_ACCOUNT_SID", None)
-os.environ.pop("TWILIO_FROM_NUMBER", None)
+os.environ["TZ_OFFSET_HOURS"] = "0"
 
 import db  # noqa: E402
 
@@ -28,7 +24,7 @@ db.init_db()
 
 import sms  # noqa: E402
 
-U = "test_user"
+U = "ig"
 PASS = []
 
 
@@ -38,112 +34,40 @@ def check(name, cond):
 
 
 def events_of(kind):
-    return [r for r in db.get_events(U, limit=200) if r["kind"] == kind]
+    return [r for r in db.get_events(U, limit=300) if r["kind"] == kind]
 
 
-# ── 0. score before any definition → dropped, not recorded ──────────
-print("0) score with no marker defined")
-text = sms._process_ignition_markers(U, "가보자!\n[IGNITION: 1]",
-                                     trigger="cron_evening")
-check("tag stripped but nothing recorded",
-      "[IGNITION" not in text and len(events_of("ignition_judgment")) == 0)
+db.ensure_user_profile_row(U)
+db.set_expectation_sent(U)
+db.save_sms_message(U, "user", "안녕", "in")
 
-# ── 1. the DEFINITION is extraction — generation must not set it ─────
-print("1) [IGNITION_DEF:] is no longer a generation marker")
-text = sms._strip_extraction_markers(
-    U, '좋아, 그걸로 하자!\n[IGNITION_DEF: "노트북 앞에 앉아 콜랩에 코드 타이핑"]')
-check("stale marker stripped from outbound",
-      "[IGNITION_DEF" not in text and text == "좋아, 그걸로 하자!")
-check("and it does NOT set the field (analysis call owns it)",
-      db.get_user_phase(U)["ignition_marker"] == ""
-      and len(events_of("ignition_def_set")) == 0)
+print("1) checklist")
+check("ignition_marker is no longer an onboarding field",
+      "ignition_marker" not in db.ONBOARDING_FIELDS
+      and "ignition_marker" not in db.get_onboarding_state(U)["missing"])
 
-# the analysis call is the only writer
-db.set_ignition_marker(U, "콜랩에 코드 타이핑 시작", source="analyze")
-check("analysis-written marker persists + events",
-      db.get_user_phase(U)["ignition_marker"] == "콜랩에 코드 타이핑 시작"
-      and len(events_of("ignition_def_set")) == 1)
+print("2) prompts")
+reply_prompt, _ = sms._build_system_prompt_for_reply(U)
+evening_prompt, _ = sms._build_system_prompt("evening", U)
+check("no ignition judgment block anywhere ('ignition' as an EXPECT "
+      "vocab token is step-surface territory, tier 2)",
+      "Ignition judgment" not in reply_prompt
+      and "Ignition judgment" not in evening_prompt
+      and "[IGNITION" not in reply_prompt
+      and "measuring instrument" not in reply_prompt)
+check("placeholders carry no ignition marker",
+      "ignition_marker" not in sms._build_placeholders(U))
 
-# ── 2. judgment marker ───────────────────────────────────────────────
-print("2) [IGNITION: n]")
-text = sms._process_ignition_markers(
-    U, "오 벌써 열었네! 그 첫 줄부터 가자.\n[IGNITION: 4]",
-    trigger="inbound_reply")
-check("score stripped", "[IGNITION" not in text)
-judgments = events_of("ignition_judgment")
-p = json.loads(judgments[-1]["payload"]) if judgments else {}
-check("judgment event with score + trigger + marker context",
-      p.get("score") == 4 and p.get("trigger") == "inbound_reply"
-      and p.get("marker") == "콜랩에 코드 타이핑 시작")
+print("3) markers")
+out = sms._process_ignition_markers(U, "좋아!\n[IGNITION: 4]", "t")
+check("[IGNITION: n] stripped, nothing recorded",
+      "[IGNITION" not in out and out == "좋아!"
+      and events_of("ignition_judgment") == [])
 
-text = sms._process_ignition_markers(U, "no markers", trigger="x")
-check("no markers → text unchanged, no new events",
-      text == "no markers" and len(events_of("ignition_judgment")) == 1)
-
-# ── 3. placeholders reach the prompts ────────────────────────────────
-print("3) placeholders")
-fields = sms._build_placeholders(U)
-check("ignition_marker exposed to prompt templates",
-      fields["ignition_marker"] == "콜랩에 코드 타이핑 시작")
-
-prompt, _ = sms._build_system_prompt_for_reply(U)
-check("rendered reply prompt carries the user's marker",
-      "콜랩에 코드 타이핑 시작" in prompt)
-
-# ── 4. end-to-end inbound reply path ─────────────────────────────────
-print("4) inbound path")
-
-class FakeAnthropicClient:
-    def __init__(self, *a, **kw):
-        pass
-
-    class messages:
-        @staticmethod
-        def create(**kwargs):
-            class _Block:
-                text = ("코드 돌아간 거야?? 좋아, 다음 줄 가자.\n"
-                        "[IGNITION: 5]\n[STEP: evoke_mastery@1, micro_ask@2]")
-
-            class _Resp:
-                content = [_Block()]
-            return _Resp()
-
-
-class DispatchFake(FakeAnthropicClient):
-    """One fake for both calls (shared anthropic module): tool_use for
-    the analysis pass, text for generation."""
-    class messages:
-        @staticmethod
-        def create(**kwargs):
-            if kwargs.get("tools"):
-                class _B:
-                    type = "tool_use"
-                    input = {"step_completed": "not_applicable",
-                             "step_reason": "-"}
-            else:
-                class _B:
-                    type = "text"
-                    text = ("코드 돌아간 거야?? 좋아, 다음 줄 가자.\n"
-                            "[IGNITION: 5]\n[STEP: evoke_mastery@1, micro_ask@2]")
-
-            class _R:
-                content = [_B()]
-            return _R()
-
-
-sms.anthropic.Anthropic = DispatchFake
-reply = sms.handle_inbound("+15550001111", "콜랩 켰고 방금 첫 줄 돌렸어!")
-check("both markers stripped from outbound",
-      reply is not None and "[IGNITION" not in reply and "[STEP" not in reply)
-
-j = json.loads(events_of("ignition_judgment")[-1]["payload"])
-check("live score 5 recorded from the reply path",
-      j["score"] == 5 and j["trigger"] == "inbound_reply")
-
-out = json.loads(events_of("sms_out")[-1]["payload"])
-check("steps still recorded alongside",
-      out.get("steps") == [{"tag": "evoke_mastery", "intensity": 1},
-                           {"tag": "micro_ask", "intensity": 2}])
+print("4) data preserved")
+db.set_ignition_marker(U, "opens the file", source="test")
+check("column and accessor still exist (archive ≠ delete)",
+      db.get_user_phase(U)["ignition_marker"] == "opens the file")
 
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

@@ -57,8 +57,10 @@ db.save_sequence_plan(U, PLAN, rationale="t", source="operator")
 print("1) fresh user")
 check("no inbound ever → not dormant", not sms._is_dormant(U))
 prompt, _ = sms._build_system_prompt("evening", U)
-check("plan assignment present, no dormant mode",
-      "Sequence assignment" in prompt and "re-opening after dormancy" not in prompt)
+check("no dormant mode for a fresh user (sequence assignments "
+      "retired 2026-08-12 — nothing to swap in either direction)",
+      "Sequence assignment" not in prompt
+      and "re-opening after dormancy" not in prompt)
 
 # ── 2. recent reply → active, plan runs ──────────────────────────────
 print("2) active user")

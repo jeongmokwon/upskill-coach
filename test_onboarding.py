@@ -48,7 +48,7 @@ s = db.get_onboarding_state(U)
 check("fresh user misses every applicable field — material_"
       "understanding stays OFF the list until alignment says "
       "has_material",
-      s["missing"] == ["expectation_setting", "goal", "ignition_marker",
+      s["missing"] == ["expectation_setting", "goal",
                        "material_alignment", "offer", "schedule"]
       and s["started_at"] is None and s["completed_at"] is None)
 check("the first concrete task is NOT an onboarding field — it "
@@ -192,8 +192,8 @@ for label, p in (("scheduled", sms._build_system_prompt("evening", U3)[0]),
           heads[0].startswith("## Right now")
           and heads[1].startswith("## Onboarding"))
 
-check("ignition judgment is asked only about an inbound reply",
-      "## Ignition judgment" in sms._build_system_prompt_for_reply(U)[0]
+check("ignition judgment retired (2026-08-12) — asked nowhere",
+      "## Ignition judgment" not in sms._build_system_prompt_for_reply(U)[0]
       and "## Ignition judgment" not in sms._build_system_prompt("evening", U)[0])
 
 # ── the walkthrough arc drives the prompt ───────────────────────────

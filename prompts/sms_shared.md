@@ -101,8 +101,8 @@ Anything else is conversation — reply normally.
 
 A separate analysis pass reads the whole conversation after every
 reply and writes down what has been established — the goal, the
-big-steps path, the first task, their ignition marker, the
-messaging windows, what you committed to do for them. **You never
+big-steps path, the first task, the messaging windows, what you
+committed to do for them. **You never
 emit markers for these.** Your job is to have the conversation that
 makes them true; the recording happens on its own, and it can look
 back over earlier turns, so nothing is lost if a point lands
