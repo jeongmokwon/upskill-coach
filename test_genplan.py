@@ -123,9 +123,9 @@ check("notes saved as p7 hypotheses with quote evidence",
       len(notes) == 2 and notes[0]["source"] == "p7"
       and notes[0]["confidence"] == "hypothesis"
       and "그건 내 방식대로" in notes[0]["evidence_json"])
-plan = db.get_current_plan(U)
-check("plan saved (3 steps, cursor 0, source recorded)",
-      plan and len(plan["steps"]) == 3 and plan["cursor"] == 0)
+check("NO sequence plan saved — plan generation retired "
+      "(2026-08-12, PR-A); notes+brief are the artifacts",
+      db.get_current_plan(U) is None)
 check("plan_generated event + T2b record",
       len(events_of("plan_generated")) == 1
       and db.get_llm_call(result["llm_call_id"]) is not None)
@@ -157,7 +157,7 @@ check("a materials-less user renders no materials section",
 # ── 2. invalid → feedback retry → valid ──────────────────────────────
 print("2) retry")
 bad = json.loads(json.dumps(VALID))
-bad["plan"]["steps"][0]["tag"] = "galaxy_brain"
+bad["notes"][0]["expect"] = "galaxy_brain"     # invalid expect vocab
 FakeAnthropic.queue = [bad, json.loads(json.dumps(VALID))]
 FakeAnthropic.seen = []
 result = genplan.generate(U)
@@ -169,16 +169,15 @@ check("retry carried validation feedback",
 # ── 3. persistent failure → zero partial writes ──────────────────────
 print("3) persistent failure")
 notes_before = len(db.get_user_notes(U))
-plan_before = db.get_current_plan(U)["version"]
 bad2 = json.loads(json.dumps(VALID))
-bad2["plan"]["steps"] = bad2["plan"]["steps"][:1]        # only 1 step
+bad2["notes"][0]["expect"] = "nope"              # stays invalid
 FakeAnthropic.queue = [json.loads(json.dumps(bad2)) for _ in range(3)]
 result = genplan.generate(U)
 check("returns None + failure event",
       result is None and len(events_of("p7_generation_failed")) == 1)
 check("NOTHING partially saved",
       len(db.get_user_notes(U)) == notes_before
-      and db.get_current_plan(U)["version"] == plan_before)
+      and db.get_current_plan(U) is None)
 
 # ── 4. validation specifics ──────────────────────────────────────────
 print("4) validation")
@@ -187,9 +186,10 @@ v["notes"][0]["expect"] = "maybe"
 errs = genplan._validate(v)
 check("unknown expect caught", any("expect" in e for e in errs))
 v2 = json.loads(json.dumps(VALID))
-v2["plan"]["steps"][0]["tag"] = "hold"
-check("hold not plannable", any("plannable" in e
-                                for e in genplan._validate(v2)))
+v2.pop("plan", None)                     # plan key gone entirely
+check("a payload without any plan key validates cleanly (plan "
+      "generation retired)", genplan._validate(v2) == [] or
+      all("plan" not in e for e in genplan._validate(v2)))
 
 # ── 5. completion hook fires generation in background ────────────────
 print("5) completion hook")

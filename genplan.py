@@ -10,13 +10,13 @@ science lens and produces three artifacts:
   1. initial user notes — hypothesis-confidence conditional
      statements, each quoting the onboarding conversation as
      evidence
-  2. a sequence plan (2-5 steps) whose rationale cites those notes
+  2. (retired 2026-08-12: a sequence plan is no longer generated)
   3. a user profile brief (brief §7) — job, learning types from the
      fixed taxonomy, learning materials, what they want from Theo as
      VERBATIM quotes, a personality read, and which path_kind their
      learning types prescribe
 
-The chain plan → notes → conversation quotes is the point: the
+The chain notes → conversation quotes is the point: the
 rehearsal evaluates whether the reasoning was grounded, not whether
 the first guess was right.
 
@@ -74,7 +74,7 @@ PATH_KINDS = (
 
 _TOOL = {
     "name": "submit_initial_plan",
-    "description": ("Submit the initial user notes and sequence plan "
+    "description": ("Submit the initial user notes "
                     "derived from the onboarding conversation."),
     "input_schema": {
         "type": "object",
@@ -99,27 +99,6 @@ _TOOL = {
                     "required": ["claim", "when", "expect",
                                  "evidence_quotes"],
                 },
-            },
-            "plan": {
-                "type": "object",
-                "properties": {
-                    "steps": {
-                        "type": "array",
-                        "minItems": 2,
-                        "maxItems": 5,
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "tag": {"type": "string"},
-                                "intensity": {"type": "integer"},
-                                "intent": {"type": "string"},
-                            },
-                            "required": ["tag", "intensity", "intent"],
-                        },
-                    },
-                    "rationale": {"type": "string"},
-                },
-                "required": ["steps", "rationale"],
             },
             "profile": {
                 "type": "object",
@@ -183,7 +162,7 @@ _TOOL = {
                              "path_kind", "rationale"],
             },
         },
-        "required": ["notes", "plan", "profile"],
+        "required": ["notes", "profile"],
     },
 }
 
@@ -227,17 +206,6 @@ def _validate(payload, user_text=None, require_profile=False):
         if n.get("expect") not in sms._EXPECT_VOCAB:
             errors.append(f"notes[{i}].expect: {n.get('expect')!r} not in "
                           f"{sorted(sms._EXPECT_VOCAB)}")
-    steps = payload.get("plan", {}).get("steps", [])
-    if not 2 <= len(steps) <= 5:
-        errors.append(f"plan.steps: {len(steps)} steps (must be 2-5)")
-    for i, s in enumerate(steps):
-        if s.get("tag") not in _PLANNABLE_TAGS:
-            errors.append(f"plan.steps[{i}].tag: {s.get('tag')!r} not a "
-                          f"plannable vocabulary tag")
-        if not isinstance(s.get("intensity"), int) \
-                or not 1 <= s["intensity"] <= 3:
-            errors.append(f"plan.steps[{i}].intensity: must be 1-3")
-
     profile = payload.get("profile")
     if profile is None:
         if require_profile:
@@ -334,12 +302,7 @@ via the submit_initial_plan tool (you MUST call it):
    one of: no_reply, reply, advance, withdraw, ignition. These are
    hypotheses from words, not behavior — be honest about weak
    signals by simply not writing a note.
-2. **A sequence plan** (2-5 steps) for reaching THEIR ignition
-   marker: each step {{tag, intensity 1-3, intent}} where intent is
-   one line the coach will receive as its per-message assignment.
-   The rationale must cite your notes — a step with no grounding in
-   a note should default to the prior's theory, and say so.
-3. **A profile brief**: who this learner is, for every future
+2. **A profile brief**: who this learner is, for every future
    message the coach writes.
    - `job`: their work or field, only if they said it.
    - `learning_types`: multi-label, ONLY from this fixed taxonomy —
@@ -370,10 +333,6 @@ via the submit_initial_plan tool (you MUST call it):
    infer a job from a topic, a personality from politeness, or a
    want they never expressed — an empty field is information; an
    invented one is damage.
-
-The plan will be played ONE STEP PER TURN across real conversations
-(the server enforces this), so design steps as conversational
-moments, not a monologue outline.
 
 ---
 
@@ -473,9 +432,8 @@ def generate(user_id):
             evidence=[{"quote": q, "source": "onboarding"}
                       for q in n["evidence_quotes"]],
             confidence="hypothesis", source="p7")
-    plan_version = db.save_sequence_plan(
-        user_id, payload["plan"]["steps"],
-        rationale=payload["plan"]["rationale"], source="p7")
+    # (sequence-plan generation ARCHIVED 2026-08-12, PR-A — notes
+    # and the profile brief remain this call's artifacts.)
 
     # The brief goes live immediately (operator decision): unlike the
     # nightly proposals, a first read of the user has nothing to
@@ -504,139 +462,23 @@ def generate(user_id):
             source="p7", path_kind=path_kind)
 
     db.log_event(user_id, "plan_generated",
-                 {"plan_version": plan_version,
-                  "notes_count": len(payload["notes"]),
+                 {"notes_count": len(payload["notes"]),
                   "brief_version": brief_version,
                   "path_kind": path_kind,
                   "llm_call_id": llm_call_id,
                   "onboarding_started_at": started},
                  source="genplan")
-    print(f"[GENPLAN] {user_id}: plan v{plan_version} + "
-          f"{len(payload['notes'])} notes + brief v{brief_version} "
-          f"generated — review via /plan and /notes before the first "
-          f"sequence send", flush=True)
-    return {"plan_version": plan_version,
-            "notes": len(payload["notes"]),
+    print(f"[GENPLAN] {user_id}: {len(payload['notes'])} notes + "
+          f"brief v{brief_version} generated — review via /notes",
+          flush=True)
+    return {"notes": len(payload["notes"]),
             "brief_version": brief_version,
             "path_kind": path_kind,
             "llm_call_id": llm_call_id}
 
 
-_REPLAN_TOOL = {
-    "name": "submit_plan_proposal",
-    "description": "Propose a revised sequence plan for this user.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "steps": _TOOL["input_schema"]["properties"]["plan"]
-                     ["properties"]["steps"],
-            "rationale": {"type": "string"},
-        },
-        "required": ["steps", "rationale"],
-    },
-}
-
-
-def propose_replan(user_id, reasons, client=None):
-    """Generate a plan-v2 PROPOSAL after [REPLAN:] requests (P0-D
-    part 2). Deliberately does NOT save a sequence_plans row — the
-    latest saved version is the ACTIVE plan, so activation is the
-    operator's move: review the plan_proposed event, then POST the
-    steps to /plan. Inputs: prior + vocabulary + the user's notes +
-    the recent trajectory + the current plan and the replan reasons.
-    Returns the proposal dict or None."""
-    import notes as notes_mod
-    import trace as trace_mod
-
-    plan = db.get_current_plan(user_id)
-    prior, h_prior = sms._read_prompt_versioned("prior")
-    plan_text = "(no active plan)"
-    if plan:
-        plan_text = f"v{plan['version']}, cursor at step {plan['cursor'] + 1}:\n" + \
-            "\n".join(f"  {i+1}. {s['tag']}@{s.get('intensity', 2)} — "
-                      f"{s.get('intent', '')}"
-                      for i, s in enumerate(plan["steps"]))
-    system = f"""You are the planning layer of Theo, an AI learning coach. The
-coach flagged that this user's current sequence plan no longer fits
-the signals. Propose a REVISED plan (2-5 steps, {{tag, intensity
-1-3, intent}}) via the submit_plan_proposal tool (you MUST call
-it). Ground every step in the user's notes or the prior; the
-rationale must say what the old plan got wrong, citing the replan
-reasons and the trajectory.
-
----
-
-{prior}
-
----
-
-{_vocab_section()}
-
----
-
-{notes_mod.render_notes_block(user_id) or "(no notes yet)"}{_materials_section(user_id)}
-
----
-
-## Current plan (being replaced)
-
-{plan_text}
-
-## Why the coach requested a replan
-
-{chr(10).join('- ' + r for r in reasons)}
-
-## Recent trajectory
-
-{trace_mod.render_trace(user_id, days=7)}"""
-    messages = [{"role": "user", "content": "Propose the revised plan."}]
-    if client is None:
-        client = anthropic.Anthropic()
-    payload, errors, llm_call_id = None, [], None
-    for attempt in range(MAX_ATTEMPTS):
-        try:
-            resp = client.messages.create(
-                model=MODEL, max_tokens=2000, system=system,
-                messages=messages, tools=[_REPLAN_TOOL],
-                tool_choice={"type": "tool",
-                             "name": "submit_plan_proposal"})
-            tool_input = next((b.input for b in resp.content
-                               if getattr(b, "type", "") == "tool_use"),
-                              None)
-        except Exception as e:
-            print(f"[GENPLAN] ❌ replan call failed: {e}", flush=True)
-            db.log_event(user_id, "llm_error",
-                         {"where": "propose_replan",
-                          "error": str(e)[:300]}, source="genplan")
-            return None
-        raw = json.dumps(tool_input, ensure_ascii=False) if tool_input else ""
-        llm_call_id = db.save_llm_call(
-            user_id, f"replan_attempt{attempt + 1}", MODEL, system,
-            messages, prompt_versions={"prior": h_prior},
-            response_text=raw)
-        errors = (["no tool_use block"] if tool_input is None
-                  else _validate({"notes": [], "plan": tool_input}))
-        if not errors:
-            payload = tool_input
-            break
-        messages = messages + [
-            {"role": "assistant", "content": raw or "(no tool call)"},
-            {"role": "user", "content": "Validation failed:\n- "
-             + "\n- ".join(errors) + "\nResubmit corrected."}]
-    if payload is None:
-        db.log_event(user_id, "replan_proposal_failed",
-                     {"errors": errors[:10], "llm_call_id": llm_call_id},
-                     source="genplan")
-        return None
-    db.log_event(user_id, "plan_proposed",
-                 {"steps": payload["steps"],
-                  "rationale": payload["rationale"][:600],
-                  "replan_reasons": reasons[:5],
-                  "llm_call_id": llm_call_id}, source="genplan")
-    print(f"[GENPLAN] {user_id}: plan proposal logged — review the "
-          f"plan_proposed event, then POST /plan to activate",
-          flush=True)
-    return payload
+# (propose_replan / _REPLAN_TOOL — sequence-plan revision proposals —
+# ARCHIVED 2026-08-12, PR-A with the rest of the sequence machinery.)
 
 
 def generate_async(user_id):

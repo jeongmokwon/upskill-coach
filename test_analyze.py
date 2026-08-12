@@ -130,11 +130,12 @@ ToolFake.payload = {
     "step_completed": "not_applicable", "step_reason": "-",
 }
 res = analyze_turn.analyze(U)
-check("all remaining fields written",
+check("all remaining fields written — ignition payload ignored "
+      "(retired 2026-08-12, PR-A)",
       {"path", "schedule", "offer", "bite"} <= set(res["applied"])
-      and any(a.startswith("ignition_marker") for a in res["applied"]))
-check("stated marker stored as confirmed",
-      db.get_user_phase(U)["ignition_marker_status"] == "confirmed")
+      and not any(a.startswith("ignition_marker") for a in res["applied"]))
+check("retired ignition payload writes nothing",
+      not (db.get_user_phase(U)["ignition_marker"] or "").strip())
 check("schedule parsed to windows",
       json.loads(db.get_user_schedule(U)["windows_json"])[0]
       == {"start": "21:00", "end": "22:30"})
@@ -160,24 +161,12 @@ ToolFake.payload = {
     "ignition_marker": "그 워드파일 열어서 암기 시작",
     "ignition_marker_basis": "inferred",
     "ignition_marker_confidence": "high",
-    "step_completed": "not_applicable", "step_reason": "-",
 }
 res = analyze_turn.analyze("u_inf")
-check("confident inference is stored as PROVISIONAL",
-      db.get_user_phase("u_inf")["ignition_marker"] == "그 워드파일 열어서 암기 시작"
-      and db.get_user_phase("u_inf")["ignition_marker_status"] == "provisional")
-
-db.ensure_user_profile_row("u_low")
-db.save_sms_message("u_low", "user", "뭐 좀 배우고 싶어", "in")
-ToolFake.payload = {
-    "ignition_marker": "아마 노트북 켜는 거?",
-    "ignition_marker_basis": "inferred",
-    "ignition_marker_confidence": "low",
-    "step_completed": "not_applicable", "step_reason": "-",
-}
-analyze_turn.analyze("u_low")
-check("low-confidence guess is refused",
-      db.get_user_phase("u_low")["ignition_marker"] == "")
+check("ignition extraction retired — even a confident marker payload "
+      "writes nothing",
+      not (db.get_user_phase("u_inf")["ignition_marker"] or "").strip()
+      and not any(a.startswith("ignition") for a in res["applied"]))
 
 # ── 3c. the walkthrough lands through analysis ───────────────────────
 print("3c) walkthrough extraction")
@@ -340,21 +329,17 @@ ctx, _ = sms._build_context_blocks("u_unjudged")
 check("unjudged (NULL) → no block",
       "## No small talk with this user" not in ctx)
 
-# ── 4. step judgment rides the same call ─────────────────────────────
-print("4) step judgment")
+# ── 4. step judgment retired (2026-08-12, PR-A) ─────────────────────
+print("4) step judgment retired")
 db.save_sequence_plan(U, [
     {"tag": "elicit_why", "intensity": 2, "intent": "why, his words"},
     {"tag": "micro_ask", "intensity": 1, "intent": "one tiny thing"}],
     rationale="t", source="operator")
 ToolFake.payload = {"step_completed": "yes", "step_reason": "he said why"}
 analyze_turn.analyze(U)
-check("yes advances the cursor",
-      db.get_current_plan(U)["cursor"] == 1
-      and len(events_of("step_judged")) == 1)
-ToolFake.payload = {"step_completed": "uncertain", "step_reason": "vague"}
-analyze_turn.analyze(U)
-check("uncertain does not advance",
-      db.get_current_plan(U)["cursor"] == 1)
+check("a step_completed payload no longer moves any cursor",
+      db.get_current_plan(U)["cursor"] == 0
+      and len(events_of("step_judged")) == 0)
 
 # ── 5. generation no longer acts on extraction markers ───────────────
 print("5) generation path")

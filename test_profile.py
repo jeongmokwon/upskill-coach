@@ -290,8 +290,8 @@ check("GET /plan surfaces job / types / materials / path kind",
       and "사내 위키" in text)
 check("GET /plan surfaces the verbatim wants, personality, rationale",
       QUOTE_2 in text and "꾸준함" in text and "인출 유창성" in text)
-check("plan itself still rendered", "sequence plan" in text
-      and "micro_ask@1" in text)
+check("no sequence plan rendered (generation retired 2026-08-12)",
+      "micro_ask@1" not in text)
 status, text = get_plan(secret="s3cr3t", user_id="nobody")
 check("brief-less user says so instead of 500",
       status == 200 and "none generated" in text)

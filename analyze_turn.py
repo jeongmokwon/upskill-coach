@@ -6,17 +6,17 @@ BEFORE the coach's generation call, so generation receives already-
 updated state and only has to talk well.
 
 Why this exists: three times a generation call silently dropped a
-side duty (ignition scoring, plan [ADVANCE], then the whole marker
+side duty (live scoring, plan markers, then the whole marker
 set collapsing mid-conversation). A model that is talking will not
 reliably also do bookkeeping. So everything that can be READ FROM
 THE TRANSCRIPT is extracted here instead of being emitted as a
 marker by the speaker:
 
-  - onboarding fields (goal, path, bite, ignition marker, schedule,
+  - onboarding fields (goal, path, bite, schedule,
     offer) — filled ONLY when the user actually said or agreed to
     it, never inferred
-  - step-completion judgment against the active sequence plan
-    (the former _judge_step_completion, absorbed)
+  - (step-completion judgment retired 2026-08-12 with the
+    sequence-plan machinery, PR-A)
 
 Decision markers ([STEP:], [EXPECT:], [REPLAN:]) stay with the
 generation call — they exist only in the speaker's head and cannot
@@ -73,35 +73,6 @@ _TOOL = {
                 "description": "The concrete 3-5 minute action agreed "
                                "for the next day or two — a first "
                                "physical motion, not a study session.",
-            },
-            "ignition_marker": {
-                "type": "string",
-                "description": "The observable first motion of one "
-                               "ordinary session for THIS user — "
-                               "something a screenshot or a message "
-                               "could verify ('opens the Word file and "
-                               "starts working through it'). NOT their "
-                               "goal's success criterion ('answers "
-                               "instantly when asked' is success months "
-                               "out, not the start of tonight). Unlike "
-                               "the agreement fields, you SHOULD DERIVE "
-                               "this from what they told you about "
-                               "their material and how they work — it "
-                               "is a measuring instrument, not a "
-                               "promise they made.",
-            },
-            "ignition_marker_basis": {
-                "type": "string",
-                "enum": ["stated", "inferred"],
-                "description": "stated = they said or confirmed it in "
-                               "so many words. inferred = you derived "
-                               "it from their material/workflow.",
-            },
-            "ignition_marker_confidence": {
-                "type": "string",
-                "enum": ["high", "medium", "low"],
-                "description": "For an inferred marker: how sure are "
-                               "you? low = omit the marker instead.",
             },
             "schedule": {
                 "type": "string",
@@ -262,28 +233,19 @@ _TOOL = {
                                "either way; re-report later when "
                                "the picture changes.",
             },
-            "step_completed": {
-                "type": "string",
-                "enum": ["yes", "no", "uncertain", "not_applicable"],
-                "description": "Did the user's latest reply accomplish "
-                               "the current plan step's purpose? "
-                               "not_applicable when no step is shown.",
-            },
-            "step_reason": {"type": "string"},
             "notes_for_operator": {
                 "type": "string",
                 "description": "Anything notable a human should see "
                                "(optional, one line).",
             },
         },
-        "required": ["step_completed", "step_reason"],
+        "required": [],
     },
 }
 
 _FIELD_TO_KEY = {
     "goal": "goal",
     "bite": "first_bite",
-    "ignition_marker": "ignition_marker",
     "schedule": "schedule",
     "offer": "offer",
     "path": "path_direction",
@@ -334,7 +296,6 @@ def _build_system(user_id):
         f"- path: {path.get('direction', '(unknown)')} | "
         f"{path.get('project', '')} | {path.get('project_done_condition', '')}",
         f"- first bite: {phase['agreed_first_bite'] or '(unknown)'}",
-        f"- ignition marker: {phase['ignition_marker'] or '(unknown)'}",
         f"- schedule: {sched.get('raw_text', '(unknown)')}",
         f"- offer (what the coach committed to): "
         f"{prof.get('agreed_offer') or '(unknown)'}",
@@ -351,19 +312,6 @@ def _build_system(user_id):
             f"{m.get('user_description') or '(none)'} | "
             f"wants recorded: {len(m.get('wants') or [])}")
 
-    step_block = "No active plan step — report step_completed as not_applicable."
-    plan = db.get_current_plan(user_id)
-    if state["completed_at"] and plan and plan["cursor"] < len(plan["steps"]):
-        s = plan["steps"][plan["cursor"]]
-        step_block = (
-            f"Current plan step: {s['tag']}@{s.get('intensity', 2)} — "
-            f"{s.get('intent', '')}\n"
-            "yes = the reply itself accomplishes what this step was for "
-            "(an elicit step: they actually articulated it; an ask step: "
-            "they did it or committed to it). no = not yet. uncertain = "
-            "genuinely ambiguous (treated as no). Judge substance, not "
-            "politeness.")
-
     return f"""You are the analysis layer of Theo, an AI learning coach. You do
 not talk to the user. You read the conversation and report what it
 now establishes, via the submit_analysis tool (you MUST call it).
@@ -378,34 +326,16 @@ conversation; a wrong fill corrupts their record. Re-report a field
 only if the conversation REFINED it beyond what is known below
 (identical restatements: omit).
 
-**ignition_marker is the exception, on purpose.** It is not a
-promise the user makes — it is the instrument the system judges
-their sessions with, so it should be DERIVED from what they have
-told you about their material and how they work. Once you know
-someone studies from a Word file of their own notes, "opens that
-file and starts working through it" is a sound inference, not an
-invention. Report it with basis=inferred and your confidence; use
-low only when you would be guessing, and then omit the marker
-entirely. An inferred marker is provisional — the coach will
-confirm it in passing later — so a reasonable inference beats an
-empty field.
-
 ## Already known (do not re-report unchanged)
 
 {chr(10).join(known)}
 
 Still missing: {', '.join(state['missing']) or '(nothing)'}
 
-## Step judgment
-
-{step_block}
-
 ## Field notes
 
 - schedule must be HH:MM-HH:MM (24h), comma-separated, the user's
   local time — convert if they said "저녁 8시쯤".
-- ignition_marker must be observable ("에디터 열고 타이핑 시작"),
-  not a feeling ("집중되면").
 - path_project's shape follows how they learn: a deliverable with a
   done-condition, a coverage target ("자료 3장까지 즉답"), or a
   duration of practice. Report whichever they agreed to.
@@ -476,17 +406,14 @@ def analyze(user_id, trigger="inbound", client=None):
             return None
 
         applied = _apply(user_id, payload, llm_call_id)
-        judged = _judge(user_id, payload, llm_call_id)
         db.log_event(user_id, "turn_analyzed",
                      {"trigger": trigger, "applied": applied,
-                      "step_completed": payload.get("step_completed"),
                       "operator_note": (payload.get("notes_for_operator")
                                         or "")[:200],
                       "llm_call_id": llm_call_id}, source="analyze")
         if applied:
             print(f"[ANALYZE] {user_id}: filled {applied}", flush=True)
-        return {"applied": applied, "judged": judged,
-                "llm_call_id": llm_call_id}
+        return {"applied": applied, "llm_call_id": llm_call_id}
     except Exception as e:
         print(f"[ANALYZE] ⚠️ failed for {user_id}: {e}", flush=True)
         return None
@@ -511,23 +438,6 @@ def _apply(user_id, p, llm_call_id):
     if bite and bite != (phase["agreed_first_bite"] or "").strip():
         db.set_agreed_bite(user_id, bite, source="analyze")
         applied.append("bite")
-
-    marker = (p.get("ignition_marker") or "").strip()
-    if marker and marker != (phase["ignition_marker"] or "").strip():
-        basis = (p.get("ignition_marker_basis") or "inferred").strip()
-        conf = (p.get("ignition_marker_confidence") or "medium").strip()
-        # A low-confidence inference is a guess; leave the field empty
-        # so the conversation keeps steering toward it. A STATED
-        # marker always lands regardless of the confidence field.
-        if basis == "inferred" and conf == "low":
-            print(f"[ANALYZE] low-confidence ignition inference — "
-                  f"not saved: {marker!r}", flush=True)
-        else:
-            status = "confirmed" if basis == "stated" else "provisional"
-            db.set_ignition_marker(user_id, marker, source="analyze",
-                                   status=status, basis=basis,
-                                   confidence=conf)
-            applied.append(f"ignition_marker({status})")
 
     status = (p.get("material_status") or "").strip()
     if status:
@@ -686,32 +596,8 @@ def _apply(user_id, p, llm_call_id):
     return applied
 
 
-def _judge(user_id, p, llm_call_id):
-    """Move the plan cursor on a confident completion verdict."""
-    verdict = p.get("step_completed")
-    if verdict not in ("yes", "no", "uncertain"):
-        return None
-    plan = db.get_current_plan(user_id)
-    if not plan or plan["cursor"] >= len(plan["steps"]):
-        return None
-    step = plan["steps"][plan["cursor"]]
-    db.log_event(user_id, "step_judged",
-                 {"step_index": plan["cursor"], "tag": step["tag"],
-                  "completed": verdict,
-                  "reason": (p.get("step_reason") or "")[:300],
-                  "llm_call_id": llm_call_id}, source="analyze")
-    if verdict != "yes":
-        return verdict
-    new_idx = plan["cursor"] + 1
-    db.move_plan_cursor(user_id, new_idx,
-                        reason=f"analysis: {(p.get('step_reason') or '')[:120]}",
-                        source="analyze")
-    if new_idx >= len(plan["steps"]):
-        db.log_event(user_id, "plan_completed",
-                     {"version": plan["version"]}, source="analyze")
-        print(f"[ANALYZE] {user_id}: plan v{plan['version']} complete",
-              flush=True)
-    return verdict
+# (_judge — sequence-plan cursor movement — ARCHIVED 2026-08-12,
+# PR-A with the rest of the sequence machinery.)
 
 
 def analyze_history(user_id, client=None):

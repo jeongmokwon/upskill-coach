@@ -3292,7 +3292,11 @@ def mark_onboarding_started(user_id):
 #   or naming it), Theo leads a walkthrough until it can produce a
 #   sample of its offer, and the user confirming that sample is what
 #   fills the field. No-material users go straight to offer.
-ONBOARDING_FIELDS = ("expectation_setting", "goal", "ignition_marker",
+# ignition_marker retired from the checklist (2026-08-12, PR-A):
+# the ignition→flow frame is shelved pending a user who needs it —
+# companion-era onboarding must not require agreeing an "ignition
+# marker". Columns and past data remain; only the gate shrank.
+ONBOARDING_FIELDS = ("expectation_setting", "goal",
                      "material_alignment", "material_understanding",
                      "offer", "schedule")
 
@@ -3313,8 +3317,6 @@ def get_onboarding_state(user_id):
         filled.append("expectation_setting")
     if (prof.get("agreed_goal") or "").strip():
         filled.append("goal")
-    if (prof.get("ignition_marker") or "").strip():
-        filled.append("ignition_marker")
     if mat_status:
         filled.append("material_alignment")
     if mat_status == "has_material" and has_validated_material(user_id):

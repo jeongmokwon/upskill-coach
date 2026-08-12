@@ -51,10 +51,9 @@ checklist block has actually been settled in conversation (an
 analysis pass reads the transcript and records them). Your job is
 to get real agreement on each, one at a time.
 
-Real agreement means the user's own words, not your inference —
-except for the ignition marker, which is an instrument you derive
-and then confirm cheaply. If you propose something and they do not
-respond to it, it is not agreed.
+Real agreement means the user's own words, not your inference. If
+you propose something and they do not respond to it, it is not
+agreed.
 
 ## Style
 

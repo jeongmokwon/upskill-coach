@@ -363,12 +363,6 @@ def annotate_all(day=None, client=None):
         except Exception as e:
             print(f"[P6] ⚠️ availability update failed {user_id}: {e}",
                   flush=True)
-        try:
-            reasons = _pending_replan_reasons(user_id)
-            if reasons:
-                import genplan
-                genplan.propose_replan(user_id, reasons, client=client)
-        except Exception as e:
-            print(f"[P6] ⚠️ replan proposal failed {user_id}: {e}",
-                  flush=True)
+        # (replan proposals ARCHIVED 2026-08-12, PR-A — sequence
+        # plans retired.)
     return results

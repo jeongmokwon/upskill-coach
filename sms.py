@@ -456,15 +456,6 @@ def _build_placeholders(user_id):
         "phase": phase_state["phase"],
         "agreed_first_bite": phase_state["agreed_first_bite"] or "(not yet agreed)",
         "agreed_goal": phase_state["agreed_goal"] or "(not yet agreed)",
-        "ignition_marker": (
-            (phase_state["ignition_marker"]
-             + (" — PROVISIONAL: derived from what they told you, not "
-                "yet confirmed by them. If a natural, cheap moment "
-                "comes up, check it in passing ('그게 시작이지, 맞지?') "
-                "— never as an interrogation."
-                if phase_state.get("ignition_marker_status") == "provisional"
-                else ""))
-            if phase_state["ignition_marker"] else "(not yet defined)"),
         # The language rule: an explicit user preference wins;
         # otherwise English (pilots are effectively all English —
         # the blanket Korean mandate this replaces was what the
@@ -899,7 +890,11 @@ def _build_focus_block(user_id, dormancy=True):
     """
     if dormancy and _is_dormant(user_id):
         return _build_dormant_block(user_id)
-    return _build_onboarding_block(user_id) or _build_plan_block(user_id)
+    # Sequence-plan assignments retired (2026-08-12, PR-A): the
+    # machinery was idling (no active plan on any live user) and the
+    # step-sequence frame is shelved. Post-onboarding, the mode
+    # prompt and context blocks carry the message's job.
+    return _build_onboarding_block(user_id)
 
 
 # ─── Commit-marker protocol (Phase 0 → Phase 1) ──────────────────────
@@ -939,30 +934,14 @@ _IGNITION_SCORE_RE = re.compile(r'\[IGNITION:\s*([1-5])\s*\]')
 
 
 def _process_ignition_markers(user_id, text, trigger):
-    """Act on [IGNITION: n] — the coach's live cheap signal, a
-    judgment only the speaker can make in the moment. Returns the
-    text with the score stripped."""
-    # [IGNITION_DEF:] is an EXTRACTION marker — the analysis call owns
-    # it now; it is stripped (not acted on) by _strip_extraction_markers.
-    score_match = _IGNITION_SCORE_RE.search(text)
-    if score_match:
-        score = int(score_match.group(1))
-        marker = db.get_user_phase(user_id)["ignition_marker"]
-        if marker:
-            db.log_event(user_id, "ignition_judgment",
-                         {"score": score, "trigger": trigger,
-                          "marker": marker},
-                         source="sms")
-        else:
-            # Prompt forbids scoring before a marker is defined, but
-            # LLM compliance isn't a guarantee (observed in prod:
-            # score 1 emitted on a cron send with marker ""). A score
-            # with no definition is unjudgeable noise — strip the tag,
-            # record nothing.
-            print(f"[SMS] stray [IGNITION: {score}] with no marker "
-                  f"defined — dropped", flush=True)
+    """ARCHIVED (2026-08-12, PR-A): ignition judgments retired with
+    the ignition→flow frame. Kept as a pure stripper so a model
+    that still emits [IGNITION: n] from habit never leaks it to the
+    user; nothing is recorded."""
+    if _IGNITION_SCORE_RE.search(text):
+        print(f"[SMS] stray [IGNITION] marker ({trigger}) — ignition "
+              f"is retired; stripped", flush=True)
         text = _IGNITION_SCORE_RE.sub("", text)
-
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
 
@@ -1286,22 +1265,6 @@ def _build_onboarding_block(user_id):
                                     "automatically; never try to "
                                     "deliver or restate it yourself)",
              "goal": "their goal, in their own words",
-             "ignition_marker": "what STARTING one ordinary session "
-                                "observably looks like for them — NOT "
-                                "their goal's success criterion. "
-                                "Observed confusion: asked '이 지식이 "
-                                "머릿속에 들어왔다는 순간은 언제야?' the "
-                                "user said '누가 물어보면 바로 대답할 수 "
-                                "있어야지' — that is success months from "
-                                "now, not starting tonight. Usually you "
-                                "derive it from their material rather "
-                                "than ask (a Word file of their own "
-                                "notes → '그 파일 열어서 손대기 시작'); "
-                                "if your context already shows a derived "
-                                "version, just confirm it in passing at "
-                                "a cheap moment. Concrete and observable "
-                                "in THEIR craft, never a feeling "
-                                "('집중되면')",
              "schedule": "the times of day they want to hear from you",
              "material_alignment": _alignment_label(user_id),
              "material_understanding": _walkthrough_label(user_id),
@@ -1537,68 +1500,11 @@ ZERO-DEMAND re-opening. This is mechanical, not your judgment call:
 # single-task LLM call that runs BEFORE the reply prompt is built —
 # the generation then receives the already-updated assignment. Code
 # moves the cursor; the judge only answers one question.
-def _check_plan_deviation(user_id, steps):
-    """Detection net (P0-D): the generation's step tags confess when
-    it played a LATER plan step than the cursor allows — a deviation
-    that should have been a [REPLAN:]. Detection only; the message
-    already went out."""
-    try:
-        plan = db.get_current_plan(user_id)
-        if not plan or plan["cursor"] >= len(plan["steps"]):
-            return
-        later = {s["tag"] for s in plan["steps"][plan["cursor"] + 1:]}
-        played = [s.get("tag") for s in steps if s.get("tag") in later]
-        if played:
-            print(f"[PLAN] ⚠️ deviation: played {played} while cursor at "
-                  f"step {plan['cursor'] + 1}", flush=True)
-            db.log_event(user_id, "planner_deviation",
-                         {"played_ahead": played,
-                          "cursor": plan["cursor"],
-                          "plan_version": plan["version"]}, source="sms")
-    except Exception as e:
-        print(f"[PLAN] ⚠️ deviation check failed: {e}", flush=True)
-
-
-def _build_plan_block(user_id):
-    """The assignment block (exploration v2): the LLM receives ONLY
-    the current step as its job — later steps exist server-side, so
-    collapsing a sequence into one send is structurally impossible,
-    not merely forbidden. Empty string when the user has no plan
-    (planner falls back to free choice per prior+notes)."""
-    plan = db.get_current_plan(user_id)
-    if not plan or not plan["steps"]:
-        return ""
-    cur, steps = plan["cursor"], plan["steps"]
-    if cur >= len(steps):
-        return ("## Sequence assignment\n\n"
-                f"Plan v{plan['version']} is COMPLETE. Choose freely per "
-                "the prior and this user's notes; a new plan will be set "
-                "at the next review. Emit [REPLAN: \"...\"] with a "
-                "suggestion if you see the natural next sequence.")
-    step = steps[cur]
-    intent = step.get("intent", "")
-    lines = [
-        "## Sequence assignment (this message's job — nothing more)",
-        "",
-        f"Plan v{plan['version']}, step {cur + 1} of {len(steps)}: "
-        f"**{step['tag']}@{step.get('intensity', 2)}** — {intent}",
-        "",
-        "Execute THIS step only. Later steps of the plan are not yours "
-        "to perform in this message, and are shown by name only so you "
-        "can angle the conversation toward them without starting them.",
-    ]
-    if cur + 1 < len(steps):
-        lines.append(f"Next (name only, do NOT perform): "
-                     f"{steps[cur + 1]['tag']}")
-    lines += [
-        "",
-        "Step completion is judged SERVER-SIDE before each of your "
-        "replies — this assignment already reflects that judgment, so "
-        "just work the step shown. One marker remains yours:",
-        "- If the plan visibly no longer fits the signals, emit "
-        "[REPLAN: \"reason\"] and act per the prior and notes instead.",
-    ]
-    return "\n".join(lines)
+# (Sequence-plan machinery — _check_plan_deviation and
+# _build_plan_block — ARCHIVED 2026-08-12, PR-A. The step-sequence
+# frame is shelved: no live user had an active plan, so removal
+# changes no behavior. sequence_plans data and accessors remain in
+# db.py; restore from git history if a sequence-shaped user appears.)
 
 
 # [STEP: tag@2, tag@1] — the LLM self-tags which behavioral levers
@@ -2074,7 +1980,6 @@ def _reply_to_inbound(user_id, from_number, body, my_msg_id):
                      {"draft": reply_text[:160],
                       "llm_call_id": llm_call_id}, source="sms")
         return None
-    _check_plan_deviation(user_id, steps)
     # Field fills above may have completed the checklist — code, not
     # the LLM, makes that call. Completion fires the initial plan
     # generation in the background (P0-B) so this reply isn't
@@ -2123,11 +2028,8 @@ def _build_system_prompt_for_reply(user_id, drill_graded=None):
         parts.append(drill.graded_reply_block(drill_graded))
     parts += _phase_gated_blocks(user_id, versions)
     parts.append(rendered_mode)
-    # Judging ignition is a question about an inbound reply, so it is
-    # asked only here — on a scheduled send there is nothing to judge.
-    judge, h_judge = _read_prompt_versioned("sms_ignition_judgment")
-    versions["sms_ignition_judgment"] = h_judge
-    parts.append(judge.format_map(_SafeDict(**fields)))
+    # (The per-reply ignition judgment block was retired 2026-08-12,
+    # PR-A — prompts/sms_ignition_judgment.md is kept, deprecated.)
     parts.append(_conversation_contract_block())
     return "\n\n---\n\n".join(parts), versions
 
@@ -2586,7 +2488,6 @@ def _cron_tick_for_user(user_id, to_number, slot, window=None):
                               "attempt": 2, "held": True},
                              source="cron")
                 return _skip("drill_answer_leak")
-    _check_plan_deviation(user_id, steps)
     if db.check_and_complete_onboarding(user_id):
         import genplan
         genplan.generate_async(user_id)

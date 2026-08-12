@@ -40,14 +40,12 @@ starting.
   conversation do the work. This is the moment the whole product
   exists for.
 
-## The HOW comes from the plan and the notes, not from here
+## The HOW comes from the notes, not from here
 
 This prompt defines the phase's JOB (move tonight toward the
-committed bite). WHICH sequence of moves gets this specific user
-there is per-user knowledge: it lives in the sequence assignment
-and the user's notes above. Do not fall back to a memorized recipe
-— users differ, and the assignment is the current best bet for
-THIS one.
+committed bite). HOW to get this specific user there is per-user
+knowledge: it lives in the user's notes above. Do not fall back to
+a memorized recipe — users differ.
 
 Two phase-level constants that do belong here:
 

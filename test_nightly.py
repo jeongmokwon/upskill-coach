@@ -142,19 +142,9 @@ reasons = annotate._pending_replan_reasons(U)
 check("request newer than plan → reasons surface",
       reasons == ["user pivoted to a new goal"])
 
-ToolFake.payload = {"steps": [
-    {"tag": "connect", "intensity": 1, "intent": "re-open gently"},
-    {"tag": "elicit_why", "intensity": 2, "intent": "new goal, his words"},
-    {"tag": "micro_ask", "intensity": 1, "intent": "tiny start"}],
-    "rationale": "old plan assumed the previous goal"}
-prop = genplan.propose_replan(U, reasons, client=ToolFake())
-check("proposal logged, ACTIVE plan untouched",
-      prop is not None
-      and len(events_of("plan_proposed")) == 1
-      and db.get_current_plan(U)["version"] == 1
-      and db.get_current_plan(U)["steps"][0]["tag"] == "elicit_why")
-check("proposal blocks re-proposing the same request",
-      annotate._pending_replan_reasons(U) == [])
+check("replan proposals retired (2026-08-12, PR-A) — genplan no "
+      "longer exposes propose_replan",
+      not hasattr(genplan, "propose_replan"))
 
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
