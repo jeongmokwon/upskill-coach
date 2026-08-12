@@ -832,7 +832,9 @@ def _build_materials_block(user_id):
             "## Their materials — NONE\n\n"
             "Their /my page is empty right now. Nothing has been "
             "shared — no file, no link — whatever the conversation "
-            "says or promises. A promise to upload is not an upload.")
+            "says or promises. A promise to upload is not an upload. "
+            "You have read NOTHING of theirs — never speak as if "
+            "you have.")
         # An empty page reads two ways, and only the stored alignment
         # tells them apart. Unsettled ('') means the question is still
         # open. Settled no_material means the emptiness IS the answer
@@ -1402,58 +1404,23 @@ def whatsapp_window_closed(user_id):
 # unanswered" — is true after essentially every conversation: people
 # answer what matters and go to bed without replying to the final
 # turn. Treated as a signal, that makes holding the permanent state
-# for every user after their first real exchange, which is what
-# began happening. Silence is still available where it belongs: the
-# SERVER decides it mechanically (dormancy gate, closed WhatsApp
-# window) before the planner is ever called. Re-enable with
-# PLANNER_HOLD=on once the planner can tell closure from avoidance.
-HOLD_ENABLED = os.environ.get("PLANNER_HOLD", "off").lower() == "on"
-
-# Kept for when holding returns: a hold is a pause, never a policy of
-# silence. The second of two consecutive holds cost us the WhatsApp
-# window entirely (past 24h of user silence we cannot reopen contact).
-MAX_HOLD_H = 23.98      # 23h59m
-
-
-def hold_forbidden(user_id):
-    """True when the planner may not choose silence: either holding is
-    suspended outright, or the coach has been silent ~24h already.
-    Never-contacted users are exempt from the ceiling."""
-    if not HOLD_ENABLED:
-        return True
-    last_out = db.get_last_event(user_id, "sms_out")
-    if not last_out:
-        return False
-    try:
-        hours = (datetime.now()
-                 - datetime.fromisoformat(last_out["ts"])).total_seconds() / 3600
-    except Exception:
-        return False
-    return hours >= MAX_HOLD_H
+# Planner-chosen silence (hold) RETIRED (2026-08-12, operator
+# decision): it was already suspended by default after two
+# consecutive holds cost a WhatsApp window; the suspension is now
+# permanent. Silence belongs to the SERVER (pause, schedule,
+# dormancy gate, closed WhatsApp window) — the planner always
+# writes.
 
 
 def _hold_cap_block(user_id):
-    """Prompt block that revokes the hold option once the ceiling is
-    reached. Empty while holding is still allowed."""
-    if not hold_forbidden(user_id):
-        return ""
-    if not HOLD_ENABLED:
-        return ("## This send must produce a message\n\n"
-                "Choosing silence is not available to you. If the "
-                "moment feels wrong — they are at work, their last "
-                "question is still hanging — that shapes WHAT you "
-                "write (something small, warm, easy to leave "
-                "unanswered), not WHETHER you write. Genuine silence "
-                "is decided by the server before you are called.")
-    return ("## Silence ceiling reached — you may NOT hold this time\n\n"
-            "It has been about a day since you last said anything. "
-            "Holding is for a moment that is wrong, not for waiting "
-            "indefinitely: a day of nothing reads as abandonment, and "
-            "on WhatsApp it also ends your ability to reach them at "
-            "all until they write first. Send something — and if their "
-            "last question is still unanswered, that is exactly the "
-            "situation to acknowledge lightly and make easy to leave "
-            "(a zero-demand touch or a warm release), not to repeat.")
+    """The standing must-send block for scheduled sends."""
+    return ("## This send must produce a message\n\n"
+            "Choosing silence is not available to you. If the "
+            "moment feels wrong — they are at work, their last "
+            "question is still hanging — that shapes WHAT you "
+            "write (something small, warm, easy to leave "
+            "unanswered), not WHETHER you write. Genuine silence "
+            "is decided by the server before you are called.")
 
 
 def mark_whatsapp_window_open(user_id, note=""):
@@ -1641,33 +1608,25 @@ def generate_message(user_id, system_prompt, history, trigger,
         hold_reason, text = _process_hold_reason(text)
         steps, text = _process_step_marker(user_id, text)
 
-        # A hold is a complete answer: no message body, so the
-        # question/step guards do not apply to it — unless the silence
-        # ceiling has been reached, in which case holding is itself the
-        # violation and gets one regeneration like any other.
-        if not text.strip() and any(s.get("tag") == "hold" for s in steps):
-            if not hold_forbidden(user_id) or attempt == 2:
-                if hold_forbidden(user_id):
-                    print("[SMS] ⚠️ held past the silence ceiling anyway",
-                          flush=True)
-                    db.log_event(user_id,
-                                 "hold_cap_violated" if HOLD_ENABLED
-                                 else "hold_while_suspended",
-                                 {"reason": hold_reason or "(none)",
-                                  "llm_call_id": llm_call_id},
-                                 source="sms")
-                return text, steps, expect, llm_call_id, hold_reason
-            print("[SMS] hold refused — silence ceiling reached, "
-                  "regenerating", flush=True)
+        # Planner-chosen silence is RETIRED (2026-08-12): an empty
+        # body is never a valid answer. One regeneration; a model
+        # that refuses to write twice yields nothing to send — the
+        # send skips loudly instead of fabricating.
+        if not text.strip():
+            if attempt >= 2:
+                print("[SMS] ⚠️ empty body twice — nothing to send",
+                      flush=True)
+                db.log_event(user_id, "hold_while_suspended",
+                             {"reason": hold_reason or "(none)",
+                              "llm_call_id": llm_call_id},
+                             source="sms")
+                return None, steps, expect, llm_call_id, hold_reason
+            print("[SMS] empty body — regenerating", flush=True)
             attempt_history = attempt_history + [
                 {"role": "assistant", "content": raw},
-                _server_turn(("You may not choose silence — this send "
-                              "must produce a message."
-                              if not HOLD_ENABLED else
-                              "You may not hold: it has been about a "
-                              "day since your last message.")
-                             + " Send something small and easy to leave "
-                               "unanswered.")]
+                _server_turn("You may not choose silence — this send "
+                             "must produce a message. Send something "
+                             "small and easy to leave unanswered.")]
             continue
 
         violations = check_send_guards(text, steps, user_id=user_id)
@@ -2513,22 +2472,9 @@ def _cron_tick_for_user(user_id, to_number, slot, window=None):
                           "forbidden_steps": bad,
                           "llm_call_id": llm_call_id}, source="cron")
 
-    # The planner may CHOOSE silence on a scheduled send ([STEP: hold]
-    # with no message body) — deliberate non-action is an action.
-    # Record it like a skip so the trace shows a hold token; send
-    # nothing.
-    if not text.strip() and any(s.get("tag") == "hold" for s in steps):
-        print(f"[SMS] {slot}: planner chose hold — nothing sent "
-              f"({hold_reason or 'no reason given'})", flush=True)
-        db.log_event(user_id, "cron_tick",
-                     {"slot": slot, "action": "held_by_planner",
-                      "reason": hold_reason or "(none given)",
-                      "decision_id": fire_decision_id,
-                      "llm_call_id": llm_call_id,
-                      "steps": steps, "expect": expect,
-                      **win_extra},
-                     source="cron")
-        return None
+    # (Planner-chosen hold RETIRED 2026-08-12 — generate_message now
+    # returns None on a twice-empty body, handled above; deliberate
+    # silence belongs to the server gates alone.)
 
     send_sms(to_number, text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", text, "out")
