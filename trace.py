@@ -121,9 +121,12 @@ def render_trace(user_id, days=3, verbose=False, now=None):
             if pending_out_ts:
                 lines.append("  [no reply]")
                 pending_out_ts = None
-            steps = _steps_str(p.get("steps")) or "(untagged)"
+            # Step tags retired from rendering (exp/step-surface-
+            # removal): the trajectory keeps its rhythm function
+            # (what fired when, silences, replies) without the move
+            # lexicon conditioning every send.
             trig = p.get("trigger", "")
-            lines.append(f"  {hhmm}  coach: {steps}   ({trig})")
+            lines.append(f"  {hhmm}  coach: sent   ({trig})")
             if verbose and p.get("text"):
                 snippet = p["text"].replace("\n", " / ")[:120]
                 lines.append(f'         "{snippet}"')
