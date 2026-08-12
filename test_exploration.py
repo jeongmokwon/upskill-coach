@@ -167,10 +167,14 @@ check("cron path stores steps + expect",
 
 sms.anthropic.Anthropic = lambda *a, **kw: FakeSend("[STEP: hold]")
 held = sms.handle_cron_tick("evening")
-ticks = [json.loads(t["payload"]) for t in events_of("cron_tick")]
-check("planner-chosen hold sends nothing, records held_by_planner",
+check("hold retired (2026-08-12): a twice-empty body sends nothing "
+      "and is recorded as a suspension violation, never as a "
+      "planner choice",
       held is None
-      and any(t.get("action") == "held_by_planner" for t in ticks))
+      and len(events_of("hold_while_suspended")) >= 1
+      and not any(json.loads(t["payload"]).get("action")
+                  == "held_by_planner"
+                  for t in events_of("cron_tick")))
 
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
