@@ -391,18 +391,27 @@ def prepare_scheduled_question(user_id, client=None, record=True):
     if open_pred:
         item = next((i for i in db.get_knowledge_items(track["id"])
                      if i["id"] == open_pred["item_id"]), None)
-        if item:
+        # A suspended item (user complaint, '그만 물어봐') must not be
+        # re-asked just because its prediction is still open — fall
+        # through to fresh selection and let the prediction age out.
+        if item and item["status"] in _ASKABLE:
             return {"track": track, "item": item,
                     "prediction_id": open_pred["id"], "reask": True,
                     "why": "yesterday's question is still open",
-                    "last_graded": last_graded}
+                    "last_graded": last_graded,
+                    "source_context": _anchor_window(
+                        _material_text(user_id),
+                        item.get("anchor_quote", ""))}
     item, why = rank_select(user_id, track, client=client)
     if item is None:
         return None
     pred_id = (_predict(user_id, item, track["id"], client=client)
                if record else None)
     return {"track": track, "item": item, "prediction_id": pred_id,
-            "reask": False, "why": why, "last_graded": last_graded}
+            "reask": False, "why": why, "last_graded": last_graded,
+            "source_context": _anchor_window(_material_text(user_id),
+                                             item.get("anchor_quote",
+                                                      ""))}
 
 
 def question_block(ctx):
@@ -425,6 +434,16 @@ def question_block(ctx):
         "Source anchor: (none — canonical item)",
         f"Why this item today: {ctx['why']}",
     ]
+    passage = (ctx.get("source_context") or "").strip()
+    if passage:
+        lines += [
+            "",
+            "THE PASSAGE (the anchor's verbatim surroundings — the "
+            "question must make sense within this passage alone; a "
+            "fact from elsewhere in their document, however true, "
+            "does not belong in this question):",
+            f"\"\"\"{passage}\"\"\"",
+        ]
     if ctx.get("reask"):
         lines.append(
             "This question is STILL OPEN from a previous send — they "
@@ -484,6 +503,11 @@ Rules:
 EXACTLY from the material. The server verifies by exact substring \
 match and rejects the item otherwise. Never paraphrase inside the \
 quote.
+- ONE item = ONE passage. Every element must be grounded in the \
+text surrounding your anchor — never combine facts from different \
+parts of the material into one item (the server checks each item \
+against its own passage and rejects splices; field failure: \
+questions "no human reading the document would ask").
 - Do NOT duplicate the existing bank stems (provided).
 - elements = the pieces a complete answer must contain, calibrated \
 to what a senior practitioner answering a colleague must say.
@@ -540,6 +564,110 @@ def _prefs_block(user_id):
     if not prefs:
         return "(none stated — mine broadly, hardest-to-retain first)"
     return "\n".join(f"- {k}: {v['value']}" for k, v in prefs.items())
+
+
+_CONTEXT_WINDOW = 1200   # chars of source on each side of an anchor
+
+_VERIFY_TOOL = {
+    "name": "submit_verification",
+    "description": "Verify each item's elements against its own "
+                   "passage.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "verdicts": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "index": {"type": "integer"},
+                        "supported": {"type": "boolean"},
+                        "foreign_elements": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Elements NOT supported by "
+                                           "this item's own passage.",
+                        },
+                    },
+                    "required": ["index", "supported"],
+                },
+            },
+        },
+        "required": ["verdicts"],
+    },
+}
+
+_VERIFY_SYSTEM = """You are the intake verifier of a question bank. \
+For each candidate item you get the item's stem and elements, plus \
+THE PASSAGE — the source text surrounding the item's own anchor. \
+Field failure this prevents (reported by a real user): items that \
+splice facts from DIFFERENT parts of a 50-page document into one \
+frame, producing questions "no human reading the document would \
+ask". An element is supported only if THIS passage alone grounds \
+it; knowledge from elsewhere in the document — however true — makes \
+it a foreign element. Judge each item independently; be strict."""
+
+
+def _anchor_window(source, anchor):
+    """The passage around an anchor occurrence in the source, or ''
+    when the anchor cannot be located (normalization mismatch)."""
+    ns, na = _norm_text(source), _norm_text(anchor)
+    pos = ns.find(na)
+    if pos < 0 or not na:
+        return ""
+    # Map the normalized hit back to raw text approximately by
+    # proportional position — exact mapping is overkill for a
+    # context window.
+    ratio = pos / max(1, len(ns))
+    center = int(ratio * len(source))
+    lo = max(0, center - _CONTEXT_WINDOW)
+    hi = min(len(source), center + _CONTEXT_WINDOW + len(anchor))
+    return source[lo:hi]
+
+
+def verify_items(items, source, client=None):
+    """Intake coherence check: every element must be supported by
+    the item's OWN passage. Returns (ok, rejected) where rejected
+    items carry a 'foreign_elements' field. Anchors are assumed
+    already substring-verified. On verifier failure everything
+    passes (the anchor check remains the hard floor — a broken
+    verifier must not empty the bank)."""
+    if not items:
+        return [], []
+    payload = []
+    for i, it in enumerate(items):
+        payload.append({
+            "index": i, "stem": it.get("stem", ""),
+            "elements": it.get("elements", []),
+            "passage": _anchor_window(source,
+                                      it.get("anchor_quote", "")),
+        })
+    try:
+        client = client or anthropic.Anthropic()
+        resp = client.messages.create(
+            model=MODEL, max_tokens=2000, system=_VERIFY_SYSTEM,
+            messages=[{"role": "user", "content":
+                       json.dumps(payload, ensure_ascii=False)}],
+            tools=[_VERIFY_TOOL],
+            tool_choice={"type": "tool",
+                         "name": "submit_verification"})
+        v = next((b.input for b in resp.content
+                  if getattr(b, "type", "") == "tool_use"), None)
+        verdicts = {d["index"]: d for d in (v or {}).get("verdicts", [])}
+    except Exception as e:
+        print(f"[DRILL] ⚠️ intake verifier failed ({e}) — items pass "
+              f"on the anchor check alone", flush=True)
+        return list(items), []
+    ok, rejected = [], []
+    for i, it in enumerate(items):
+        d = verdicts.get(i)
+        if d is None or d.get("supported"):
+            ok.append(it)
+        else:
+            it = dict(it)
+            it["foreign_elements"] = d.get("foreign_elements", [])
+            rejected.append(it)
+    return ok, rejected
 
 
 def _json_array_call(client, system, user, max_tokens):
@@ -626,6 +754,12 @@ def generate_items(user_id, track, n, client=None):
     else:
         still_bad = []
 
+    ok, spliced = verify_items(ok, source, client=client)
+    for it in spliced:
+        print(f"[DRILL] ✗ splice rejected: {it.get('stem','')[:60]} "
+              f"(foreign: {', '.join(it.get('foreign_elements', []))[:80]})",
+              flush=True)
+
     added = 0
     seen = {_norm_text(i["stem"]) for i in existing}
     for it in ok[:n]:
@@ -646,7 +780,8 @@ def generate_items(user_id, track, n, client=None):
             continue
     db.log_event(user_id, "bank_refilled",
                  {"track_id": track["id"], "requested": n,
-                  "added": added, "rejected": len(still_bad)},
+                  "added": added, "rejected": len(still_bad),
+                  "splice_rejected": len(spliced)},
                  source="server")
     print(f"[DRILL] bank refilled for {user_id}: +{added} "
           f"(requested {n}, {len(still_bad)} dropped unanchored)",
@@ -729,6 +864,14 @@ _GRADE_TOOL = {
                 "type": "string",
                 "description": "Verbatim quote backing style_note. "
                                "No quote → no note."},
+            "question_complaint": {
+                "type": "string",
+                "description": "If the reply criticizes the QUESTION "
+                               "itself (wrong, nonsensical, mixes "
+                               "unrelated things, not from the "
+                               "material): their objection, one "
+                               "line. '' otherwise. Hedging inside "
+                               "an answer is NOT a complaint."},
             "correction_of_coach": {
                 "type": "string",
                 "description": "If the reply CORRECTS something the "
@@ -758,7 +901,11 @@ self_confidence, and optionally one style observation (with a \
 verbatim quote, or leave it empty).
 - A wrong answer under quiz pressure is a mistake-log entry, \
 never a teaching. Only an explicit correction of the coach's own \
-claim goes to correction_of_coach."""
+claim goes to correction_of_coach.
+- If the reply objects to the QUESTION itself ("this question \
+mixes two different rules", "that's not what my file says"), \
+report question_complaint — the user is the bank's debugger, and \
+their objection retires the item."""
 
 _VALID_VERDICTS = ("complete", "partial", "missed")
 
@@ -780,7 +927,7 @@ def grade_if_answering(user_id, client=None):
             return None
         item = next((i for i in db.get_knowledge_items(track["id"])
                      if i["id"] == open_pred["item_id"]), None)
-        if not item:
+        if not item or item["status"] == "suspended":
             return None
         history = db.get_recent_sms_messages(user_id, limit=8)
         if not history or history[-1]["role"] != "user":
@@ -809,6 +956,26 @@ def grade_if_answering(user_id, client=None):
             user_id, "drill_grade", MODEL, _GRADE_SYSTEM,
             [{"role": "user", "content": convo[-2000:]}], {},
             json.dumps(g, ensure_ascii=False) if g else "")
+        if g and (g.get("question_complaint") or "").strip():
+            # The user is the bank's debugger: an objection to the
+            # question retires the item on the spot and files the
+            # complaint for the mining loop. (Field origin: 40% of
+            # the first live batch "spliced different parts of the
+            # document into one frame".)
+            db.set_item_status(item["id"], "suspended",
+                               source="user_complaint")
+            db.log_event(user_id, "drill_question_complaint",
+                         {"item_id": item["id"],
+                          "complaint": g["question_complaint"][:300],
+                          "llm_call_id": llm_call_id},
+                         source="drill")
+            print(f"[DRILL] question complaint — item {item['id']} "
+                  f"suspended: {g['question_complaint'][:80]}",
+                  flush=True)
+            # The prediction is deliberately left UNSCORED: a bad
+            # question is missing data, not his miss — it ages out
+            # (the KPI counts only scored rows), and the reask path
+            # skips suspended items so it cannot resurface.
         if not g or not g.get("is_answer"):
             return None
         verdict = g.get("verdict")
