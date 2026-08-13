@@ -857,6 +857,50 @@ def grade_if_answering(user_id, client=None):
         return None
 
 
+def followup_block(ctx):
+    """The next question, bank-served, for the conversational REPLY
+    — field origin (2026-08-13): after the husband answered the 9am
+    drill, the reply path free-generated four follow-up questions
+    with no bank, no anchor, no passage, no prediction. One embedded
+    a fabricated premise ('broker confirmation') and attributed it
+    to his file. Follow-ups now ride the same machinery as the
+    morning send."""
+    item = ctx["item"]
+    lines = [
+        "## Next drill item (server-selected — if you continue with "
+        "a question, ask THIS one, nothing else)",
+        f"Topic to probe: {item['stem']}",
+        "A complete answer would cover (the rubric — never enumerate "
+        "it in the question):",
+    ]
+    lines += [f"- {e}" for e in item["elements"]]
+    lines += [
+        f"Source anchor (verbatim from their material): "
+        f"\"{item['anchor_quote']}\"" if item["anchor_quote"] else
+        "Source anchor: (none — canonical item)",
+        f"Why this item: {ctx['why']}",
+    ]
+    passage = (ctx.get("source_context") or "").strip()
+    if passage:
+        lines += [
+            "",
+            "THE PASSAGE (the question must make sense within this "
+            "passage alone — a fact from elsewhere in their "
+            "document, however true, does not belong):",
+            f"\"\"\"{passage}\"\"\"",
+        ]
+    lines += [
+        "",
+        "Rules for the follow-up: close the loop on their answer "
+        "first (grounded ONLY in the graded-answer anchor above), "
+        "then this question — one message. NEVER invent a question "
+        "of your own: no bank item in hand means no question. If "
+        "their message suggests they are done for now, skip the "
+        "question entirely — the item returns tomorrow morning.",
+    ]
+    return "\n".join(lines)
+
+
 def graded_reply_block(graded):
     """Context block for the conversational reply right after a
     grading pass ran. The anchor quote is REQUIRED here: when the

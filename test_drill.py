@@ -586,5 +586,60 @@ mine_sys = [k for k in DrillFake.seen if not k.get("tools")
 check("mining also reads the person ledger now",
       "STYLE NOTES" in mine_sys and "precise setups" in mine_sys)
 
+# ── 10. follow-ups ride the bank (the Wednesday hole) ───────────────
+print("10) bank-routed follow-ups")
+U10 = "fw10"
+db.ensure_user_profile_row(U10)
+t10 = db.create_track(U10, "PDF", mode="drill")
+db.add_user_material(U10, "file", title="m.docx",
+                     extracted_text="The notice must reach the "
+                                    "exchange within ten days of "
+                                    "closing per the safe harbor.")
+iA = db.add_knowledge_item(t10, U10, stem="notice window",
+                           anchor_type="file_chunk",
+                           anchor_quote="notice must reach the "
+                                        "exchange within ten days",
+                           elements=["ten days", "to the exchange"],
+                           kind="numeric_comparison",
+                           est_difficulty=2)
+iB = db.add_knowledge_item(t10, U10, stem="safe harbor scope",
+                           anchor_type="file_chunk",
+                           anchor_quote="per the safe harbor",
+                           elements=["safe harbor applies"],
+                           kind="concept", est_difficulty=1)
+DrillFake.payload_by_tool = {
+    "submit_prediction": {"predicted_verdict": "partial",
+                          "predicted_difficulty": 2, "reason": "r"}}
+ctx10 = drill.prepare_scheduled_question(U10)   # opens question on one item
+db.save_sms_message(U10, "user", "ten days, to the exchange", "in")
+DrillFake.payload_by_tool["submit_grading"] = {
+    "is_answer": True, "verdict": "complete",
+    "elements": [{"name": "ten days", "verdict": "hit"}],
+    "self_confidence": "high", "confidence_marker": ""}
+graded10 = drill.grade_if_answering(U10)
+DrillFake.payload_by_tool["submit_selection"] = {
+    "item_id": iB if ctx10["item"]["id"] == iA else iA,
+    "p_miss": "medium", "why": "next in line"}
+next10 = drill.prepare_scheduled_question(U10)
+sp10, _ = sms._build_system_prompt_for_reply(
+    U10, drill_graded=graded10, drill_next=next10)
+check("graded reply carries BOTH the graded anchor and the next "
+      "bank item (follow-ups no longer freelance)",
+      "Drill answer just graded" in sp10
+      and "Next drill item (server-selected" in sp10
+      and "NEVER invent a question of your own" in sp10)
+check("the follow-up recorded its own prediction before writing",
+      db.get_open_prediction(U10) is not None
+      and db.get_open_prediction(U10)["id"] == next10["prediction_id"])
+
+sp10b, _ = sms._build_system_prompt_for_reply(U10)
+check("a drill user with NO served item gets the no-freelance rule",
+      "No freelance drill questions" in sp10b
+      and "Next drill item" not in sp10b)
+sp10c, _ = sms._build_system_prompt_for_reply("plain")
+check("non-drill users get neither block",
+      "No freelance" not in sp10c and "Next drill item" not in sp10c)
+DrillFake.payload_by_tool = {}
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
