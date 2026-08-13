@@ -3402,16 +3402,6 @@ async def _track_admin_handler(request):
         if old is None:
             return web.Response(status=404, text="no track")
         return web.Response(text=f"track {tid}: '{old}' → '{name}'\n")
-    if action in ("suspend_item", "restore_item"):
-        # Operator lever for the intake audit: flagged splice items
-        # get suspended without waiting for the user to hit them.
-        item_id = request.query.get("item_id", "").strip()
-        if not item_id.isdigit():
-            return web.Response(status=400, text="item_id required")
-        status = ("suspended" if action == "suspend_item"
-                  else "untested")
-        db.set_item_status(int(item_id), status, source="admin")
-        return web.Response(text=f"item {item_id} → {status}\n")
     return web.Response(status=400, text="unknown action")
 
 
