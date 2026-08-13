@@ -1940,12 +1940,28 @@ def _reply_to_inbound(user_id, from_number, body, my_msg_id):
     import drill
     drill_graded = drill.grade_if_answering(user_id)
 
+    # A graded answer chains the NEXT question through the bank —
+    # the husband's own protocol ("You can ask me more questions to
+    # the extent I answer your prior questions"). Without this, the
+    # reply path free-generates follow-up quizzes with no anchor,
+    # no prediction, no grading (observed 2026-08-13: a fabricated
+    # 'broker confirmation' premise attributed to his file). The
+    # prediction is recorded BEFORE the reply is written, same as a
+    # scheduled send.
+    drill_next = None
+    if drill_graded:
+        try:
+            drill_next = drill.prepare_scheduled_question(user_id)
+        except Exception as e:
+            print(f"[SMS] ⚠️ follow-up prepare failed: {e}",
+                  flush=True)
+
     # Use the phase-specific evening prompt for inbound replies too —
     # the LLM should be in the same mode whether the user is replying
     # to a scheduled ping or texting spontaneously.
     ensure_my_link_delivered(user_id)
     system_prompt, prompt_versions = _build_system_prompt_for_reply(
-        user_id, drill_graded=drill_graded)
+        user_id, drill_graded=drill_graded, drill_next=drill_next)
 
     reply_text, steps, expect, llm_call_id, _hold = generate_message(
         user_id, system_prompt, history, "inbound_reply",
@@ -1970,6 +1986,29 @@ def _reply_to_inbound(user_id, from_number, body, my_msg_id):
         import genplan
         genplan.generate_async(user_id)
     db.mark_onboarding_started(user_id)
+
+    # Answer-leak guard on a bank-served follow-up, same rule as the
+    # scheduled path: one rewrite, and if it still leaks, send the
+    # reply WITHOUT the question part being trusted — log loudly.
+    if drill_next and reply_text.strip() \
+            and drill.leaks_answer(reply_text, drill_next["item"]):
+        db.log_event(user_id, "drill_answer_leak",
+                     {"draft": reply_text[:300],
+                      "llm_call_id": llm_call_id,
+                      "item_id": drill_next["item"]["id"],
+                      "followup": True, "attempt": 1}, source="sms")
+        history2 = history + [
+            {"role": "assistant", "content": reply_text},
+            _server_turn("Your draft contains the answer key of the "
+                         "next drill item (anchor/rubric contents). "
+                         "Rewrite: feedback on their answer, then "
+                         "ONLY the question.")]
+        retry_text, steps, expect, llm_call_id, _h = generate_message(
+            user_id, system_prompt, history2, "inbound_reply_leak_retry",
+            max_tokens=400, prompt_versions=prompt_versions)
+        if retry_text:
+            reply_text = retry_text
+
     send_sms(from_number, reply_text, user_id=user_id)
     db.save_sms_message(user_id, "assistant", reply_text, "out")
     db.log_event(user_id, "sms_out",
@@ -1979,10 +2018,18 @@ def _reply_to_inbound(user_id, from_number, body, my_msg_id):
                   "steps": steps, "expect": expect,
                   "phase": db.get_user_phase(user_id)["phase"]},
                  source="sms")
+    if drill_next:
+        db.log_event(user_id, "drill_question_sent",
+                     {"item_id": drill_next["item"]["id"],
+                      "prediction_id": drill_next["prediction_id"],
+                      "reask": drill_next["reask"],
+                      "why": drill_next["why"], "followup": True,
+                      "llm_call_id": llm_call_id}, source="sms")
     return reply_text
 
 
-def _build_system_prompt_for_reply(user_id, drill_graded=None):
+def _build_system_prompt_for_reply(user_id, drill_graded=None,
+                                   drill_next=None):
     """Shared persona + phase-specific mode prompt, with placeholders
     filled — used for inbound conversational replies.
 
@@ -2004,9 +2051,30 @@ def _build_system_prompt_for_reply(user_id, drill_graded=None):
     versions = {"sms_shared": h_shared, mode_name: h_mode,
                 **ctx_versions}
     parts = [context, rendered_shared]
+    import drill
     if drill_graded:
-        import drill
         parts.append(drill.graded_reply_block(drill_graded))
+        if drill_next:
+            parts.append(drill.followup_block(drill_next))
+    try:
+        if not drill_next and drill.active_drill_track(user_id):
+            # The Wednesday hole: with no served item in hand, the
+            # reply path used to freelance quiz questions (no bank,
+            # no anchor, no prediction) — one embedded a fabricated
+            # premise and attributed it to the user's file. Served
+            # item or no question.
+            parts.append(
+                "## No freelance drill questions\n\n"
+                "Drill questions for this user come ONLY from "
+                "server-selected bank items. No item block in this "
+                "prompt = no new drill question in this reply — "
+                "respond conversationally instead (clarifying "
+                "questions about what THEY said are fine). If they "
+                "want another question, tell them one is coming; "
+                "the server will serve it on their next answer or "
+                "tomorrow morning.")
+    except Exception as e:
+        print(f"[SMS] ⚠️ freelance-guard block failed: {e}", flush=True)
     parts += _phase_gated_blocks(user_id, versions)
     parts.append(rendered_mode)
     # (The per-reply ignition judgment block was retired 2026-08-12,
