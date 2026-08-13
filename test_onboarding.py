@@ -177,8 +177,9 @@ check("and the focus block says so out loud",
 
 db.check_and_complete_onboarding(U4, force=True)
 p_off, _ = sms._build_system_prompt("evening", U4)
-check("completion hands the moves back",
-      "micro_ask@2" in p_off and "expect advance" in p_off
+check("move chains stay off even after completion (step surfaces "
+      "removed 2026-08-12)",
+      "expect advance" not in p_off
       and "This block outranks" not in p_off)
 
 # ── the focus block rides second, right under the clock ─────────────

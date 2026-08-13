@@ -75,8 +75,10 @@ print()
 
 check("day headers present",
       out.count("== ") == 2)
-check("coach step tokens rendered",
-      "coach: map@1, micro_ask@2   (cron_evening)" in out)
+check("coach sends rendered without move tags (step surfaces "
+      "removed 2026-08-12)",
+      "coach: sent   (cron_evening)" in out
+      and "map@1" not in out)
 check("[no reply] after unanswered evening",
       "[no reply]" in out.split("== ")[2])  # inside day-2 block or before
 check("user reply with mechanical latency + word count",

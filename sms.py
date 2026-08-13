@@ -837,7 +837,8 @@ def _build_materials_block(user_id):
             "shared — no file, no link — whatever the conversation "
             "says or promises. A promise to upload is not an upload. "
             "You have read NOTHING of theirs — never speak as if "
-            "you have.")
+            "you have. (Never open with 'I read your file' or "
+            "'파일 읽어봤어' — nothing exists to read.)")
         # An empty page reads two ways, and only the stored alignment
         # tells them apart. Unsettled ('') means the question is still
         # open. Settled no_material means the emptiness IS the answer
@@ -1527,12 +1528,24 @@ _QUESTION_RE = re.compile(r"[?？]")
 # so it is mechanically checkable — the narrow-guard exception to
 # "hallucinations are judge work".
 _UPLOADED_THING_RE = re.compile(
-    r"올려\s*(?:놓은|둔|준)\s*(?:거|파일|자료)")
+    r"올려\s*(?:놓은|둔|준)\s*(?:거|파일|자료)"
+    # The same receipt claim in English — the prompt went English-
+    # native (2026-08-12) and the original incident promptly
+    # reappeared as "Hey — I just read through your file." Only
+    # first-person past-tense READ claims match; "I'll read your
+    # file (once you upload it)" is a legitimate promise.
+    r"|\bI(?:'ve|\s+have)?(?:\s+just|\s+already)?\s+"
+    r"(?:read|reviewed|looked\s+through|went\s+through|"
+    r"finished(?:\s+reading)?)\s+(?:through\s+)?"
+    r"(?:your|the)\s+(?:files?|docs?|documents?|notes?|materials?)",
+    re.IGNORECASE)
 _UPLOAD_GUARD_MSG = (
     "Only the USER can upload, to their /my page — you never upload "
-    "anything, and nothing has been uploaded by anyone. If you "
-    "mention the upload, ask whether THEY have done it yet ('자료 "
-    "올렸어?'). Remove every reference to an already-uploaded thing.")
+    "anything, and nothing has been uploaded by anyone. You have "
+    "read NOTHING of theirs ('I read your file' is a fabrication). "
+    "If you mention the upload, ask whether THEY have done it yet "
+    "('자료 올렸어?'). Remove every reference to an already-uploaded "
+    "or already-read thing.")
 
 # [HOLD: "reason"] — deliberate silence needs a recorded WHY. Sending
 # nothing is a real intervention; without a reason in the log the
