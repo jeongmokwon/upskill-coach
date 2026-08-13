@@ -708,7 +708,7 @@ def _build_context_blocks(user_id, focus_block=None):
         print(f"[SMS] ⚠️ materials block failed: {e}", flush=True)
     try:
         notes_block = notes_mod.render_notes_block(
-            user_id, profile=False, moves=_onboarding_done(user_id))
+            user_id, profile=False, moves=False)
         if notes_block:
             parts.append(notes_block)
     except Exception as e:
@@ -802,10 +802,13 @@ def _phase_gated_blocks(user_id, versions):
     plan: hard rules 2-8 and the full step vocabulary. During
     onboarding they are replaced by rule 1 (already in sms_shared)
     and the compact tag list."""
+    # Step vocabulary and the compact tag list removed from assembly
+    # (exp/step-surface-removal): the 17-move lexicon was biasing
+    # every message toward coaching-move shapes.
     if not _onboarding_done(user_id):
-        return [_step_compact_block()]
+        return []
     out = []
-    for name in ("sms_hard_rules_full", "sms_step_vocabulary"):
+    for name in ("sms_hard_rules_full",):
         try:
             text, h = _read_prompt_versioned(name)
             versions[name] = h
@@ -834,7 +837,8 @@ def _build_materials_block(user_id):
             "shared — no file, no link — whatever the conversation "
             "says or promises. A promise to upload is not an upload. "
             "You have read NOTHING of theirs — never speak as if "
-            "you have.")
+            "you have. (Never open with 'I read your file' or "
+            "'파일 읽어봤어' — nothing exists to read.)")
         # An empty page reads two ways, and only the stored alignment
         # tells them apart. Unsettled ('') means the question is still
         # open. Settled no_material means the emptiness IS the answer
@@ -1524,12 +1528,24 @@ _QUESTION_RE = re.compile(r"[?？]")
 # so it is mechanically checkable — the narrow-guard exception to
 # "hallucinations are judge work".
 _UPLOADED_THING_RE = re.compile(
-    r"올려\s*(?:놓은|둔|준)\s*(?:거|파일|자료)")
+    r"올려\s*(?:놓은|둔|준)\s*(?:거|파일|자료)"
+    # The same receipt claim in English — the prompt went English-
+    # native (2026-08-12) and the original incident promptly
+    # reappeared as "Hey — I just read through your file." Only
+    # first-person past-tense READ claims match; "I'll read your
+    # file (once you upload it)" is a legitimate promise.
+    r"|\bI(?:'ve|\s+have)?(?:\s+just|\s+already)?\s+"
+    r"(?:read|reviewed|looked\s+through|went\s+through|"
+    r"finished(?:\s+reading)?)\s+(?:through\s+)?"
+    r"(?:your|the)\s+(?:files?|docs?|documents?|notes?|materials?)",
+    re.IGNORECASE)
 _UPLOAD_GUARD_MSG = (
     "Only the USER can upload, to their /my page — you never upload "
-    "anything, and nothing has been uploaded by anyone. If you "
-    "mention the upload, ask whether THEY have done it yet ('자료 "
-    "올렸어?'). Remove every reference to an already-uploaded thing.")
+    "anything, and nothing has been uploaded by anyone. You have "
+    "read NOTHING of theirs ('I read your file' is a fabrication). "
+    "If you mention the upload, ask whether THEY have done it yet "
+    "('자료 올렸어?'). Remove every reference to an already-uploaded "
+    "or already-read thing.")
 
 # [HOLD: "reason"] — deliberate silence needs a recorded WHY. Sending
 # nothing is a real intervention; without a reason in the log the
@@ -1555,10 +1571,8 @@ def check_send_guards(text, steps, user_id=None):
             f"{n} questions in one message — ask exactly one. Keep the "
             f"single most important question and drop the rest (they "
             f"can come in later turns).")
-    if not steps:
-        violations.append(
-            "missing [STEP: ...] — every message must record the "
-            "coaching move(s) it plays.")
+    # (missing-[STEP:] violation removed — step tagging retired with
+    # the step surfaces, exp/step-surface-removal.)
     if (user_id and _UPLOADED_THING_RE.search(text or "")
             and not db.get_user_materials(user_id)):
         violations.append(_UPLOAD_GUARD_MSG)

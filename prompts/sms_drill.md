@@ -75,5 +75,3 @@ appears in your output beyond what the question itself requires,
 you have texted the user the answers. The server checks for this
 and will refuse the send.
 
-Tag the send `[STEP: spark_curiosity@2]` — a drill question is an
-opened information gap. Do not invent new tags for it.

@@ -52,8 +52,9 @@ check("questions across bubbles counted together",
 check("full-width ？ counted",
       any("questions" in v for v in
           sms.check_send_guards("이거 맞아？ 저건？", one)))
-check("missing STEP caught",
-      any("STEP" in v for v in sms.check_send_guards("좋아!", [])))
+check("missing STEP is no longer a violation (tagging retired "
+      "with the step surfaces)",
+      sms.check_send_guards("좋아!", []) == [])
 check("statement with no question is fine",
       sms.check_send_guards("오늘은 여기까지 하자. 내일 봐", one) == [])
 
@@ -243,6 +244,21 @@ check("the family covers 올려둔/올려준 + 파일/자료 too",
 check("asking plainly ('올렸어?') is NOT a violation",
       sms.check_send_guards("자료 올렸어? 급하지 않아", one,
                             user_id=UG) == [])
+check("the ENGLISH receipt claim is the same violation (observed "
+      "2026-08-12: 'Hey — I just read through your file.')",
+      any("fabrication" in v for v in sms.check_send_guards(
+          "Hey — I just read through your file.", one, user_id=UG))
+      and sms.check_send_guards("I've reviewed your notes carefully",
+                                one, user_id=UG) != []
+      and sms.check_send_guards("I have read the document you sent",
+                                one, user_id=UG) != [])
+check("English FUTURE promises are legitimate — 'I'll read your "
+      "file once it's up' is not a receipt claim",
+      sms.check_send_guards("I'll read your file as soon as you "
+                            "upload it — no rush.", one,
+                            user_id=UG) == []
+      and sms.check_send_guards("Want me to read your notes once "
+                                "they're up?", one, user_id=UG) == [])
 check("without user_id the state-conditioned guard stays off "
       "(legacy call sites unaffected)",
       sms.check_send_guards("자료 올려놓은 거 확인했어?", one) == [])

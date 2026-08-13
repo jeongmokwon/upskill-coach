@@ -120,21 +120,24 @@ check("during onboarding the prior stays out — nothing to run yet",
 check("notes block present, claims only while onboarding runs",
       "What is KNOWN about this user" in prompt
       and "validate@2, micro_ask@1" not in prompt)
-check("trajectory block present with step-language",
-      "Recent trajectory" in prompt and "coach: micro_ask@2" in prompt)
-check("tagging continues on the compact list, anchors held back",
-      "[EXPECT:" in prompt and "[STEP:" in prompt
-      and "Choose the move FIRST" not in prompt
+check("trajectory block present — rhythm without move tags "
+      "(step surfaces removed)",
+      "Recent trajectory" in prompt and "coach: sent" in prompt
+      and "micro_ask@2" not in prompt)
+check("no tagging asks at all during onboarding (step surfaces "
+      "removed)",
+      "[EXPECT:" not in prompt and "[STEP:" not in prompt
       and "### Vocabulary" not in prompt)
 
 db.check_and_complete_onboarding(U, force=True)
 done, done_versions = sms._build_system_prompt("evening", U)
-check("completion brings back the moves on the notes",
-      "validate@2, micro_ask@1" in done)
-check("completion brings back the anchors and rules 2-8 — but NOT "
-      "the prior (removed from the SMS prompt 2026-08-11)",
+check("move chains stay OFF the notes after completion too "
+      "(step surfaces removed)",
+      "validate@2, micro_ask@1" not in done)
+check("completion brings back rules 2-8 — but NOT the prior, and "
+      "NOT the vocabulary (step surfaces removed 2026-08-12)",
       "Policy prior" not in done and "prior" not in done_versions
-      and "Choose the move FIRST" in done and "### Vocabulary" in done
+      and "### Vocabulary" not in done
       and "One cognitive altitude at a time" in done)
 
 expect, text = sms._process_expect_marker("안녕\n[EXPECT: advance]")
