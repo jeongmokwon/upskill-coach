@@ -312,7 +312,26 @@ def _build_system(user_id):
             f"{m.get('user_description') or '(none)'} | "
             f"wants recorded: {len(m.get('wants') or [])}")
 
-    return f"""You are the analysis layer of Theo, an AI learning coach. You do
+    # The analysis pass converts relative time ("일요일까지") into
+    # absolute dates, so it MUST know today's date. Field incident
+    # (2026-08-14~16): with no date anchor, the model resolved "next
+    # Sunday" to 2025-06-01 — a Sunday from its training-era prior —
+    # setting an already-expired pause three days running while the
+    # user repeated her request.
+    tz_h = int(os.environ.get("TZ_OFFSET_HOURS", "-8"))
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+    now_local = _dt.now() + _td(hours=tz_h)
+    weekday = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+               "Saturday", "Sunday"][now_local.weekday()]
+    clock_line = (f"RIGHT NOW for this user it is {weekday}, "
+                  f"{now_local.strftime('%Y-%m-%d %H:%M')} (local). "
+                  f"Resolve every relative time expression "
+                  f"(\"일요일까지\", \"내일 저녁\") against THIS date.")
+
+    return f"""{clock_line}
+
+You are the analysis layer of Theo, an AI learning coach. You do
 not talk to the user. You read the conversation and report what it
 now establishes, via the submit_analysis tool (you MUST call it).
 
@@ -533,7 +552,18 @@ def _apply(user_id, p, llm_call_id):
                 # the same one every send-time calculation uses)
                 tz_h = int(os.environ.get("TZ_OFFSET_HOURS", "-8"))
                 until = (local - _td(hours=tz_h)).isoformat()
-                if until != (prof.get("paused_until") or "").strip():
+                # A pause that is already in the past is worthless —
+                # it sets and instantly expires, and the user keeps
+                # getting messages while the system believes it
+                # complied (the 2025-06-01 incident). Reject loudly.
+                if until <= _dt.now().isoformat():
+                    print(f"[ANALYZE] ⚠️ pause_until {pause!r} is in "
+                          f"the past — rejected", flush=True)
+                    db.log_event(user_id, "pause_rejected_past",
+                                 {"pause_until": pause,
+                                  "llm_call_id": llm_call_id},
+                                 source="analyze")
+                elif until != (prof.get("paused_until") or "").strip():
                     db.set_pause(user_id, until, source="analyze")
                     applied.append(f"pause_until({pause})")
             except ValueError:
