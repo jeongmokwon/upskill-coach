@@ -15,6 +15,7 @@ markers (it only strips them so nothing leaks).
 import json
 import os
 import tempfile
+from datetime import datetime, timedelta
 
 os.environ.pop("DATABASE_URL", None)
 os.environ["TUTOR_USER_ID"] = "u1"
@@ -401,6 +402,30 @@ db.ensure_user_profile_row(UNPF)
 check("no preferences → no block",
       "Standing preferences" not in
       _sms_pref._build_system_prompt("evening", UNPF)[0])
+
+# ── the clock + past-pause rejection (2025-06-01 incident) ──────────
+print("8) analyze knows what day it is")
+sysp = analyze_turn._build_system(U)
+check("the analysis prompt carries today's date and weekday",
+      "RIGHT NOW for this user it is" in sysp
+      and datetime.now().strftime("%Y-%m-%d") in sysp)
+
+db.ensure_user_profile_row("u_past")
+db.save_sms_message("u_past", "user", "일요일까지 보내지 말아줘", "in")
+ToolFake.payload = {"pause_until": "2025-06-01T20:00:00"}
+res = analyze_turn.analyze("u_past")
+check("a past-dated pause is REJECTED loudly, never silently set",
+      not any(a.startswith("pause_until") for a in res["applied"])
+      and not (db.get_user_profile_by_id("u_past") or {}).get("paused_until")
+      and any(r["kind"] == "pause_rejected_past"
+              for r in db.get_events("u_past", limit=20)))
+
+ToolFake.payload = {"pause_until":
+                    (datetime.now() + timedelta(days=2)).strftime(
+                        "%Y-%m-%dT20:00:00")}
+res = analyze_turn.analyze("u_past")
+check("a future pause still lands",
+      any(a.startswith("pause_until") for a in res["applied"]))
 
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
