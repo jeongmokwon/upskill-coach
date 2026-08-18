@@ -1146,6 +1146,64 @@ async def _debug_timeline_handler(request):
     return web.Response(text="\n".join(lines) + "\n", content_type="text/plain")
 
 
+async def _track_convo_handler(request):
+    """Open the life-track lane for a user and send the track
+    conversation opener — the trigger of the 2026-08-18 experiment
+    (SMS로 멀티 에이전트 생성). Manual/cron-fired, idempotent on the
+    lane flag; each POST sends one opener.
+
+    POST /debug/track-convo?secret=...&user_id=X
+    """
+    import sms
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = request.query.get("user_id", "").strip()
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+    sent = sms.send_track_convo_opener(user_id)
+    return web.json_response({"ok": bool(sent), "user_id": user_id,
+                              "sent": sent})
+
+
+async def _debug_tracks_handler(request):
+    """Observability for the track experiment: every life track (all
+    statuses) with its open items, as JSON.
+
+    GET /debug/tracks?secret=...&user_id=X
+    """
+    import db
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = request.query.get("user_id", "").strip()
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+    out = []
+    for t in db.get_life_tracks(user_id,
+                                statuses=("active", "held", "retired")):
+        t = dict(t)
+        t["open_items"] = db.get_track_items(t["id"], status="open")
+        t["resolved_items"] = db.get_track_items(t["id"],
+                                                 status="resolved")
+        out.append(t)
+    return web.json_response({"user_id": user_id,
+                              "lane_open": db.tracks_lane_open(user_id),
+                              "tracks": out})
+
+
 async def _debug_prompt_handler(request):
     """Retrieve the exact prompt template text behind a version hash
     — T2's acceptance surface. Take any sms_out event's
@@ -4037,6 +4095,8 @@ def start_ws_server():
         app.router.add_post("/debug/track", _track_admin_handler)
         app.router.add_post("/debug/rebank", _rebank_handler)
         app.router.add_get("/debug/prompt-preview", _prompt_preview_handler)
+        app.router.add_post("/debug/track-convo", _track_convo_handler)
+        app.router.add_get("/debug/tracks", _debug_tracks_handler)
         app.router.add_get("/notes", _notes_handler)
         app.router.add_post("/notes", _notes_handler)
         app.router.add_get("/plan", _plan_handler)
