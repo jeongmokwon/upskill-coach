@@ -2025,6 +2025,18 @@ def _reply_to_inbound(user_id, from_number, body, my_msg_id):
                       "reask": drill_next["reask"],
                       "why": drill_next["why"], "followup": True,
                       "llm_call_id": llm_call_id}, source="sms")
+    # Life-track ops hop: AFTER the reply (so it sees the coach's
+    # confirmation in history), in the background (extraction must
+    # not delay the conversation), and only for lane-open users —
+    # tracks_ops.run() itself re-checks the gate, so this costs the
+    # husband's path nothing but a boolean.
+    if db.tracks_lane_open(user_id):
+        import threading
+
+        import tracks_ops
+        threading.Thread(target=tracks_ops.run, args=(user_id,),
+                         kwargs={"trigger": "inbound"},
+                         daemon=True).start()
     return reply_text
 
 
@@ -2075,12 +2087,97 @@ def _build_system_prompt_for_reply(user_id, drill_graded=None,
                 "tomorrow morning.")
     except Exception as e:
         print(f"[SMS] ⚠️ freelance-guard block failed: {e}", flush=True)
+    try:
+        tb = _tracks_block(user_id)
+        if tb:
+            parts.append(tb)
+    except Exception as e:
+        print(f"[SMS] ⚠️ tracks block failed: {e}", flush=True)
     parts += _phase_gated_blocks(user_id, versions)
     parts.append(rendered_mode)
     # (The per-reply ignition judgment block was retired 2026-08-12,
     # PR-A — prompts/sms_ignition_judgment.md is kept, deprecated.)
     parts.append(_conversation_contract_block())
     return "\n\n---\n\n".join(parts), versions
+
+
+def _tracks_block(user_id):
+    """Life-track lane prompt block — ONLY for tracks-enabled users
+    (empty string otherwise, so the husband's prompt is
+    byte-identical to before). Renders current tracks + the rules of
+    the track conversation. The actual WRITES happen in the
+    tracks_ops hop after the reply; this block is what lets the
+    coach hold the design conversation honestly."""
+    if not db.tracks_lane_open(user_id):
+        return ""
+    import tracks_ops
+    rows = db.get_life_tracks(user_id, statuses=("active", "held"))
+    lines = ["## Life tracks (the concerns you carry for them)"]
+    if rows:
+        for t in rows:
+            lines.append(f"- [{t['status']}] {t['name']} — {t['role']} "
+                         f"(part: {t['part_type']}, "
+                         f"surfacing: {t['surfacing']})")
+            items = db.get_track_items(t["id"], status="open")
+            if items:
+                lines.append(f"  open items: " + "; ".join(
+                    (it["payload"] or "{}")[:80] for it in items[:8]))
+    else:
+        lines.append("(none yet — the track conversation builds them)")
+    parts_list = "\n".join(f"- {k}: {v}"
+                           for k, v in tracks_ops.PART_TYPES.items())
+    lines.append(f"""
+You can design tracks WITH the user in this conversation: they name a
+recurring concern, you propose a concrete track (name, what you'd do,
+when you'd bring it up, what you'd never do), they adjust or confirm.
+Everything is adjustable later in plain conversation — cadences,
+wording, items, retiring a track.
+
+Machines you actually have (propose ONLY these):
+{parts_list}
+
+Rules:
+- A track exists when the user AGREES to a concrete proposal — restate
+  the final shape briefly when they do. The server records agreed
+  changes after this reply; never claim a track is already running
+  before the user agreed.
+- If a concern needs a machine NOT in the list above (reading their
+  email, watching prices, anything beyond the parts), say honestly
+  that this one has to be BUILT and brought back — "이건 우리가
+  만들어서 가져와야 한다" — and that you'll flag it. Do not fake it.
+- Deferring is a valid outcome ("let's not track this yet") — say so
+  plainly.
+- Ask for missing profile facts a track needs (a child's age, which
+  day the nanny comes) as part of the design conversation, one at a
+  time, never as a form.""")
+    return "\n".join(lines)
+
+
+TRACK_CONVO_OPENER = (
+    "Different kind of question today — what are the things you're "
+    "juggling in your head every day? Not big projects, the "
+    "recurring stuff: lists, restocks, calls you owe, things you "
+    "check on. Dump them here and let's see which ones I can carry "
+    "for you.")
+
+
+def send_track_convo_opener(user_id):
+    """Operator/cron-triggered opener for the track conversation.
+    Enables the lane if it isn't already, then sends a fixed opener
+    (deterministic on purpose — the conversation after it is the
+    experiment). Returns sent text or None."""
+    db.enable_tracks(user_id, source="admin")
+    phone = _phone_for(user_id)
+    if not phone:
+        print(f"[TRACKS] no phone for {user_id}", flush=True)
+        return None
+    text = TRACK_CONVO_OPENER
+    send_sms(phone, text, user_id=user_id)
+    db.save_sms_message(user_id, "assistant", text, "out")
+    db.log_event(user_id, "sms_out",
+                 {"text": text, "trigger": "track_convo_opener"},
+                 source="sms")
+    return text
 
 
 # ─── Scheduled slot handling ────────────────────────────────────────

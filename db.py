@@ -59,6 +59,22 @@ import threading as _threading
 
 USER_ID = "jeongmo"  # default fallback, overridden by onboarding
 
+# Life-track config columns, shared by both schema branches (additive
+# only — legacy drill tracks keep every one of these empty). The
+# track "생성" experiment (2026-08-18): a track is config data, not
+# code — role + part_type (which machine) + surfacing (when the
+# conductor may raise it) + donts. status gains values beyond
+# active: 'held' (판정: 지금은 안 만든다 — T7 주식 case) and
+# 'retired' (대화로 은퇴).
+_TRACK_CONFIG_COLS = [
+    ("role", "TEXT DEFAULT ''"),           # one-line mission
+    ("part_type", "TEXT DEFAULT ''"),      # tracks_ops.PART_TYPES key
+    ("surfacing", "TEXT DEFAULT '{}'"),    # JSON {kind, ...params}
+    ("donts", "TEXT DEFAULT '[]'"),        # JSON list of strings
+    ("cost_lane", "TEXT DEFAULT ''"),      # haiku | sonnet
+    ("profile_facts", "TEXT DEFAULT '[]'"),  # JSON: facts to elicit
+]
+
 # ─── Thread-local user/session context (multi-user support) ──────
 _tls = _threading.local()
 
@@ -242,6 +258,11 @@ def init_db():
             # SMALLTALK_AVERSION_THRESHOLD (sms.py) — some pilot
             # users visibly bounced off chit-chat openers.
             ("smalltalk_aversion", "REAL"),
+            # Life-track conversation gate: ISO timestamp when the
+            # track-generation lane was enabled for this user. Empty
+            # = the lane is invisible (the husband's prompts and
+            # inbound path are byte-identical to before).
+            ("tracks_enabled", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.cursor().execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {ddl}")
@@ -717,6 +738,29 @@ def init_db():
         conn.cursor().execute(
             "CREATE INDEX IF NOT EXISTS idx_consents_user ON user_consents (user_id, doc)"
         )
+        # Track items — the one generic ledger behind every life-track
+        # part (capture-list entries, cadence last-done stamps, owed
+        # replies, expected deliveries). The payload is JSON on
+        # purpose: item shapes differ per track and keep evolving, so
+        # the schema stays out of their way — the per-part minimum
+        # contract lives in code (tracks_ops.validate_item_payload),
+        # not in columns.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS track_items (
+                id SERIAL PRIMARY KEY,
+                track_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT '',
+                payload TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT '',
+                resolved_at TEXT DEFAULT ''
+            )
+        """)
+        conn.cursor().execute(
+            "CREATE INDEX IF NOT EXISTS idx_track_items ON track_items (track_id, status)"
+        )
         # Commit BEFORE the ALTER-with-rollback migrations below.
         # Those loops rollback when a column already exists (which is
         # every boot after the first), and an uncommitted CREATE TABLE
@@ -737,6 +781,18 @@ def init_db():
         ]:
             try:
                 conn.cursor().execute(f"ALTER TABLE learning_paths ADD COLUMN {col} {ddl}")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+        # Life-track config columns (additive only — the husband's
+        # drill track keeps these empty and never reads them). The
+        # rehearsal of 2026-08-18 derived this shape: a track is a
+        # role + a part (which machine runs it) + a surfacing rule
+        # (when the conductor may raise it) + donts. JSON columns so
+        # config evolves in conversation without migrations.
+        for col, ddl in _TRACK_CONFIG_COLS:
+            try:
+                conn.cursor().execute(f"ALTER TABLE tracks ADD COLUMN {col} {ddl}")
                 conn.commit()
             except Exception:
                 conn.rollback()
@@ -907,6 +963,8 @@ def init_db():
             ("paused_until", "TEXT DEFAULT ''"),
             # Small-talk aversion — see Postgres branch for rationale.
             ("smalltalk_aversion", "REAL"),
+            # Life-track gate — see Postgres branch for rationale.
+            ("tracks_enabled", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE user_profiles ADD COLUMN {col} {default}")
@@ -1272,6 +1330,20 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_briefs_user ON user_profile_briefs (user_id, version);
+
+            CREATE TABLE IF NOT EXISTS track_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                track_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT '',
+                payload TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT '',
+                resolved_at TEXT DEFAULT ''
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_track_items ON track_items (track_id, status);
         """)
         # learning_paths.path_kind migration — see Postgres branch for
         # rationale. Runs after the table exists.
@@ -1280,6 +1352,12 @@ def init_db():
         ]:
             try:
                 conn.execute(f"ALTER TABLE learning_paths ADD COLUMN {col} {default}")
+            except Exception:
+                pass
+        # Life-track config columns — see Postgres branch for rationale.
+        for col, default in _TRACK_CONFIG_COLS:
+            try:
+                conn.execute(f"ALTER TABLE tracks ADD COLUMN {col} {default}")
             except Exception:
                 pass
 
@@ -2530,6 +2608,194 @@ def get_tracks(user_id, mode=None):
     cur = _execute(conn, q + " ORDER BY id", tuple(args))
     rows = _fetchall(cur); conn.close()
     return rows
+
+
+# ─── Life tracks: config + generic items (2026-08-18 experiment) ────
+# Everything here is conversation-driven: the tracks_ops hop emits
+# operations, code validates them, these functions apply them. No
+# operator gate — "유저가 대화로 activate 하라는걸 잘 알아듣고
+# 알아서 해내는가"가 관찰 포인트다.
+
+def enable_tracks(user_id, source="admin"):
+    """Open the life-track lane for one user. Idempotent."""
+    ensure_user_profile_row(user_id)
+    prof = get_user_profile_by_id(user_id) or {}
+    if (prof.get("tracks_enabled") or "").strip():
+        return False
+    conn = get_conn()
+    _execute(conn,
+             f"UPDATE user_profiles SET tracks_enabled = {_P} "
+             f"WHERE user_id = {_P}",
+             (datetime.now().isoformat(), user_id))
+    conn.commit(); conn.close()
+    log_event(user_id, "tracks_enabled", {}, source=source)
+    return True
+
+
+def tracks_lane_open(user_id):
+    prof = get_user_profile_by_id(user_id) or {}
+    return bool((prof.get("tracks_enabled") or "").strip())
+
+
+def create_life_track(user_id, name, role, part_type, surfacing=None,
+                      donts=None, profile_facts=None, cost_lane="",
+                      status="active", source="conversation"):
+    """A life track is born from conversation, already whole: role,
+    part, surfacing rule, donts. status='held' records the judgment
+    '지금은 안 만든다' — the deferred list is a ledger too."""
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    cur = _execute(conn,
+        f"INSERT INTO tracks (user_id, name, mode, authority, status, "
+        f" created_at, role, part_type, surfacing, donts, cost_lane, "
+        f" profile_facts) "
+        f"VALUES ({_P}, {_P}, 'life', 'user_wins', {_P}, {_P}, {_P}, "
+        f" {_P}, {_P}, {_P}, {_P}, {_P})"
+        + (" RETURNING id" if DB_TYPE == "postgres" else ""),
+        (user_id, name, status, datetime.now().isoformat(), role,
+         part_type, json.dumps(surfacing or {}, ensure_ascii=False),
+         json.dumps(donts or [], ensure_ascii=False), cost_lane,
+         json.dumps(profile_facts or [], ensure_ascii=False)))
+    track_id = _fetchone(cur)["id"] if DB_TYPE == "postgres" else cur.lastrowid
+    conn.commit(); conn.close()
+    log_event(user_id, "life_track_created",
+              {"track_id": track_id, "name": name, "part_type": part_type,
+               "status": status}, source=source)
+    return track_id
+
+
+_TRACK_MUTABLE = ("name", "role", "surfacing", "donts", "cost_lane",
+                  "profile_facts")
+
+
+def update_track_config(track_id, fields, source="conversation"):
+    """Conversation-driven config evolution — 유저의 상황은 항상
+    변한다. Only _TRACK_MUTABLE keys move; part_type is NOT among
+    them (changing the machine is a new part decision, zone B).
+    → old row, or None."""
+    fields = {k: v for k, v in (fields or {}).items()
+              if k in _TRACK_MUTABLE}
+    if not fields:
+        return None
+    conn = get_conn()
+    cur = _execute(conn, f"SELECT * FROM tracks WHERE id = {_P}",
+                   (track_id,))
+    row = _fetchone(cur)
+    if not row or row.get("mode") != "life":
+        conn.close(); return None
+    sets, args = [], []
+    for k, v in fields.items():
+        if k in ("surfacing", "donts", "profile_facts") \
+                and not isinstance(v, str):
+            v = json.dumps(v, ensure_ascii=False)
+        sets.append(f"{k} = {_P}"); args.append(v)
+    args.append(track_id)
+    _execute(conn,
+             f"UPDATE tracks SET {', '.join(sets)} WHERE id = {_P}",
+             tuple(args))
+    conn.commit(); conn.close()
+    log_event(row["user_id"], "life_track_updated",
+              {"track_id": track_id, "fields": sorted(fields.keys())},
+              source=source)
+    return row
+
+
+def set_track_status(track_id, status, source="conversation", reason=""):
+    """active / held / retired — all reachable from conversation."""
+    if status not in ("active", "held", "retired"):
+        return None
+    conn = get_conn()
+    cur = _execute(conn, f"SELECT * FROM tracks WHERE id = {_P}",
+                   (track_id,))
+    row = _fetchone(cur)
+    if not row:
+        conn.close(); return None
+    _execute(conn, f"UPDATE tracks SET status = {_P} WHERE id = {_P}",
+             (status, track_id))
+    conn.commit(); conn.close()
+    log_event(row["user_id"], "life_track_status",
+              {"track_id": track_id, "old": row["status"], "new": status,
+               "reason": reason[:200]}, source=source)
+    return row
+
+
+def get_life_tracks(user_id, statuses=("active", "held")):
+    """Life tracks across statuses — the ops hop needs held ones too
+    (so a '다시 해보자' revives instead of duplicating)."""
+    conn = get_conn()
+    marks = ", ".join([_P] * len(statuses))
+    cur = _execute(conn,
+        f"SELECT * FROM tracks WHERE user_id = {_P} AND mode = 'life' "
+        f"AND status IN ({marks}) ORDER BY id",
+        tuple([user_id] + list(statuses)))
+    rows = _fetchall(cur); conn.close()
+    return rows
+
+
+def add_track_item(track_id, user_id, kind, payload=None):
+    conn = get_conn()
+    now = datetime.now().isoformat()
+    cur = _execute(conn,
+        f"INSERT INTO track_items (track_id, user_id, kind, payload, "
+        f" status, created_at, updated_at) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, 'open', {_P}, {_P})"
+        + (" RETURNING id" if DB_TYPE == "postgres" else ""),
+        (track_id, user_id, kind,
+         json.dumps(payload or {}, ensure_ascii=False), now, now))
+    item_id = _fetchone(cur)["id"] if DB_TYPE == "postgres" else cur.lastrowid
+    conn.commit(); conn.close()
+    return item_id
+
+
+def update_track_item(item_id, payload=None, status=None):
+    """Patch payload (merge, not replace — item shapes evolve) and/or
+    move status (open → resolved). → updated row or None."""
+    conn = get_conn()
+    cur = _execute(conn, f"SELECT * FROM track_items WHERE id = {_P}",
+                   (item_id,))
+    row = _fetchone(cur)
+    if not row:
+        conn.close(); return None
+    now = datetime.now().isoformat()
+    new_payload = row["payload"]
+    if payload is not None:
+        try:
+            merged = json.loads(row["payload"] or "{}")
+        except Exception:
+            merged = {}
+        merged.update(payload)
+        new_payload = json.dumps(merged, ensure_ascii=False)
+    new_status = status or row["status"]
+    resolved_at = now if (status == "resolved"
+                          and row["status"] != "resolved") \
+        else row.get("resolved_at") or ""
+    _execute(conn,
+             f"UPDATE track_items SET payload = {_P}, status = {_P}, "
+             f"updated_at = {_P}, resolved_at = {_P} WHERE id = {_P}",
+             (new_payload, new_status, now, resolved_at, item_id))
+    conn.commit(); conn.close()
+    row.update({"payload": new_payload, "status": new_status,
+                "updated_at": now, "resolved_at": resolved_at})
+    return row
+
+
+def get_track_items(track_id, status="open"):
+    conn = get_conn()
+    q = f"SELECT * FROM track_items WHERE track_id = {_P}"
+    args = [track_id]
+    if status:
+        q += f" AND status = {_P}"; args.append(status)
+    cur = _execute(conn, q + " ORDER BY id", tuple(args))
+    rows = _fetchall(cur); conn.close()
+    return rows
+
+
+def get_track_item(item_id):
+    conn = get_conn()
+    cur = _execute(conn, f"SELECT * FROM track_items WHERE id = {_P}",
+                   (item_id,))
+    row = _fetchone(cur); conn.close()
+    return row
 
 
 def add_knowledge_item(track_id, user_id, stem, anchor_type,
