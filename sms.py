@@ -2153,12 +2153,17 @@ Rules:
     return "\n".join(lines)
 
 
+# The product's two verbs, both visible (founder-approved copy,
+# 2026-08-18): work tracks are pushed on TOGETHER (the husband does
+# not want to hand over partner prep — he wants a capable
+# companion), while small recurring load is HELD for the user. An
+# opener with only one verb misses half the users; the first draft
+# ("dump them here") read as a survey and asked instead of offering.
 TRACK_CONVO_OPENER = (
-    "Different kind of question today — what are the things you're "
-    "juggling in your head every day? Not big projects, the "
-    "recurring stuff: lists, restocks, calls you owe, things you "
-    "check on. Dump them here and let's see which ones I can carry "
-    "for you.")
+    "I can do more for you now. The things you're working toward — "
+    "or keep meaning to get to — we can push on together. And the "
+    "small stuff you re-remember every day, I can just hold for "
+    "you. What's on your plate these days? Start anywhere.")
 
 
 def send_track_convo_opener(user_id):
