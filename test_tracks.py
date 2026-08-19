@@ -164,22 +164,33 @@ _, rejectedO = tracks_ops.apply_ops("someone_else", [
 check("item ownership checked",
       any("not our item" in r for r in rejectedO))
 
-print("\n── prompt block + lane isolation ──")
+print("\n── companion prompt: its own stack, not the edtech one ──")
 blk = sms._tracks_block(U)
-check("block renders tracks", "장보기" in blk and "부모님 전화" in blk)
-check("block carries the capability stance",
-      "UNLIMITED" in blk and "promise" in blk.lower())
-check("block splits 전능 from 전지 (facts stay honest)",
-      "knowledge is NOT" in blk and "invent facts" in blk)
-check("block bans machinery vocabulary + meta-questions",
-      "machinery language" in blk and "where should we start" in blk)
-# User data (track names/roles) stays in the user's words — Korean
-# there is correct. The INSTRUCTION text is what must stay English:
-# Korean tokens in prompt scaffolding measurably pull English-lane
-# replies toward Korean (the #171 step-vocabulary lesson).
-stance = blk.split("## How you work")[1]
-check("instruction text carries no Korean tokens (leakage guard)",
-      not any('가' <= ch <= '힣' for ch in stance))
+check("state block renders tracks (user's own words)",
+      "장보기" in blk and "부모님 전화" in blk)
+comp_prompt, comp_v = sms._build_system_prompt_for_reply(U)
+check("lane user gets the companion prompt",
+      "sms_companion" in comp_v and "capability is UNLIMITED" in comp_prompt)
+check("genie: imagines FOR them, 10x bar",
+      "imagining it FOR them" in comp_prompt
+      and "10x productive" in comp_prompt)
+check("curiosity before design present",
+      "get curious" in comp_prompt
+      and "what can you even do for me?" in comp_prompt)
+check("facts stay honest (the one limit)",
+      "knowledge is not unlimited" in comp_prompt.lower())
+check("tracks state rides the companion prompt",
+      "Life tracks" in comp_prompt and "장보기" in comp_prompt)
+check("edtech stack is GONE — no shared persona, no discovery mode, "
+      "no user-facts",
+      "sms_shared" not in comp_v and "sms_discovery" not in comp_v
+      and "sms_user_facts" not in comp_v
+      and "companion for learning" not in comp_prompt)
+# The INSTRUCTION file must stay English (the #171 leakage lesson);
+# user data (track names) rightly keeps the user's language.
+comp_file = open("prompts/sms_companion.md").read()
+check("companion prompt file carries no Korean tokens",
+      not any('가' <= ch <= '힣' for ch in comp_file))
 db.ensure_user_profile_row("hub")
 check("drill user: lane closed, no block, no ops",
       not db.tracks_lane_open("hub")
@@ -190,14 +201,18 @@ legacy = db.create_track("hub", "Cleary PDF", mode="drill",
 check("legacy drill track untouched by life accessors",
       db.get_life_tracks("hub") == []
       and db.update_track_config(legacy, {"role": "x"}) is None)
+hub_prompt_before, hub_v_before = \
+    sms._build_system_prompt_for_reply("hub")
+check("lane-closed drill user keeps the legacy stack",
+      "sms_shared" in hub_v_before
+      and "sms_companion" not in hub_v_before)
 
 print("\n── drill user + open lane coexist (the husband's next state) ──")
 db.enable_tracks("hub", source="test")
 hub_prompt, _v = sms._build_system_prompt_for_reply("hub")
+check("companion prompt takes over", "capability is UNLIMITED" in hub_prompt)
 check("drill freelance guard still present",
       "No freelance drill questions" in hub_prompt)
-check("tracks block joins the same prompt",
-      "Life tracks" in hub_prompt)
 check("ops hop now live for him", db.tracks_lane_open("hub"))
 
 print("\n── surfacing validator matrix ──")
