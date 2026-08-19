@@ -172,7 +172,14 @@ check("block carries the capability stance",
 check("block splits 전능 from 전지 (facts stay honest)",
       "knowledge is NOT" in blk and "invent facts" in blk)
 check("block bans machinery vocabulary + meta-questions",
-      "machinery language" in blk and "어디부터" in blk)
+      "machinery language" in blk and "where should we start" in blk)
+# User data (track names/roles) stays in the user's words — Korean
+# there is correct. The INSTRUCTION text is what must stay English:
+# Korean tokens in prompt scaffolding measurably pull English-lane
+# replies toward Korean (the #171 step-vocabulary lesson).
+stance = blk.split("## How you work")[1]
+check("instruction text carries no Korean tokens (leakage guard)",
+      not any('가' <= ch <= '힣' for ch in stance))
 db.ensure_user_profile_row("hub")
 check("drill user: lane closed, no block, no ops",
       not db.tracks_lane_open("hub")
