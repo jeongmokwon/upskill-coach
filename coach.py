@@ -1172,6 +1172,39 @@ async def _track_convo_handler(request):
                               "sent": sent})
 
 
+async def _nudge_handler(request):
+    """Wizard-of-Oz promise fulfillment: make the coach send one
+    proactive message under an operator instruction. This is how
+    promises harvested from transcripts are kept by hand until the
+    surfacing machinery exists.
+
+    POST /debug/nudge?secret=...&user_id=X
+    body (plain text) = the instruction
+    (or ?instruction=... for short ones)
+    """
+    import sms
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = request.query.get("user_id", "").strip()
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+    instruction = (request.query.get("instruction", "").strip()
+                   or (await request.text()).strip())
+    if not instruction:
+        return web.Response(status=400, text="instruction required "
+                                             "(query param or body)")
+    sent = sms.send_nudge(user_id, instruction)
+    return web.json_response({"ok": bool(sent), "user_id": user_id,
+                              "sent": sent})
+
+
 async def _debug_tracks_handler(request):
     """Observability for the track experiment: every life track (all
     statuses) with its open items, as JSON.
@@ -4097,6 +4130,7 @@ def start_ws_server():
         app.router.add_get("/debug/prompt-preview", _prompt_preview_handler)
         app.router.add_post("/debug/track-convo", _track_convo_handler)
         app.router.add_get("/debug/tracks", _debug_tracks_handler)
+        app.router.add_post("/debug/nudge", _nudge_handler)
         app.router.add_get("/notes", _notes_handler)
         app.router.add_post("/notes", _notes_handler)
         app.router.add_get("/plan", _plan_handler)

@@ -164,13 +164,17 @@ _, rejectedO = tracks_ops.apply_ops("someone_else", [
 check("item ownership checked",
       any("not our item" in r for r in rejectedO))
 
-print("\n── prompt block + husband isolation ──")
+print("\n── prompt block + lane isolation ──")
 blk = sms._tracks_block(U)
 check("block renders tracks", "장보기" in blk and "부모님 전화" in blk)
-check("block teaches build-and-deliver honesty",
-      "만들어서 가져와야" in blk)
+check("block carries the capability stance",
+      "UNLIMITED" in blk and "promise" in blk.lower())
+check("block splits 전능 from 전지 (facts stay honest)",
+      "knowledge is NOT" in blk and "invent facts" in blk)
+check("block bans machinery vocabulary + meta-questions",
+      "machinery language" in blk and "어디부터" in blk)
 db.ensure_user_profile_row("hub")
-check("husband: lane closed, no block, no ops",
+check("drill user: lane closed, no block, no ops",
       not db.tracks_lane_open("hub")
       and sms._tracks_block("hub") == ""
       and tracks_ops.run("hub") is None)
@@ -179,6 +183,15 @@ legacy = db.create_track("hub", "Cleary PDF", mode="drill",
 check("legacy drill track untouched by life accessors",
       db.get_life_tracks("hub") == []
       and db.update_track_config(legacy, {"role": "x"}) is None)
+
+print("\n── drill user + open lane coexist (the husband's next state) ──")
+db.enable_tracks("hub", source="test")
+hub_prompt, _v = sms._build_system_prompt_for_reply("hub")
+check("drill freelance guard still present",
+      "No freelance drill questions" in hub_prompt)
+check("tracks block joins the same prompt",
+      "Life tracks" in hub_prompt)
+check("ops hop now live for him", db.tracks_lane_open("hub"))
 
 print("\n── surfacing validator matrix ──")
 ok = tracks_ops.validate_surfacing
