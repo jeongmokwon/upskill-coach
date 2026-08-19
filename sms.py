@@ -71,6 +71,14 @@ MODEL = "claude-sonnet-4-5"
 # (compact synthesis of older turns + raw recent N), not a bigger N.
 HISTORY_LIMIT = 50
 
+# Generation ceiling for every outbound message. A SAFETY VALVE, not
+# a length target — message length is governed by the prompt. The old
+# per-call values (400-600) were low enough that long companion
+# replies got cut mid-sentence (six "또 잘렸어" in one day,
+# 2026-08-19). The API requires a finite max_tokens, so set it far
+# above any real reply; billing only counts tokens actually produced.
+GEN_MAX_TOKENS = 2000
+
 # Below this the analysis pass's smalltalk_aversion read stays
 # advisory (no prompt block); at or above it the no-small-talk
 # block is enforced. Some pilot users visibly bounced off
@@ -1580,7 +1588,7 @@ def check_send_guards(text, steps, user_id=None):
 
 
 def generate_message(user_id, system_prompt, history, trigger,
-                     max_tokens=500, prompt_versions=None):
+                     max_tokens=GEN_MAX_TOKENS, prompt_versions=None):
     """Call the model, process its markers, and enforce the send
     guards with ONE regeneration attempt.
 
@@ -1614,6 +1622,14 @@ def generate_message(user_id, system_prompt, history, trigger,
             user_id, trigger if attempt == 1 else f"{trigger}_retry",
             MODEL, system_prompt, attempt_history,
             prompt_versions or {}, raw)
+
+        # The ceiling should never bind (GEN_MAX_TOKENS is a safety
+        # valve) — if it does, that's a mid-sentence cut the user
+        # sees, so record it loudly instead of shipping it silently.
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            db.log_event(user_id, "generation_truncated",
+                         {"where": trigger, "max_tokens": max_tokens,
+                          "llm_call_id": llm_call_id}, source="sms")
 
         text = _strip_extraction_markers(user_id, raw)
         text = _process_ignition_markers(user_id, text, trigger=trigger)
@@ -1965,7 +1981,7 @@ def _reply_to_inbound(user_id, from_number, body, my_msg_id):
 
     reply_text, steps, expect, llm_call_id, _hold = generate_message(
         user_id, system_prompt, history, "inbound_reply",
-        max_tokens=400, prompt_versions=prompt_versions)
+        max_tokens=GEN_MAX_TOKENS, prompt_versions=prompt_versions)
     if reply_text is None:
         return None
     if db.get_last_user_message_id(user_id) != my_msg_id:
@@ -2005,7 +2021,7 @@ def _reply_to_inbound(user_id, from_number, body, my_msg_id):
                          "ONLY the question.")]
         retry_text, steps, expect, llm_call_id, _h = generate_message(
             user_id, system_prompt, history2, "inbound_reply_leak_retry",
-            max_tokens=400, prompt_versions=prompt_versions)
+            max_tokens=GEN_MAX_TOKENS, prompt_versions=prompt_versions)
         if retry_text:
             reply_text = retry_text
 
@@ -2253,7 +2269,7 @@ def send_nudge(user_id, instruction):
         "own — the user has not texted since your last message.")]
     text, steps, expect, llm_call_id, _hold = generate_message(
         user_id, system_prompt, history, "nudge",
-        max_tokens=400, prompt_versions=prompt_versions)
+        max_tokens=GEN_MAX_TOKENS, prompt_versions=prompt_versions)
     if not text:
         return None
     send_sms(phone, text, user_id=user_id)
@@ -2381,7 +2397,7 @@ def generate_web_reply(user_id, session_id, text, jpeg_bytes=None):
         user_id, session_id, text, jpeg_bytes)
     client = anthropic.Anthropic()
     resp = client.messages.create(
-        model=MODEL, max_tokens=600, system=system_prompt,
+        model=MODEL, max_tokens=GEN_MAX_TOKENS, system=system_prompt,
         messages=history)
     raw = "".join(b.text for b in resp.content
                   if getattr(b, "type", "") == "text")
@@ -2445,7 +2461,7 @@ def handle_material_ready(user_id, material_id):
             f"better than any adjective — and open the walkthrough."))
         text, steps, expect, llm_call_id, _hold = generate_message(
             user_id, system_prompt, history, "material_ready",
-            max_tokens=400, prompt_versions=prompt_versions)
+            max_tokens=GEN_MAX_TOKENS, prompt_versions=prompt_versions)
         if not text or not text.strip():
             return None
         text = _strip_extraction_markers(user_id, text)
@@ -2682,7 +2698,7 @@ def _cron_tick_for_user(user_id, to_number, slot, window=None):
 
     text, steps, expect, llm_call_id, hold_reason = generate_message(
         user_id, system_prompt, history, trigger,
-        max_tokens=500, prompt_versions=prompt_versions)
+        max_tokens=GEN_MAX_TOKENS, prompt_versions=prompt_versions)
     if text is None:
         return None
 
@@ -2707,7 +2723,7 @@ def _cron_tick_for_user(user_id, to_number, slot, window=None):
             text, steps, expect, llm_call_id, hold_reason = \
                 generate_message(user_id, system_prompt, history,
                                  f"{trigger}_leak_retry",
-                                 max_tokens=500,
+                                 max_tokens=GEN_MAX_TOKENS,
                                  prompt_versions=prompt_versions)
             if text is None:
                 return None

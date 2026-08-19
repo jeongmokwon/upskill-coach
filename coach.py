@@ -3281,7 +3281,7 @@ async def _session_stream_handler(request):
             client = anthropic.Anthropic()
             full, flushed = "", 0
             with client.messages.stream(
-                    model=sms_mod.MODEL, max_tokens=600,
+                    model=sms_mod.MODEL, max_tokens=sms_mod.GEN_MAX_TOKENS,
                     system=system_prompt, messages=history) as stream:
                 for delta in stream.text_stream:
                     full += delta
