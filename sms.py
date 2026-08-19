@@ -139,6 +139,25 @@ def _addr(phone):
     return f"{_channel_prefix()}{phone}"
 
 
+def _split_for_twilio(text, limit=1500):
+    """Split one bubble into <=limit-char chunks, breaking at the last
+    blank line before the limit, else the last newline, else hard at
+    the limit. 1500 leaves headroom under Twilio's 1600 hard cap."""
+    chunks = []
+    while len(text) > limit:
+        window = text[:limit]
+        cut = window.rfind("\n\n")
+        if cut < limit // 2:
+            cut = window.rfind("\n")
+        if cut < limit // 2:
+            cut = limit
+        chunks.append(text[:cut].strip())
+        text = text[cut:].strip()
+    if text:
+        chunks.append(text)
+    return chunks
+
+
 def send_sms(to_number, body, user_id=None):
     """Send `body` to `to_number` (E.164). Returns Twilio SID or None.
     `user_id` is used only for event attribution on failures.
@@ -170,6 +189,11 @@ def send_sms(to_number, body, user_id=None):
     # whitespace). Leaves '---' inside code/text alone.
     parts = re.split(r"\n\s*---\s*\n", body.strip())
     parts = [p.strip() for p in parts if p.strip()]
+    # Twilio rejects bodies over 1600 chars outright (error 21617) —
+    # the bubble would vanish, not truncate. With the generation
+    # ceiling raised (GEN_MAX_TOKENS) that length is now reachable,
+    # so split oversized bubbles at paragraph/line boundaries.
+    parts = [chunk for p in parts for chunk in _split_for_twilio(p)]
     if not parts:
         return None
 
