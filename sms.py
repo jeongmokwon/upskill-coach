@@ -2103,14 +2103,19 @@ def _build_system_prompt_for_reply(user_id, drill_graded=None,
 
 def _tracks_block(user_id):
     """Life-track lane prompt block — ONLY for tracks-enabled users
-    (empty string otherwise, so the husband's prompt is
-    byte-identical to before). Renders current tracks + the rules of
-    the track conversation. The actual WRITES happen in the
-    tracks_ops hop after the reply; this block is what lets the
-    coach hold the design conversation honestly."""
+    (empty string otherwise, so lane-closed users' prompts are
+    byte-identical to before).
+
+    Pilot stance (founder, 2026-08-19): the companion assumes
+    UNLIMITED CAPABILITY — it promises whatever would genuinely
+    help, and the team behind it keeps every promise (Wizard-of-Oz:
+    promises are harvested from transcripts and fulfilled by hand
+    via /debug/nudge until the machinery exists). What Theo promises
+    IS the requirements discovery. The one line that never moves:
+    capability is unlimited, KNOWLEDGE is not — fabricated facts and
+    fake receipts stay forbidden (능력은 전능, 사실은 정직)."""
     if not db.tracks_lane_open(user_id):
         return ""
-    import tracks_ops
     rows = db.get_life_tracks(user_id, statuses=("active", "held"))
     lines = ["## Life tracks (the concerns you carry for them)"]
     if rows:
@@ -2123,33 +2128,42 @@ def _tracks_block(user_id):
                 lines.append(f"  open items: " + "; ".join(
                     (it["payload"] or "{}")[:80] for it in items[:8]))
     else:
-        lines.append("(none yet — the track conversation builds them)")
-    parts_list = "\n".join(f"- {k}: {v}"
-                           for k, v in tracks_ops.PART_TYPES.items())
-    lines.append(f"""
-You can design tracks WITH the user in this conversation: they name a
-recurring concern, you propose a concrete track (name, what you'd do,
-when you'd bring it up, what you'd never do), they adjust or confirm.
-Everything is adjustable later in plain conversation — cadences,
-wording, items, retiring a track.
+        lines.append("(none yet — this conversation builds them)")
+    lines.append("""
+## How you work (pilot capability stance)
 
-Machines you actually have (propose ONLY these):
-{parts_list}
+You are a companion with a full team behind you. ASSUME UNLIMITED
+CAPABILITY: reminders at any time or cadence, tracking anything,
+research and tailored suggestions, watching for dates, drafting,
+proactive check-ins, working through their hardest problems with
+them. Never hedge on capability — no "그 기능은 아직", no "I can't
+yet". Every promise you make is recorded and kept by the team, so
+promise what a genuinely capable companion would.
 
 Rules:
-- A track exists when the user AGREES to a concrete proposal — restate
-  the final shape briefly when they do. The server records agreed
-  changes after this reply; never claim a track is already running
-  before the user agreed.
-- If a concern needs a machine NOT in the list above (reading their
-  email, watching prices, anything beyond the parts), say honestly
-  that this one has to be BUILT and brought back — "이건 우리가
-  만들어서 가져와야 한다" — and that you'll flag it. Do not fake it.
-- Deferring is a valid outcome ("let's not track this yet") — say so
-  plainly.
-- Ask for missing profile facts a track needs (a child's age, which
-  day the nanny comes) as part of the design conversation, one at a
-  time, never as a form.""")
+- Speak THEIR language, never machinery language. No internal
+  vocabulary (track types, parts, "research 트랙" 등) — describe
+  what you'll DO, concretely, in their words. Track boundaries
+  follow THEIR categories (육아 is one thing to a parent, however
+  many machines it takes underneath).
+- When they hand you several concerns, propose the complete setup in
+  ONE message — for each: what you'll do and when you'll speak up —
+  then let them adjust. Don't ask "어디부터 할까?" / "where should
+  we start?"; decide, propose, take vetoes.
+- Promise CONCRETELY (what + when), and treat every promise as a
+  commitment. Vague promises ("챙겨볼게") are worse than none.
+- Capability is unlimited; knowledge is NOT. Never claim to have
+  read/seen/received something you haven't, never invent facts about
+  their world, their files, their industry. When you need to know
+  something, ask them — being their companion means learning them,
+  not pretending.
+- A setup exists once they agree — restate the final shape briefly
+  when they do; the server records it after this reply.
+- Deferring is a valid outcome ("that one's not worth tracking") —
+  say so plainly.
+- Ask for missing personal facts a setup needs (a child's age, which
+  day the nanny comes) as part of the conversation, one at a time,
+  never as a form.""")
     return "\n".join(lines)
 
 
@@ -2182,6 +2196,42 @@ def send_track_convo_opener(user_id):
     db.log_event(user_id, "sms_out",
                  {"text": text, "trigger": "track_convo_opener"},
                  source="sms")
+    return text
+
+
+def send_nudge(user_id, instruction):
+    """The Wizard-of-Oz lever: make the coach send one proactive
+    message under an operator instruction — how promises harvested
+    from transcripts get KEPT by hand until the machinery exists
+    (약속은 자유, 파기는 금지). The message is generated through the
+    normal reply prompt (persona, tracks block, guards), so it
+    sounds like Theo, not like an announcement."""
+    phone = _phone_for(user_id)
+    if not phone:
+        print(f"[NUDGE] no phone for {user_id}", flush=True)
+        return None
+    phase_state = db.get_user_phase(user_id)
+    history = db.get_recent_sms_messages(
+        user_id, limit=HISTORY_LIMIT,
+        since=phase_state["phase_started_at"], with_time=True)
+    system_prompt, prompt_versions = _build_system_prompt_for_reply(
+        user_id)
+    history = history + [_server_turn(
+        "Proactive send (no new user message). Instruction from the "
+        "server:\n" + instruction.strip() + "\n\nWrite the single "
+        "outbound message that fulfills this. It must stand on its "
+        "own — the user has not texted since your last message.")]
+    text, steps, expect, llm_call_id, _hold = generate_message(
+        user_id, system_prompt, history, "nudge",
+        max_tokens=400, prompt_versions=prompt_versions)
+    if not text:
+        return None
+    send_sms(phone, text, user_id=user_id)
+    db.save_sms_message(user_id, "assistant", text, "out")
+    db.log_event(user_id, "sms_out",
+                 {"text": text, "trigger": "nudge",
+                  "instruction": instruction[:300],
+                  "llm_call_id": llm_call_id}, source="sms")
     return text
 
 
