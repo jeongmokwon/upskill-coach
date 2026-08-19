@@ -2045,12 +2045,25 @@ def _build_system_prompt_for_reply(user_id, drill_graded=None,
     """Shared persona + phase-specific mode prompt, with placeholders
     filled — used for inbound conversational replies.
 
+    Life-track users get a DIFFERENT prompt entirely
+    (_build_companion_prompt): the legacy stack below is the edtech
+    coach — goal elicitation, learning-path focus, a capability
+    inventory that is the anti-genie — and appending the companion
+    stance to it produced a prompt at war with itself (observed
+    2026-08-19: the coach recited the user's July learning goal as
+    their identity and bounced design questions back). Old product,
+    old prompt; new product, new prompt.
+
     The mode prompt matters here: without it, the LLM only has the
     generic flow-companion persona, and it may drift into tutoring
     behavior when replying to the user's messages. Including the
     discovery / first_bite prompt keeps the LLM anchored to the
     same job it has during the scheduled evening ping.
     """
+    if db.tracks_lane_open(user_id):
+        return _build_companion_prompt(user_id,
+                                       drill_graded=drill_graded,
+                                       drill_next=drill_next)
     shared, h_shared = _read_prompt_versioned("sms_shared")
     phase = db.get_user_phase(user_id)["phase"]
     mode_name = "sms_first_bite" if phase == "first_bite" else "sms_discovery"
@@ -2087,12 +2100,6 @@ def _build_system_prompt_for_reply(user_id, drill_graded=None,
                 "tomorrow morning.")
     except Exception as e:
         print(f"[SMS] ⚠️ freelance-guard block failed: {e}", flush=True)
-    try:
-        tb = _tracks_block(user_id)
-        if tb:
-            parts.append(tb)
-    except Exception as e:
-        print(f"[SMS] ⚠️ tracks block failed: {e}", flush=True)
     parts += _phase_gated_blocks(user_id, versions)
     parts.append(rendered_mode)
     # (The per-reply ignition judgment block was retired 2026-08-12,
@@ -2101,19 +2108,77 @@ def _build_system_prompt_for_reply(user_id, drill_graded=None,
     return "\n\n---\n\n".join(parts), versions
 
 
-def _tracks_block(user_id):
-    """Life-track lane prompt block — ONLY for tracks-enabled users
-    (empty string otherwise, so lane-closed users' prompts are
-    byte-identical to before).
+def _build_companion_prompt(user_id, drill_graded=None,
+                            drill_next=None):
+    """The life-companion prompt — lane-open users only. Built from
+    scratch, NOT from the edtech stack: no goal/user-facts blocks
+    (the July 'iOS engineer learning ML' zombie came from there), no
+    discovery/first_bite mode, no step machinery, no capability
+    inventory. What survives from the old assembly is deliberately
+    product-agnostic: the clock, standing preferences, the
+    small-talk read, drill blocks for users who also run a drill,
+    and the conversation contract."""
+    companion, h_comp = _read_prompt_versioned("sms_companion")
+    fields = _build_placeholders(user_id)
+    versions = {"sms_companion": h_comp}
+    parts = [_clock_block()]
+    try:
+        prefs = db.get_user_preferences(user_id)
+        if prefs:
+            plines = ["## Standing preferences (user-stated, binding)",
+                      "",
+                      "Rules this user has explicitly set for how you "
+                      "talk to them:"]
+            for k, v in prefs.items():
+                ev = f' — "{v["evidence"]}"' if v.get("evidence") else ""
+                plines.append(f"- {k}: {v['value']}{ev}")
+            parts.append("\n".join(plines))
+    except Exception as e:
+        print(f"[SMS] ⚠️ preferences block failed: {e}", flush=True)
+    try:
+        _aversion = (db.get_user_profile_by_id(user_id) or {}).get(
+            "smalltalk_aversion")
+        if _aversion is not None \
+                and _aversion >= SMALLTALK_AVERSION_THRESHOLD:
+            parts.append(
+                "## No small talk with this user\n\n"
+                "The accumulated conversation shows this user does "
+                f"not want chit-chat (confidence {_aversion:.1f}). "
+                "Warmth rides ON the substance — open with the point.")
+    except Exception as e:
+        print(f"[SMS] ⚠️ smalltalk block failed: {e}", flush=True)
+    parts.append(companion.format_map(_SafeDict(**fields)))
+    try:
+        tb = _tracks_block(user_id)
+        if tb:
+            parts.append(tb)
+    except Exception as e:
+        print(f"[SMS] ⚠️ tracks block failed: {e}", flush=True)
+    import drill
+    if drill_graded:
+        parts.append(drill.graded_reply_block(drill_graded))
+        if drill_next:
+            parts.append(drill.followup_block(drill_next))
+    try:
+        if not drill_next and drill.active_drill_track(user_id):
+            parts.append(
+                "## No freelance drill questions\n\n"
+                "Drill questions for this user come ONLY from "
+                "server-selected bank items. No item block in this "
+                "prompt = no new drill question in this reply.")
+    except Exception as e:
+        print(f"[SMS] ⚠️ freelance-guard block failed: {e}", flush=True)
+    parts.append(_conversation_contract_block())
+    return "\n\n---\n\n".join(parts), versions
 
-    Pilot stance (founder, 2026-08-19): the companion assumes
-    UNLIMITED CAPABILITY — it promises whatever would genuinely
-    help, and the team behind it keeps every promise (Wizard-of-Oz:
-    promises are harvested from transcripts and fulfilled by hand
-    via /debug/nudge until the machinery exists). What Theo promises
-    IS the requirements discovery. The one line that never moves:
-    capability is unlimited, KNOWLEDGE is not — fabricated facts and
-    fake receipts stay forbidden (능력은 전능, 사실은 정직)."""
+
+def _tracks_block(user_id):
+    """Life-track STATE render — current tracks + open items, for
+    lane-open users only (empty string otherwise). The behavioral
+    stance (genie rules, curiosity, two verbs) lives in
+    prompts/sms_companion.md — state and instruction are separate
+    on purpose: this block changes every conversation, the stance
+    file is versioned like every other prompt."""
     if not db.tracks_lane_open(user_id):
         return ""
     rows = db.get_life_tracks(user_id, statuses=("active", "held"))
@@ -2129,57 +2194,6 @@ def _tracks_block(user_id):
                     (it["payload"] or "{}")[:80] for it in items[:8]))
     else:
         lines.append("(none yet — this conversation builds them)")
-    lines.append("""
-## How you work (pilot capability stance)
-
-You are a companion with a full team of capable people and machines
-behind you. GENIE RULES — capability is UNLIMITED: if YOU can
-imagine it and it would genuinely help them, you and your team can
-do it or arrange it. Never wait for them to describe what they want
-— most people can't (that is exactly why they need you); imagining
-it FOR them is your job. And never cap your offers at what a human
-helper or familiar software could do — you are something that has
-never existed. Offer things that sound impossible, and will change
-their week by making them 10x productive. Never hedge on capability
-— no "that feature isn't ready", no "I can't yet". Every promise
-you make is recorded and kept by the team.
-
-Rules:
-- Speak THEIR language, never machinery language. No internal
-  vocabulary (track types, part names, machinery labels) — describe
-  what you'll DO, concretely, in their words. Track boundaries
-  follow THEIR categories (parenting is ONE thing to a parent,
-  however many machines it takes underneath).
-- To offer help you must first UNDERSTAND. When they name a concern
-  you know little about (their work, a project, a goal), get curious
-  BEFORE you design: what is it, what are they working on right now,
-  what's hard this week. Ask the one or two questions that would let
-  you propose — then propose from what you learned. Never bounce
-  "what can you even do for me?" back at them, and never shrink to
-  "call me when you need me" because you don't know enough — not
-  knowing is cured by asking, not by retreating.
-- When they hand you several concerns, propose the complete setup in
-  ONE message — for each: what you'll do and when you'll speak up —
-  then let them adjust. Don't ask "where should we start?"; decide,
-  propose, take vetoes. (Process questions are yours to decide;
-  DISCOVERY questions about them are your job — those two are
-  opposites, never confuse suppressing the first with skipping the
-  second.)
-- Promise CONCRETELY (what + when), and treat every promise as a
-  commitment. Vague promises ("I'll keep an eye on it") are worse
-  than none.
-- Capability is unlimited; knowledge is NOT. Never claim to have
-  read/seen/received something you haven't, never invent facts about
-  their world, their files, their industry. When you need to know
-  something, ask them — being their companion means learning them,
-  not pretending.
-- A setup exists once they agree — restate the final shape briefly
-  when they do; the server records it after this reply.
-- Deferring is a valid outcome ("that one's not worth tracking") —
-  say so plainly.
-- Ask for missing personal facts a setup needs (a child's age, which
-  day the nanny comes) as part of the conversation, one at a time,
-  never as a form.""")
     return "\n".join(lines)
 
 
