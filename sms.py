@@ -2195,6 +2195,13 @@ def _build_companion_prompt(user_id, drill_graded=None,
     except Exception as e:
         print(f"[SMS] ⚠️ research block failed: {e}", flush=True)
     try:
+        mb = _companion_materials_block(user_id)
+        if mb:
+            parts.append(mb)
+    except Exception as e:
+        print(f"[SMS] ⚠️ companion materials block failed: {e}",
+              flush=True)
+    try:
         tb = _tracks_block(user_id)
         if tb:
             parts.append(tb)
@@ -2216,6 +2223,37 @@ def _build_companion_prompt(user_id, drill_graded=None,
         print(f"[SMS] ⚠️ freelance-guard block failed: {e}", flush=True)
     parts.append(_conversation_contract_block())
     return "\n\n---\n\n".join(parts), versions
+
+
+def _companion_materials_block(user_id):
+    """Documents the user shared on /my, rendered for CONVERSATIONAL
+    GROUNDING (founder decision 2026-08-20) — no walkthrough
+    machinery, no study framing. Present = digest + their words;
+    absent = one integrity line so the model never speaks as if it
+    has read something that isn't there."""
+    mats = db.get_user_materials(user_id)
+    if not mats:
+        return ("## Documents they've shared — NONE\n\n"
+                "Nothing has been shared on their page. Never speak "
+                "as if you have read anything of theirs; a promise "
+                "to share is not a share.")
+    lines = ["## Documents they've shared with you",
+             "",
+             "Your one-time digest of each document is below. Ground "
+             "what you say about a document in its digest; when you "
+             "need more than the digest holds, say so and ask — "
+             "never improvise contents."]
+    for m in mats:
+        head = m.get("title") or m.get("source_url") or "(unnamed)"
+        lines.append(f"\n### {head} ({m['kind']})")
+        if m.get("source_url") and m["kind"] == "link":
+            lines.append(f"- Link: {m['source_url']} (you have not "
+                         "fetched it; rely on their account of it)")
+        if m.get("digest"):
+            lines.append(f"- Your read: {m['digest']}")
+        if m.get("user_description"):
+            lines.append(f"- Their description: {m['user_description']}")
+    return "\n".join(lines)
 
 
 def _research_block(user_id):
@@ -2479,10 +2517,16 @@ def handle_material_ready(user_id, material_id):
     lands). The WhatsApp window gate still applies. Returns sent
     text or None."""
     try:
-        state = db.get_onboarding_state(user_id)
-        if state["completed_at"] or not state["missing"] \
-                or state["missing"][0] != "material_understanding":
-            return None
+        lane_open = db.tracks_lane_open(user_id)
+        if not lane_open:
+            # Legacy gate: only when the upload is the awaited
+            # onboarding step. Companion users (whose uploads are
+            # conversational grounding, not a checklist item) get
+            # the follow-up on every upload.
+            state = db.get_onboarding_state(user_id)
+            if state["completed_at"] or not state["missing"] \
+                    or state["missing"][0] != "material_understanding":
+                return None
         if whatsapp_window_closed(user_id):
             db.log_event(user_id, "material_ready_not_sent",
                          {"material_id": material_id,
@@ -2500,14 +2544,27 @@ def handle_material_ready(user_id, material_id):
             _build_system_prompt_for_reply(user_id)
         history = db.get_recent_sms_messages(
             user_id, limit=HISTORY_LIMIT, with_time=True)
-        history.append(_server_turn(
-            f"The user just shared '{m.get('title') or 'their material'}' "
-            f"on their /my page moments ago, and you have finished "
-            f"reading it (your digest is in the materials block "
-            f"above). They are probably still at the screen. Write "
-            f"the next message: let them know you have actually read "
-            f"it — one specific, true thing you noticed shows that "
-            f"better than any adjective — and open the walkthrough."))
+        if lane_open:
+            history.append(_server_turn(
+                f"The user just shared "
+                f"'{m.get('title') or 'their document'}' on their "
+                f"page moments ago, and you have finished reading it "
+                f"(your digest is in the documents block above). "
+                f"They are probably still at the screen. Write the "
+                f"next message: show them you actually read it — one "
+                f"specific, true thing you noticed beats any "
+                f"adjective — and connect it to what you two are "
+                f"working on."))
+        else:
+            history.append(_server_turn(
+                f"The user just shared "
+                f"'{m.get('title') or 'their material'}' "
+                f"on their /my page moments ago, and you have finished "
+                f"reading it (your digest is in the materials block "
+                f"above). They are probably still at the screen. Write "
+                f"the next message: let them know you have actually read "
+                f"it — one specific, true thing you noticed shows that "
+                f"better than any adjective — and open the walkthrough."))
         text, steps, expect, llm_call_id, _hold = generate_message(
             user_id, system_prompt, history, "material_ready",
             max_tokens=GEN_MAX_TOKENS, prompt_versions=prompt_versions)

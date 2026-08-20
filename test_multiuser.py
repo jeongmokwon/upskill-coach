@@ -261,7 +261,9 @@ _tok_before = db.ensure_user_token("grace1")
 counts = db.reset_user("grace1")
 prof = db.get_user_profile_by_id("grace1") or {}
 check("history wiped, identity kept",
-      counts.get("messages") == 1
+      # 2 messages: the activation-time expectation SMS (companion
+      # default since PR-1) + the inbound saved above.
+      counts.get("messages") == 2
       and prof.get("phone") == "+15550007001"
       and prof.get("email") == "g@x.co"
       and (prof.get("agreed_goal") or "") == ""

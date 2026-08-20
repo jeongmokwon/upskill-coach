@@ -3016,7 +3016,7 @@ recorded with its date and this document's version.</p>
 
 <h2>What is captured, and when</h2>
 <ul>
-<li>Sessions only ever start when <b>you</b> click "화면 공유 시작"
+<li>Sessions only ever start when <b>you</b> click "Start screen share"
 and choose what to share in your browser's picker. Theo can never
 open a session by itself.</li>
 <li>During a session, still frames of the shared screen are captured
@@ -3024,7 +3024,7 @@ at meaningful moments — when you switch windows, when you stop
 scrolling, when you stay on one spot for a while, and when you send
 a chat message. This is <b>not continuous video</b>. No audio, no
 camera, and no keystrokes are captured.</li>
-<li>A visible indicator ("Theo가 보는 중") is shown for the whole
+<li>A visible indicator ("Theo is watching") is shown for the whole
 session, and your browser shows its own sharing indicator too.</li>
 </ul>
 
@@ -3052,7 +3052,7 @@ described in our <a href="/privacy">Privacy Policy</a>.</li>
 
 <h2>Your control</h2>
 <ul>
-<li>End a session at any time with the 세션 종료 button; closing the
+<li>End a session at any time with the End session button; closing the
 tab or laptop also ends it within about a minute.</li>
 <li>You can simply never start a session — every other part of Theo
 works without screen sharing.</li>
@@ -3118,13 +3118,18 @@ async def _activate_handler(request):
       welcome email (their /my link) + signup marked active +
       user_activated event
 
-    From that moment the cron fan-out serves them: the next evening
-    slot opens their onboarding conversation.
+    Lane (2026-08-20, founder decision — new users are companion
+    users): the default opens the companion lane at activation AND
+    sends the first SMS immediately (the expectation text, which
+    ends with the cold-start opener) — the signup is minutes old,
+    the moment is warm. ?lane=legacy preserves the old behavior
+    (lane closed, first contact on the next evening cron).
 
-    POST /debug/activate?secret=..&signup_id=3&user_id=grace1
+    POST /debug/activate?secret=..&signup_id=3&user_id=grace1[&lane=legacy]
     """
     import db
     import emailer
+    import sms as sms_mod
     expected = os.environ.get("CRON_SECRET", "").strip()
     provided = (request.headers.get("X-Cron-Secret", "").strip()
                 or request.query.get("secret", "").strip())
@@ -3132,6 +3137,10 @@ async def _activate_handler(request):
         return web.Response(status=403, text="bad secret")
     sid = (request.query.get("signup_id") or "").strip()
     user_id = (request.query.get("user_id") or "").strip()
+    lane = (request.query.get("lane") or "companion").strip()
+    if lane not in ("companion", "legacy"):
+        return web.Response(status=400,
+                            text="lane must be companion or legacy")
     if not sid.isdigit() or not user_id.isalnum():
         return web.Response(status=400,
                             text="signup_id + alphanumeric user_id required")
@@ -3165,11 +3174,22 @@ async def _activate_handler(request):
     db.set_signup_status(int(sid), "active")
     db.log_event(user_id, "user_activated",
                  {"signup_id": int(sid), "phone": row["phone"],
-                  "name": row.get("name") or "",
+                  "name": row.get("name") or "", "lane": lane,
                   "email_sent": bool(email_line.startswith("welcome email: sent"))},
                  source="operator")
+    if lane == "companion":
+        db.enable_tracks(user_id, source="activation")
+        sent = sms_mod.send_expectation_message(
+            user_id, row["phone"], trigger="activation")
+        first_line = ("first SMS sent (expectation + opener)" if sent
+                      else "first SMS FAILED — send manually via "
+                           "/debug/say")
+        return web.Response(
+            text=(f"activated {user_id} (companion lane): "
+                  f"{row['phone']}\n{email_line}\n{first_line}\n"))
     return web.Response(
-        text=(f"activated {user_id}: {row['phone']}\n{email_line}\n"
+        text=(f"activated {user_id} (legacy lane): {row['phone']}\n"
+              f"{email_line}\n"
               f"the next evening cron opens their onboarding.\n"))
 
 
@@ -3303,7 +3323,7 @@ async def _session_start_handler(request):
     # understated register ("오 보인다—" enthusiasm reads as creepy
     # when the subject is your screen). It still joins the one
     # thread, marked template so analysis knows no model chose it.
-    greeting = "세션 시작했네. 보고 있을게."
+    greeting = "Session started. I'm watching with you."
     db.save_sms_message(user_id, "assistant", greeting, "out",
                         channel="web")
     db.log_event(user_id, "web_out",
@@ -3387,7 +3407,7 @@ async def _session_message_handler(request):
         text, jpeg)
     if not reply:
         return web.json_response(
-            {"reply": "…잠깐 말이 엉켰다. 다시 한 번만 보내줄래?"})
+            {"reply": "…I tripped over my words for a second. Send that once more?"})
     return web.json_response({"reply": reply})
 
 
@@ -3454,10 +3474,10 @@ async def _session_stream_handler(request):
             final = sms_mod.finish_web_turn(
                 user_id, ssn["session_id"], full, system_prompt,
                 history, versions)
-            q.put(("done", final or "(빈 응답)"))
+            q.put(("done", final or "(empty response)"))
         except Exception as e:
             print(f"[SESSION] ⚠️ stream turn failed: {e}", flush=True)
-            q.put(("done", "…잠깐 말이 엉켰다. 다시 한 번만 보내줄래?"))
+            q.put(("done", "…I tripped over my words for a second. Send that once more?"))
 
     fut = loop.run_in_executor(None, produce)
     try:
@@ -3756,7 +3776,7 @@ async def _session_stop_handler(request):
     closed = db.end_screen_session(sid, reason="user")
     closing = ""
     if closed:
-        closing = "오늘 세션은 여기까지 기록해뒀어."
+        closing = "Logged today's session up to here."
         db.save_sms_message(user_id, "assistant", closing, "out",
                             channel="web")
         db.log_event(user_id, "web_out",
@@ -3794,14 +3814,14 @@ async def _my_page_handler(request):
         err = (f"<p style='color:#b00020; font-weight:600'>"
                f"{request.query.get('err')}</p>")
     body = f"""
-<h1>Your learning space</h1>
+<h1>Your page with Theo</h1>
 <div class="meta">Private page — anyone with this link can see it,
 so don't share the address.</div>
 {saved}{err}
-<h2 style="margin-top:26px">What you're learning from</h2>
-<p>Show Theo the thing you actually study from — the file you made,
-or the link you keep coming back to. Theo reads it once, then talks
-it through with you over text.</p>
+<h2 style="margin-top:26px">Documents you've shared</h2>
+<p>If you want Theo to work from a document — a plan, a deck, a
+doc, a link you keep coming back to — share it here. Theo reads it
+once, then brings it into your conversation.</p>
 <ul>{items or "<li class='meta'>(nothing shared yet)</li>"}</ul>
 
 <h3 style="margin-top:22px">Share a file</h3>
@@ -3822,46 +3842,46 @@ it through with you over text.</p>
   <button class="btn" type="submit" style="margin-top:10px">Add link</button>
 </form>
 
-<h2 style="margin-top:30px">Study together — share your screen</h2>
-<p>Start a session and open what you're studying. Theo watches with
-you — it captures a frame only when something meaningful happens
-(you switch, you settle, you linger), reads it once, and <b>deletes
-the image immediately</b>. Only the written observation is kept.</p>
+<h2 style="margin-top:30px">Work together — share your screen</h2>
+<p>Start a session and open what you're working on. Theo watches
+with you — it captures a frame only when something meaningful
+happens (you switch, you settle, you linger), reads it once, and
+<b>deletes the image immediately</b>. Only the written observation
+is kept.</p>
 <div id="ssn-controls">
-  <input type="text" id="ssn-source" placeholder="오늘 뭘로 공부해? (선택)"
+  <input type="text" id="ssn-source" placeholder="What are you working on today? (optional)"
          style="{_FIELD_STYLE}; max-width:420px">
-  <button class="btn" id="ssn-start" style="margin-top:10px">화면 공유 시작</button>
+  <button class="btn" id="ssn-start" style="margin-top:10px">Start screen share</button>
 </div>
 <div id="ssn-consent" style="display:none; margin-top:12px; padding:16px 18px;
      border:1px solid #ccc; border-radius:10px; background:#fafafa">
-  <div style="font-weight:700">시작 전에 한 가지만 — Theo가 화면을 어떻게 보는지</div>
+  <div style="font-weight:700">One thing before you start — how Theo sees your screen</div>
   <ul style="font-size:13.5px; line-height:1.7; margin:10px 0; padding-left:18px">
-    <li>세션은 <b>네가 시작할 때만</b> 열리고, 보는 동안 표시등이 항상 떠 있어요.</li>
-    <li>연속 녹화가 아니라 <b>의미 있는 순간의 정지 화면</b>만 캡처돼요 (창 전환,
-    스크롤 멈춤 등). 소리·카메라·키보드는 안 봐요.</li>
-    <li>캡처된 화면은 AI가 <b>읽는 즉시 삭제</b>되고, 글로 된 관찰만 남아요.</li>
-    <li>언제든 종료할 수 있고, 삭제 요청도 언제든 가능해요.</li>
+    <li>A session opens <b>only when you start it</b>, and an indicator stays visible the whole time.</li>
+    <li>It is not continuous recording — only <b>still frames at meaningful moments</b> are captured (window switches, scroll pauses). No audio, camera, or keyboard.</li>
+    <li>Each captured frame is <b>deleted the moment the AI has read it</b>; only the written observation is kept.</li>
+    <li>You can end the session anytime, and request deletion anytime.</li>
   </ul>
-  <div class="meta">자세한 내용:
+  <div class="meta">Details:
   <a href="/screen-consent" target="_blank" rel="noopener">Screen Sharing
-  Consent</a> (동의하면 이 문서 버전과 시각이 기록됩니다)</div>
-  <button class="btn" id="ssn-agree" style="margin-top:12px">동의하고 시작</button>
+  Consent</a> (agreeing records this document version and the time)</div>
+  <button class="btn" id="ssn-agree" style="margin-top:12px">Agree and start</button>
 </div>
 <div id="ssn-live" style="display:none; margin-top:12px; padding:14px 18px;
      border:2px solid #e8590c; border-radius:10px; background:#fff4ec">
-  <div style="font-weight:700; color:#e8590c">● Theo가 보는 중</div>
-  <div id="ssn-status" class="meta" style="margin-top:6px">시작 중…</div>
-  <div class="meta" style="margin-top:6px">이 창은 옆에 작게 띄워둬도 돼요.
-  화면 원본은 읽는 즉시 삭제됩니다.</div>
+  <div style="font-weight:700; color:#e8590c">● Theo is watching</div>
+  <div id="ssn-status" class="meta" style="margin-top:6px">Starting…</div>
+  <div class="meta" style="margin-top:6px">You can keep this window small on the side.
+  Screen images are deleted as soon as they are read.</div>
   <div id="chat-log" style="margin-top:12px; max-height:46vh; overflow-y:auto;
        display:flex; flex-direction:column; gap:8px"></div>
   <div style="display:flex; gap:8px; margin-top:10px">
-    <input type="text" id="chat-in" placeholder="Theo에게 말하기…"
+    <input type="text" id="chat-in" placeholder="Say something to Theo…"
            style="flex:1; padding:10px 12px; border:1px solid #ccc;
                   border-radius:8px; font-size:14px">
-    <button class="btn" id="chat-send">전송</button>
+    <button class="btn" id="chat-send">Send</button>
   </div>
-  <button class="btn" id="ssn-stop" style="margin-top:10px">세션 종료</button>
+  <button class="btn" id="ssn-stop" style="margin-top:10px">End session</button>
 </div>
 <script>
 (function () {{
@@ -3895,7 +3915,7 @@ the image immediately</b>. Only the written observation is kept.</p>
       r.onload = function () {{
         post("/session/frame", {{session_id: sid, event: event,
           jpeg_b64: r.result.split(",")[1]}});
-        status("마지막 관찰 전송: " + new Date().toLocaleTimeString()
+        status("Last observation sent: " + new Date().toLocaleTimeString()
                + " (" + event + ")");
       }};
       r.readAsDataURL(blob);
@@ -3941,7 +3961,7 @@ the image immediately</b>. Only the written observation is kept.</p>
         .then(function (j) {{ if (j.closing) bubble("theo", j.closing); }})
         .catch(function () {{}});
     }}
-    status("세션 종료됨 — 대화 기록은 그대로 남아요");
+    status("Session ended — the conversation log is kept");
     document.getElementById("chat-in").disabled = true;
     document.getElementById("chat-send").disabled = true;
     document.getElementById("ssn-stop").style.display = "none";
@@ -3967,7 +3987,7 @@ the image immediately</b>. Only the written observation is kept.</p>
       sid = j.session_id;
       document.getElementById("ssn-controls").style.display = "none";
       document.getElementById("ssn-live").style.display = "block";
-      status("공유 시작됨");
+      status("Sharing started");
       if (j.greeting) bubble("theo", j.greeting);
       lastActivity = Date.now();
       timers.push(setInterval(tick, 500));
@@ -3978,7 +3998,7 @@ the image immediately</b>. Only the written observation is kept.</p>
     }})
     .catch(function (e) {{
       var st = document.getElementById("ssn-status");
-      if (st) st.textContent = "공유가 시작되지 않았어요: " + e.message;
+      if (st) st.textContent = "Sharing did not start: " + e.message;
     }});
   }}
 
@@ -4029,7 +4049,7 @@ the image immediately</b>. Only the written observation is kept.</p>
     document.getElementById("chat-in").disabled = b;
     document.getElementById("chat-send").disabled = b;
     document.getElementById("chat-in").placeholder =
-      b ? "Theo가 생각 중…" : "Theo에게 말하기…";
+      b ? "Theo is thinking…" : "Say something to Theo…";
   }}
   function sendChat() {{
     var inp = document.getElementById("chat-in");
@@ -4040,7 +4060,7 @@ the image immediately</b>. Only the written observation is kept.</p>
     var thinking = bubble("theo", "…");
     setBusy(true);
     var timer = setTimeout(function () {{
-      thinking.textContent = "(응답이 늦네요 — 잠시 후 다시 보내주세요)";
+      thinking.textContent = "(taking a while — please resend in a moment)";
       setBusy(false);
     }}, 75000);
     currentFrameB64(function (b64) {{
@@ -4080,7 +4100,7 @@ the image immediately</b>. Only the written observation is kept.</p>
       }})
       .catch(function () {{
         clearTimeout(timer);
-        thinking.textContent = "(전송 실패 — 다시 보내줄래?)";
+        thinking.textContent = "(send failed — try once more?)";
         setBusy(false);
       }});
     }});
