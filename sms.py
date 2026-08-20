@@ -2189,6 +2189,12 @@ def _build_companion_prompt(user_id, drill_graded=None,
         print(f"[SMS] ⚠️ smalltalk block failed: {e}", flush=True)
     parts.append(companion.format_map(_SafeDict(**fields)))
     try:
+        rb = _research_block(user_id)
+        if rb:
+            parts.append(rb)
+    except Exception as e:
+        print(f"[SMS] ⚠️ research block failed: {e}", flush=True)
+    try:
         tb = _tracks_block(user_id)
         if tb:
             parts.append(tb)
@@ -2210,6 +2216,25 @@ def _build_companion_prompt(user_id, drill_graded=None,
         print(f"[SMS] ⚠️ freelance-guard block failed: {e}", flush=True)
     parts.append(_conversation_contract_block())
     return "\n\n---\n\n".join(parts), versions
+
+
+def _research_block(user_id):
+    """Open research requests, rendered so the reply acknowledges
+    work-in-progress instead of denying capability or fabricating
+    results — the two failure modes this block exists to prevent
+    (chrisyu2 2026-08-20: 'I can't research' went out live)."""
+    rows = db.get_open_research_requests(user_id)
+    if not rows:
+        return ""
+    lines = ["## Research underway (the team is on it right now)",
+             "",
+             "You are researching these for them; results arrive in a "
+             "later message. If they ask, say you're on it. Never "
+             "present findings you don't have yet, and never say you "
+             "can't research:"]
+    for r in rows:
+        lines.append(f"- {r['question']}")
+    return "\n".join(lines)
 
 
 def _tracks_block(user_id):

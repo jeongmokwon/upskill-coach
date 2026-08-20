@@ -1251,6 +1251,51 @@ async def _reminder_admin_handler(request):
                               "fire_at_utc": fire_at, "recur": recur})
 
 
+async def _research_admin_handler(request):
+    """Manually fire a research request (for asks that predate the
+    machinery, and for testing), or list a user's requests.
+
+    POST /debug/research?secret=...  body JSON: {user_id, question}
+    GET  /debug/research?secret=...&user_id=X
+    """
+    import research
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    if request.method == "GET":
+        user_id = request.query.get("user_id", "").strip()
+        if not user_id:
+            return web.Response(status=400, text="user_id required")
+        conn_rows = [dict(r) for r in db.get_open_research_requests(
+            user_id)]
+        return web.json_response({"user_id": user_id,
+                                  "open": conn_rows})
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.Response(status=400, text="JSON body required")
+    user_id = (body.get("user_id") or "").strip()
+    question = (body.get("question") or "").strip()
+    if not user_id or not question:
+        return web.Response(status=400,
+                            text="user_id and question required")
+    rid = db.create_research_request(user_id, question,
+                                     evidence_quote="")
+    if not rid:
+        return web.json_response({"ok": False,
+                                  "reason": "duplicate question"})
+    research.start_async(rid)
+    return web.json_response({"ok": True, "request_id": rid,
+                              "status": "running"})
+
+
 async def _say_handler(request):
     """Verbatim operator send: the body goes out EXACTLY as written —
     no LLM, no guards, zero variance (the expectation_setting
@@ -4249,6 +4294,8 @@ def start_ws_server():
         app.router.add_get("/debug/tracks", _debug_tracks_handler)
         app.router.add_post("/debug/nudge", _nudge_handler)
         app.router.add_post("/debug/say", _say_handler)
+        app.router.add_post("/debug/research", _research_admin_handler)
+        app.router.add_get("/debug/research", _research_admin_handler)
         app.router.add_post("/reminders/tick", _reminders_tick_handler)
         app.router.add_post("/debug/reminder", _reminder_admin_handler)
         app.router.add_get("/debug/reminder", _reminder_admin_handler)

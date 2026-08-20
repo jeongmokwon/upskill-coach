@@ -79,7 +79,8 @@ companion이라면 며칠은 문제가 되지 않는다.
 | 유저 선호 (user_preferences) | analyze (verbatim 증거 검증 후) | 모든 프롬프트의 선호 블록, 채굴, 선정 |
 | 트랙 설정 (tracks의 life 칼럼들) | tracks_ops 홉 (코드 검증 후) | 답장 프롬프트의 트랙 블록; 지휘 층(예정) |
 | 트랙 아이템 (track_items) | tracks_ops 홉 (부품별 최소 계약 검증) | 트랙 블록; 지휘 층(예정) |
-| 리마인더 (reminders) | 운영자 시딩 (/debug/reminder — v1에서 대화 마커로 대체 예정) | /reminders/tick (15분 cron) → send_nudge; 발화·실패는 이벤트 로그에 |
+| 리마인더 (reminders) | 운영자 시딩 (/debug/reminder) | /reminders/tick (15분 cron) → send_nudge; 발화·실패는 이벤트 로그에 |
+| 리서치 요청 (research_requests) | analyze (유저의 명시적 요청 + verbatim 증거 검증; 장부 자체가 dedupe), /debug/research | research.py 홉 (웹검색 호출) → 결과는 send_nudge로 배달; 열린 요청은 답장 프롬프트의 research-underway 블록 |
 | 기타 상태 | phase, 스케줄, pause, 자료(원문+다이제스트), 이벤트 로그 | 전 파이프라인 |
 
 ---
@@ -190,11 +191,18 @@ lane 게이트 (user_profiles.tracks_enabled)      [코드]
 
 ## 예정된 변경 (순서대로 — 2026-08-18 피봇으로 재배열)
 
-0. **리마인더 v0 → v1** — v0(2026-08-20, 약속이 행이 되고 15분
-   cron이 send_nudge로 발화; 평일 반복은 LA 벽시계 기준 DST-안전)는
-   운영자가 시딩한다. v1 = Theo가 답장 마커로 직접 등록
-   (create_reminder가 이미 계약 지점 — 추출만 남음). 지휘 층(1번)이
-   서면 리마인더 발화도 그 밑으로 들어간다.
+0. ~~리마인더 v0 → v1~~ — **후순위로 강등 (founder, 2026-08-20):**
+   같은 날 3중 실험(Theo 대화 / v0 기계 / Ohai)으로 정리·리마인더
+   위임 lane 전체가 "있으나 마나" 판정 — 필요를 SMS로 나열하는 것
+   자체가 인지 부하라 위임 이득이 상쇄된다. 가치 축은 '빌더'
+   (구조화·시스템화·발상·새 정보 추가)다. v0는 무해하게 유지(심은
+   것은 발화), v1 마커 자동등록은 추구하지 않음.
+0-b. **리서치 홉 (2026-08-20, 빌더 축의 첫 기계):** analyze가
+   유저의 명시적 "찾아봐줘"를 추출(verbatim 증거 검증) →
+   research_requests 행(장부가 dedupe) → 웹검색 켠 별도 호출이
+   findings 생산 → send_nudge로 배달. 답장 프롬프트는 열린 요청을
+   research-underway 블록으로 받아 "능력 부인"과 "결과 조작" 둘 다
+   차단 (chrisyu2 2026-08-20 "I can't research" 실사고가 계기).
 1. **멀티트랙 지휘 층** — 트랙 여러 개가 하루 안에서 공존하는 법.
    터치포인트(아침/저녁)마다 표면화 후보 중 1-2개만 고른다 — 9개
    트랙이 각자 울리면 도움이 아니라 소음. 스펙은 머리로 쓰지 않고
