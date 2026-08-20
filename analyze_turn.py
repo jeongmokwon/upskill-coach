@@ -471,18 +471,30 @@ def _apply(user_id, p, llm_call_id):
     applied = []
     phase = db.get_user_phase(user_id)
     prof = db.get_user_profile_by_id(user_id) or {}
+    # Companion-lane users (founder decision 2026-08-20): the edtech
+    # extractions (goal / first bite / material machinery / offer /
+    # path) are NOT applied — writing them is how the July zombie was
+    # born, and the companion prompt never reads them. What still
+    # applies for every lane: preferences, smalltalk_aversion, pause,
+    # schedule, research requests, and (for grounding) the user's own
+    # description of an uploaded document.
+    lane_open = db.tracks_lane_open(user_id)
 
     goal = (p.get("goal") or "").strip()
-    if goal and goal != (phase["agreed_goal"] or "").strip():
+    if not lane_open and goal \
+            and goal != (phase["agreed_goal"] or "").strip():
         db.set_agreed_goal(user_id, goal, source="analyze")
         applied.append("goal")
 
     bite = (p.get("first_bite") or "").strip()
-    if bite and bite != (phase["agreed_first_bite"] or "").strip():
+    if not lane_open and bite \
+            and bite != (phase["agreed_first_bite"] or "").strip():
         db.set_agreed_bite(user_id, bite, source="analyze")
         applied.append("bite")
 
     status = (p.get("material_status") or "").strip()
+    if lane_open:
+        status = ""
     if status:
         prof_status = (prof.get("material_status") or "").strip()
         # A registered material outranks a conversational
@@ -495,7 +507,7 @@ def _apply(user_id, p, llm_call_id):
             applied.append(f"material_status({status})")
 
     named = p.get("material_named") or {}
-    if (named.get("title") or "").strip() \
+    if not lane_open and (named.get("title") or "").strip() \
             and not db.get_user_materials(user_id):
         mid = db.add_user_material(
             user_id, "named",
@@ -507,7 +519,17 @@ def _apply(user_id, p, llm_call_id):
         applied.append("material_named")
 
     mats = db.get_user_materials(user_id)
-    if mats:
+    if mats and lane_open:
+        # Companion: uploads are conversational grounding. The user's
+        # own account of a document keeps flowing in; the walkthrough
+        # machinery (wants, sample validation) stays legacy-only.
+        m = mats[0]
+        desc = (p.get("material_description") or "").strip()
+        if desc and desc != (m.get("user_description") or ""):
+            db.update_material_walkthrough(
+                m["id"], user_description=desc, source="analyze")
+            applied.append("material_description")
+    elif mats:
         m = mats[0]
         desc = (p.get("material_description") or "").strip()
         wants = p.get("material_wants") or None
@@ -557,7 +579,8 @@ def _apply(user_id, p, llm_call_id):
                              source="analyze")
 
     offer = (p.get("offer") or "").strip()
-    if offer and offer != (prof.get("agreed_offer") or "").strip():
+    if not lane_open and offer \
+            and offer != (prof.get("agreed_offer") or "").strip():
         db.set_agreed_offer(user_id, offer, source="analyze")
         applied.append("offer")
 
@@ -618,7 +641,7 @@ def _apply(user_id, p, llm_call_id):
             applied.append(f"smalltalk_aversion({aversion})")
 
     direction = (p.get("path_direction") or "").strip()
-    if direction:
+    if direction and not lane_open:
         cur = db.get_current_path(user_id) or {}
         project = (p.get("path_project") or cur.get("project") or "").strip()
         done = (p.get("path_done_condition")

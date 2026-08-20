@@ -3820,6 +3820,11 @@ def check_and_complete_onboarding(user_id, force=False):
     state = get_onboarding_state(user_id)
     if state["completed_at"]:
         return False
+    if not force and tracks_lane_open(user_id):
+        # Companion users have no onboarding checklist: completion —
+        # and the genplan study plan it would trigger — is
+        # legacy-lane machinery (founder decision 2026-08-20).
+        return False
     if state["missing"] and not force:
         return False
     now = datetime.now().isoformat()
