@@ -94,21 +94,24 @@ def send_my_link(user_id, to_email):
     → (ok, detail)."""
     token = db.ensure_user_token(user_id)
     link = f"https://www.learningtheo.com/my?k={token}"
-    text = f"""안녕, Theo야.
+    text = f"""Hi — it's Theo.
 
-여기가 너의 학습 공간이야 — 네가 공부하는 자료(파일이나 링크)를
-나한테 보여주는 곳:
+This is your private page with me — if you want me to work from a
+document (a plan, a deck, a doc, or a link), share it here and I'll
+actually read it:
 
 {link}
 
-이 링크는 너 전용이라 로그인이 따로 없어. 다른 사람한테는 공유하지
-말아줘.
+The link is yours alone — there's no login, so please don't share
+it with anyone.
 
-올려주면 내가 한 번 제대로 읽어볼게. 그다음 얘기는 문자에서 이어가자.
+Once you share something, I'll read it properly and we'll pick it
+up over text.
 
 — Theo
 """
-    ok, detail = send_email(to_email, "Theo — 너의 학습 공간 링크", text)
+    ok, detail = send_email(to_email, "Theo — your private page link",
+                            text)
     if ok:
         db.set_user_email(user_id, to_email)
         db.log_event(user_id, "my_link_emailed",

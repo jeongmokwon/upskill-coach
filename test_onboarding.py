@@ -337,7 +337,7 @@ db.ensure_user_profile_row(UE)
 t1 = sms._cron_tick_for_user(UE, "+15550009999", "evening")
 ev = [r for r in db.get_events(UE, limit=50) if r["kind"] == "sms_out"]
 check("first slot delivers the FIXED expectation text, not an LLM turn",
-      t1 is not None and t1.startswith("안녕, 나 Theo야.")
+      t1 is not None and t1.startswith("Hey — I'm Theo.")
       and len(ev) == 1
       and json.loads(ev[0]["payload"]).get("server_sent") is True
       and json.loads(ev[0]["payload"])["trigger"]
@@ -347,7 +347,7 @@ check("delivery checks the item off and stamps onboarding_started",
       and db.get_onboarding_state(UE)["started_at"] is not None)
 t2 = sms._cron_tick_for_user(UE, "+15550009999", "evening")
 check("the next slot opens the conversation proper (LLM turn)",
-      t2 is not None and "안녕, 나 Theo야." not in t2)
+      t2 is not None and "Hey — I'm Theo." not in t2)
 
 U2 = "veteran"   # deliberately NO ensure_user_profile_row: a forced
                  # completion used to log success and write nothing
