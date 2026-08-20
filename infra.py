@@ -60,8 +60,18 @@ def sweep():
     except Exception as e:
         print(f"[INFRA] ⚠️ capture-gap check failed: {e}", flush=True)
 
-    user_id = os.environ.get("TUTOR_USER_ID", "").strip()
-    if user_id:
+    # Every active user is watched (multi-user since 2026-08-20;
+    # this used to cover only the env-pair user). Env fallback kept
+    # for the transition case of a live env user with no profile row.
+    roster = []
+    try:
+        roster = [u["user_id"] for u in db.get_active_users()]
+    except Exception as e:
+        print(f"[INFRA] ⚠️ roster read failed: {e}", flush=True)
+    env_uid = os.environ.get("TUTOR_USER_ID", "").strip()
+    if env_uid and env_uid not in roster:
+        roster.append(env_uid)
+    for user_id in roster:
         try:
             _check_cron_staleness(user_id)
         except Exception as e:
