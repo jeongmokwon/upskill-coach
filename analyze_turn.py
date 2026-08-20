@@ -233,6 +233,30 @@ _TOOL = {
                                "either way; re-report later when "
                                "the picture changes.",
             },
+            "research_request": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "evidence_quote": {"type": "string"},
+                },
+                "required": ["question", "evidence_quote"],
+                "description": "Set ONLY when the user EXPLICITLY "
+                               "asked the coach to research / look "
+                               "up / find out something that needs "
+                               "information beyond this conversation "
+                               "('based on what you can find', "
+                               "'look into X', '리서치해줘'). "
+                               "question: the research question, "
+                               "self-contained and in English, "
+                               "carrying enough of the user's "
+                               "situation to search well. "
+                               "evidence_quote: verbatim substring "
+                               "of a USER message containing the "
+                               "ask. NOT for questions answerable "
+                               "from the thread, and NOT your own "
+                               "idea that research would help — "
+                               "only their explicit ask.",
+            },
             "notes_for_operator": {
                 "type": "string",
                 "description": "Anything notable a human should see "
@@ -618,6 +642,28 @@ def _apply(user_id, p, llm_call_id):
             else:
                 print(f"[ANALYZE] ⚠️ unparseable schedule {raw_sched!r} — "
                       f"not saved", flush=True)
+
+    rq = p.get("research_request") or {}
+    r_question = (rq.get("question") or "").strip()
+    r_quote = (rq.get("evidence_quote") or "").strip()
+    if r_question and r_quote:
+        if not _user_said(user_id, r_quote):
+            print(f"[ANALYZE] ⚠️ research evidence not found in user "
+                  f"messages — dropped: {r_question[:80]!r}", flush=True)
+            db.log_event(user_id, "research_quote_rejected",
+                         {"question": r_question[:200],
+                          "quote": r_quote[:120]}, source="analyze")
+        else:
+            rid = db.create_research_request(user_id, r_question,
+                                             evidence_quote=r_quote)
+            if rid:
+                # The row is the contract; the hop runs behind it.
+                # analyze runs BEFORE the reply is built, so the
+                # reply prompt already renders this as
+                # research-underway (sms._research_block).
+                import research
+                research.start_async(rid)
+                applied.append(f"research_request({rid})")
 
     if applied and db.check_and_complete_onboarding(user_id):
         import genplan

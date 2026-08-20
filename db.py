@@ -628,6 +628,25 @@ def init_db():
                 source TEXT NOT NULL DEFAULT 'operator'
             )
         """)
+        # research requests: a user's explicit "find out X" becomes a
+        # row (extracted by analyze with a verbatim evidence quote);
+        # the research hop (research.py, web-search-enabled call)
+        # fills findings and delivers via send_nudge. The ledger IS
+        # the dedupe: analyze re-reads the whole transcript every
+        # turn, so an ask must not re-fire once recorded.
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS research_requests (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                question TEXT NOT NULL,
+                evidence_quote TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL,
+                finished_at TEXT DEFAULT '',
+                findings TEXT DEFAULT '',
+                llm_call_id TEXT DEFAULT ''
+            )
+        """)
         # 문제 은행: every item carries a verbatim anchor from its
         # source — an item that cannot quote its origin does not
         # exist (the Rule 102(d)(1)/GS2 fabrications were exactly
@@ -1229,6 +1248,18 @@ def init_db():
                 created_at TEXT NOT NULL,
                 last_fired_at TEXT DEFAULT '',
                 source TEXT NOT NULL DEFAULT 'operator'
+            );
+
+            CREATE TABLE IF NOT EXISTS research_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                question TEXT NOT NULL,
+                evidence_quote TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL,
+                finished_at TEXT DEFAULT '',
+                findings TEXT DEFAULT '',
+                llm_call_id TEXT DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS knowledge_items (
@@ -2891,6 +2922,69 @@ def mark_reminder_fired(reminder_id, next_fire_at=None, sent=True):
         _execute(conn,
             f"UPDATE reminders SET status = 'done', last_fired_at = {_P} "
             f"WHERE id = {_P}", (now, reminder_id))
+    conn.commit(); conn.close()
+
+
+# ─── Research requests ("find out X" → row → search hop → nudge) ────
+
+def create_research_request(user_id, question, evidence_quote=""):
+    """Dedupe-or-create: analyze re-reads the WHOLE transcript every
+    turn, so the same ask would re-fire forever — an existing request
+    with the same evidence quote (or same question text, any status)
+    absorbs the report. → new id, or None if absorbed."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT id FROM research_requests WHERE user_id = {_P} "
+        f"AND (question = {_P} OR (evidence_quote != '' "
+        f"AND evidence_quote = {_P}))",
+        (user_id, question, evidence_quote))
+    if _fetchone(cur):
+        conn.close()
+        return None
+    cur = _execute(conn,
+        f"INSERT INTO research_requests (user_id, question, "
+        f" evidence_quote, status, created_at) "
+        f"VALUES ({_P}, {_P}, {_P}, 'open', {_P})"
+        + (" RETURNING id" if DB_TYPE == "postgres" else ""),
+        (user_id, question, evidence_quote,
+         datetime.now().isoformat()))
+    rid = _fetchone(cur)["id"] if DB_TYPE == "postgres" else cur.lastrowid
+    conn.commit(); conn.close()
+    log_event(user_id, "research_requested",
+              {"request_id": rid, "question": question[:300]},
+              source="analyze")
+    return rid
+
+
+def get_research_request(request_id):
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM research_requests WHERE id = {_P}",
+        (request_id,))
+    row = _fetchone(cur); conn.close()
+    return row
+
+
+def get_open_research_requests(user_id):
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM research_requests WHERE user_id = {_P} "
+        f"AND status = 'open' ORDER BY id", (user_id,))
+    rows = _fetchall(cur); conn.close()
+    return rows
+
+
+def finish_research_request(request_id, status, findings="",
+                            llm_call_id=None):
+    """status: 'done' | 'failed'. Findings are kept even on failure
+    (whatever partial text existed) — the ledger records what
+    happened, not just successes."""
+    conn = get_conn()
+    _execute(conn,
+        f"UPDATE research_requests SET status = {_P}, findings = {_P}, "
+        f"finished_at = {_P}, llm_call_id = {_P} WHERE id = {_P}",
+        (status, findings, datetime.now().isoformat(), llm_call_id,
+         request_id))
     conn.commit(); conn.close()
 
 
