@@ -1005,17 +1005,25 @@ async def _sms_reset_and_fire_handler(request):
     if not expected or provided != expected:
         return web.Response(status=403, text="bad secret")
 
-    user_id = os.environ.get("TUTOR_USER_ID", "").strip()
+    # Multi-user since 2026-08-20: an explicit user_id is required,
+    # and the follow-up send targets ONLY that user (this used to
+    # read the env user and then fire the evening tick for the
+    # ENTIRE roster).
+    user_id = (request.query.get("user_id") or "").strip()
     if not user_id:
-        return web.Response(status=500, text="TUTOR_USER_ID not set")
+        return web.Response(status=400, text="user_id required")
+    phone = sms._phone_for(user_id)
+    if not phone:
+        return web.Response(status=404, text=f"no phone for {user_id}")
 
     reset_at = db.reset_phase_state(user_id, source="admin")
     print(f"[SMS] rescue: phase reset for {user_id} at {reset_at}", flush=True)
 
     asyncio.get_event_loop().run_in_executor(
-        None, sms.handle_cron_tick, "evening"
+        None, sms._cron_tick_for_user, user_id, phone, "evening"
     )
-    return web.json_response({"ok": True, "reset_at": reset_at, "fired": "evening"})
+    return web.json_response({"ok": True, "user_id": user_id,
+                              "reset_at": reset_at, "fired": "evening"})
 
 
 async def _sms_set_goal_handler(request):

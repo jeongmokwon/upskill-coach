@@ -57,7 +57,9 @@ else:
 
 import threading as _threading
 
-USER_ID = "jeongmo"  # default fallback, overridden by onboarding
+USER_ID = (os.environ.get("TUTOR_USER_ID", "").strip()
+           or "_unset")  # legacy web-session fallback; real paths
+                         # set the thread-local via set_user_id
 
 # Life-track config columns, shared by both schema branches (additive
 # only — legacy drill tracks keep every one of these empty). The
@@ -290,40 +292,9 @@ def init_db():
         except Exception:
             conn.rollback()
 
-        # Operator-seeded pilot values (live-pilot review, 2026-08);
-        # NULL-guarded so the analysis pass owns the field afterwards.
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "UPDATE user_profiles SET smalltalk_aversion = 0.8 "
-                "WHERE user_id = 'chrisyu2' "
-                "AND smalltalk_aversion IS NULL")
-            cur.execute(
-                "UPDATE user_profiles SET smalltalk_aversion = 0.7 "
-                "WHERE user_id = 'jeongmo' "
-                "AND smalltalk_aversion IS NULL")
-            conn.commit()
-        except Exception:
-            conn.rollback()
-        # Operator-seeded standing preference: the husband asked for
-        # English on 2026-08-07 and Korean kept leaking back (the
-        # request lived only in scrollable history). Guarded so the
-        # analyze pass owns the key afterwards.
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "INSERT INTO user_preferences "
-                "(user_id, key, value, evidence, ts, source) "
-                "SELECT 'chrisyu2', 'language', "
-                "'English — reply in English', "
-                "'그리고 앞으로는 영어로 대화하자 그게 나한테 더 편할것 같아', "
-                "%s, 'operator' "
-                "WHERE NOT EXISTS (SELECT 1 FROM user_preferences "
-                "WHERE user_id = 'chrisyu2' AND key = 'language')",
-                (datetime.now().isoformat(),))
-            conn.commit()
-        except Exception:
-            conn.rollback()
+        # (Operator-seeded pilot values for the first two users were
+        # removed 2026-08-20 — the values live in the production DB;
+        # per-user data does not belong in source.)
 
         # Migrate: messages.channel + messages.direction (added with SMS
         # tutor). channel='web' is the historical row type; 'sms' rows are
@@ -1020,33 +991,6 @@ def init_db():
                 "UPDATE user_profiles SET material_status = 'has_material' "
                 "WHERE (material_status IS NULL OR material_status = '') "
                 "AND user_id IN (SELECT DISTINCT user_id FROM user_materials)")
-        except Exception:
-            pass
-        # Operator-seeded pilot values — see Postgres branch for
-        # rationale. NULL-guarded so analysis owns the field after.
-        try:
-            conn.execute(
-                "UPDATE user_profiles SET smalltalk_aversion = 0.8 "
-                "WHERE user_id = 'chrisyu2' "
-                "AND smalltalk_aversion IS NULL")
-            conn.execute(
-                "UPDATE user_profiles SET smalltalk_aversion = 0.7 "
-                "WHERE user_id = 'jeongmo' "
-                "AND smalltalk_aversion IS NULL")
-        except Exception:
-            pass
-        # Operator-seeded standing preference — see Postgres branch.
-        try:
-            conn.execute(
-                "INSERT INTO user_preferences "
-                "(user_id, key, value, evidence, ts, source) "
-                "SELECT 'chrisyu2', 'language', "
-                "'English — reply in English', "
-                "'그리고 앞으로는 영어로 대화하자 그게 나한테 더 편할것 같아', "
-                "?, 'operator' "
-                "WHERE NOT EXISTS (SELECT 1 FROM user_preferences "
-                "WHERE user_id = 'chrisyu2' AND key = 'language')",
-                (datetime.now().isoformat(),))
         except Exception:
             pass
         # SMS tutor migration — see Postgres branch above for rationale.
