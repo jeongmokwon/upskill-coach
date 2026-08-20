@@ -609,6 +609,25 @@ def init_db():
                 created_at TEXT NOT NULL
             )
         """)
+        # reminders v0: a promise Theo makes ("토요일 9시에 알려줄게")
+        # becomes a ROW, and a cron tick fires it through send_nudge —
+        # the first machinery where a conversational promise is kept
+        # automatically. fire_at is UTC ISO; recur '' = one-shot,
+        # 'weekdays' advances to the next Mon-Fri at the same LA-local
+        # time (DST-safe by construction).
+        conn.cursor().execute("""
+            CREATE TABLE IF NOT EXISTS reminders (
+                id SERIAL PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                fire_at TEXT NOT NULL,
+                recur TEXT NOT NULL DEFAULT '',
+                instruction TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL,
+                last_fired_at TEXT DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'operator'
+            )
+        """)
         # 문제 은행: every item carries a verbatim anchor from its
         # source — an item that cannot quote its origin does not
         # exist (the Rule 102(d)(1)/GS2 fabrications were exactly
@@ -1198,6 +1217,18 @@ def init_db():
                 performance_stage TEXT DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'active',
                 created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                fire_at TEXT NOT NULL,
+                recur TEXT NOT NULL DEFAULT '',
+                instruction TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL,
+                last_fired_at TEXT DEFAULT '',
+                source TEXT NOT NULL DEFAULT 'operator'
             );
 
             CREATE TABLE IF NOT EXISTS knowledge_items (
@@ -2796,6 +2827,86 @@ def get_track_item(item_id):
                    (item_id,))
     row = _fetchone(cur); conn.close()
     return row
+
+
+# ─── Reminders v0 (promise → row → cron-fired nudge) ────────────────
+
+def create_reminder(user_id, fire_at, instruction, recur="",
+                    source="operator"):
+    """fire_at: UTC ISO string (aware, +00:00). recur: '' one-shot |
+    'weekdays'. The instruction is the server-turn text send_nudge
+    will hand the model — write it as an operator instruction, not
+    as user-facing copy."""
+    ensure_user_profile_row(user_id)
+    conn = get_conn()
+    cur = _execute(conn,
+        f"INSERT INTO reminders (user_id, fire_at, recur, instruction, "
+        f" status, created_at, source) "
+        f"VALUES ({_P}, {_P}, {_P}, {_P}, 'open', {_P}, {_P})"
+        + (" RETURNING id" if DB_TYPE == "postgres" else ""),
+        (user_id, fire_at, recur, instruction,
+         datetime.now().isoformat(), source))
+    rid = _fetchone(cur)["id"] if DB_TYPE == "postgres" else cur.lastrowid
+    conn.commit(); conn.close()
+    log_event(user_id, "reminder_created",
+              {"reminder_id": rid, "fire_at": fire_at, "recur": recur,
+               "instruction": instruction[:200]}, source=source)
+    return rid
+
+
+def get_due_reminders(now_iso):
+    """Open reminders whose fire_at has passed. Both sides are aware
+    UTC ISO strings of the same shape, so string compare is time
+    compare."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"SELECT * FROM reminders WHERE status = 'open' "
+        f"AND fire_at <= {_P} ORDER BY fire_at", (now_iso,))
+    rows = _fetchall(cur); conn.close()
+    return rows
+
+
+def get_reminders(user_id, status=None):
+    conn = get_conn()
+    q = f"SELECT * FROM reminders WHERE user_id = {_P}"
+    args = [user_id]
+    if status:
+        q += f" AND status = {_P}"; args.append(status)
+    cur = _execute(conn, q + " ORDER BY fire_at", tuple(args))
+    rows = _fetchall(cur); conn.close()
+    return rows
+
+
+def mark_reminder_fired(reminder_id, next_fire_at=None, sent=True):
+    """One-shot → done; recurring → reschedule to next_fire_at. A
+    failed send still closes/advances the row (send_nudge already
+    logged the failure) — a reminder must never fire-loop."""
+    conn = get_conn()
+    now = datetime.now().isoformat()
+    if next_fire_at:
+        _execute(conn,
+            f"UPDATE reminders SET fire_at = {_P}, last_fired_at = {_P} "
+            f"WHERE id = {_P}", (next_fire_at, now, reminder_id))
+    else:
+        _execute(conn,
+            f"UPDATE reminders SET status = 'done', last_fired_at = {_P} "
+            f"WHERE id = {_P}", (now, reminder_id))
+    conn.commit(); conn.close()
+
+
+def cancel_reminder(reminder_id, user_id):
+    """Ownership-checked cancel. → True if a row changed."""
+    conn = get_conn()
+    cur = _execute(conn,
+        f"UPDATE reminders SET status = 'cancelled' "
+        f"WHERE id = {_P} AND user_id = {_P} AND status = 'open'",
+        (reminder_id, user_id))
+    changed = cur.rowcount > 0
+    conn.commit(); conn.close()
+    if changed:
+        log_event(user_id, "reminder_cancelled",
+                  {"reminder_id": reminder_id}, source="operator")
+    return changed
 
 
 def add_knowledge_item(track_id, user_id, stem, anchor_type,

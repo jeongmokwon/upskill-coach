@@ -1172,6 +1172,85 @@ async def _track_convo_handler(request):
                               "sent": sent})
 
 
+async def _reminders_tick_handler(request):
+    """Fire every due reminder through send_nudge. Render cron hits
+    this every 15 minutes — the machinery that keeps Theo's
+    conversational promises (reminders v0).
+
+    POST /reminders/tick?secret=...
+    """
+    import reminders
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    report = await asyncio.get_event_loop().run_in_executor(
+        None, reminders.run_due)
+    return web.json_response({"fired": len(report), "report": report})
+
+
+async def _reminder_admin_handler(request):
+    """Operator CRUD for reminders until Theo registers them itself.
+
+    POST /debug/reminder?secret=...  body JSON:
+      {user_id, instruction, when, recur?}
+      when: 'YYYY-MM-DD HH:MM' = LA wall-clock (or explicit-offset ISO)
+      recur: '' (default, one-shot) | 'weekdays'
+      {user_id, cancel: <reminder_id>} cancels instead.
+    GET /debug/reminder?secret=...&user_id=X lists (all statuses).
+    """
+    import reminders
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    if request.method == "GET":
+        user_id = request.query.get("user_id", "").strip()
+        if not user_id:
+            return web.Response(status=400, text="user_id required")
+        return web.json_response({"user_id": user_id,
+                                  "reminders": db.get_reminders(user_id)})
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.Response(status=400, text="JSON body required")
+    user_id = (body.get("user_id") or "").strip()
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+
+    if body.get("cancel"):
+        ok = db.cancel_reminder(int(body["cancel"]), user_id)
+        return web.json_response({"ok": ok, "cancelled": body["cancel"]})
+
+    instruction = (body.get("instruction") or "").strip()
+    when = (body.get("when") or "").strip()
+    recur = (body.get("recur") or "").strip()
+    if not instruction or not when:
+        return web.Response(status=400,
+                            text="instruction and when required")
+    if recur not in ("", "weekdays"):
+        return web.Response(status=400, text="recur must be '' or "
+                                             "'weekdays'")
+    try:
+        fire_at = reminders.parse_operator_time(when)
+    except ValueError:
+        return web.Response(status=400, text=f"unparseable when: {when}")
+    rid = db.create_reminder(user_id, fire_at, instruction, recur=recur)
+    return web.json_response({"ok": True, "reminder_id": rid,
+                              "fire_at_utc": fire_at, "recur": recur})
+
+
 async def _nudge_handler(request):
     """Wizard-of-Oz promise fulfillment: make the coach send one
     proactive message under an operator instruction. This is how
@@ -4131,6 +4210,9 @@ def start_ws_server():
         app.router.add_post("/debug/track-convo", _track_convo_handler)
         app.router.add_get("/debug/tracks", _debug_tracks_handler)
         app.router.add_post("/debug/nudge", _nudge_handler)
+        app.router.add_post("/reminders/tick", _reminders_tick_handler)
+        app.router.add_post("/debug/reminder", _reminder_admin_handler)
+        app.router.add_get("/debug/reminder", _reminder_admin_handler)
         app.router.add_get("/notes", _notes_handler)
         app.router.add_post("/notes", _notes_handler)
         app.router.add_get("/plan", _plan_handler)
