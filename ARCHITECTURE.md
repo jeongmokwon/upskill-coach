@@ -203,6 +203,13 @@ lane 게이트 (user_profiles.tracks_enabled)      [코드]
    findings 생산 → send_nudge로 배달. 답장 프롬프트는 열린 요청을
    research-underway 블록으로 받아 "능력 부인"과 "결과 조작" 둘 다
    차단 (chrisyu2 2026-08-20 "I can't research" 실사고가 계기).
+0-c. **레인 분리 완료 (2026-08-20, PR-2):** companion 유저는
+   reactive-by-default — 일반 스케줄 발송은 lane-open이면 스킵
+   (`companion_reactive_only`), 드릴 발송만 통과 (드릴 유저에겐
+   문제가 곧 제품). analyze의 edtech 추출(goal/bite/offer/path/
+   material 기계)은 lane 유저에게 적용 안 됨 (좀비의 출생 경로 차단);
+   preferences/smalltalk/pause/schedule/research/문서 설명은 전 레인
+   공통. 온보딩 완성→genplan은 legacy 전용 (force 제외).
 1. **멀티트랙 지휘 층** — 트랙 여러 개가 하루 안에서 공존하는 법.
    터치포인트(아침/저녁)마다 표면화 후보 중 1-2개만 고른다 — 9개
    트랙이 각자 울리면 도움이 아니라 소음. 스펙은 머리로 쓰지 않고

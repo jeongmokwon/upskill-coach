@@ -1128,6 +1128,10 @@ def ensure_my_link_delivered(user_id):
     a 404 for the user). Idempotent via the my_link_emailed event.
     Never raises."""
     try:
+        if db.tracks_lane_open(user_id):
+            # Companion users get their /my link in the welcome
+            # email; the onboarding-focus machinery below is legacy.
+            return
         state = db.get_onboarding_state(user_id)
         if state["completed_at"] or not state["missing"] \
                 or state["missing"][0] not in ("material_alignment",
@@ -2769,6 +2773,14 @@ def _cron_tick_for_user(user_id, to_number, slot, window=None):
             db.log_event(user_id, "drill_error",
                          {"where": "prepare", "error": str(e)[:300]},
                          source="cron")
+    if not drill_ctx and db.tracks_lane_open(user_id):
+        # Companion users are reactive-by-default (founder decision
+        # 2026-08-20): no generic scheduled check-ins — proactivity
+        # comes from agreed reminders, research deliveries, and
+        # nudges. Drill sends pass through above: for a drill-track
+        # user the bank question IS the product, whatever lane the
+        # conversation runs in.
+        return _skip("companion_reactive_only")
     if drill_ctx:
         trigger = f"cron_{slot}_drill"
         system_prompt, prompt_versions = _build_drill_prompt(
