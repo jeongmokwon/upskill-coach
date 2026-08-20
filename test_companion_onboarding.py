@@ -126,5 +126,21 @@ check("companion follow-up sent", out is not None)
 check("legacy user without focus still gated",
       sms.handle_material_ready("lex1", mid) is None)
 
+print("bind-phone lane param (manual onboarding path)")
+r = hit(coach._bind_phone_handler,
+        "/debug/bind-phone?secret=sek&user_id=manual1"
+        "&phone=%2B15550008003&lane=companion")
+check("bound + lane open in one call",
+      r.status == 200 and db.tracks_lane_open("manual1")
+      and db.get_user_by_phone("+15550008003") == "manual1")
+check("no message sent (quiet by design)",
+      db.get_recent_sms_messages("manual1", limit=3) == [])
+check("expectation still due — the manual nudge tick will send it",
+      sms._expectation_due("manual1"))
+r = hit(coach._bind_phone_handler,
+        "/debug/bind-phone?secret=sek&user_id=manual2"
+        "&phone=%2B15550008004&lane=banana")
+check("unknown lane refused", r.status == 400)
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

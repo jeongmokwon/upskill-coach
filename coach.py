@@ -3234,7 +3234,14 @@ async def _bind_phone_handler(request):
     The multi-user backfill path — and the guard against silent
     rebinding lives in db.set_user_phone.
 
-    POST /debug/bind-phone?secret=..&user_id=chrisyu2&phone=%2B1555...
+    &lane=companion additionally opens the companion lane WITHOUT
+    sending anything — the quiet half of what /debug/activate does,
+    for users onboarded outside the signup form (design partners).
+    The first message is then the operator's move:
+    POST /sms/cron-tick?slot=nudge&user_id=X sends the expectation
+    opener.
+
+    POST /debug/bind-phone?secret=..&user_id=<id>&phone=%2B1555...[&lane=companion]
     """
     import db
     expected = os.environ.get("CRON_SECRET", "").strip()
@@ -3244,6 +3251,10 @@ async def _bind_phone_handler(request):
         return web.Response(status=403, text="bad secret")
     user_id = (request.query.get("user_id") or "").strip()
     phone = (request.query.get("phone") or "").strip()
+    lane = (request.query.get("lane") or "").strip()
+    if lane not in ("", "companion"):
+        return web.Response(status=400,
+                            text="lane must be omitted or companion")
     if not user_id or not phone.startswith("+"):
         return web.Response(status=400,
                             text="user_id + phone (E.164, URL-encode the +) required")
@@ -3251,6 +3262,10 @@ async def _bind_phone_handler(request):
         db.set_user_phone(user_id, phone)
     except ValueError as e:
         return web.Response(status=409, text=str(e))
+    if lane == "companion":
+        db.enable_tracks(user_id, source="bind_phone")
+        return web.Response(text=f"bound {phone} -> {user_id} "
+                                 f"(companion lane open)\n")
     return web.Response(text=f"bound {phone} -> {user_id}\n")
 
 
