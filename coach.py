@@ -1251,6 +1251,44 @@ async def _reminder_admin_handler(request):
                               "fire_at_utc": fire_at, "recur": recur})
 
 
+async def _say_handler(request):
+    """Verbatim operator send: the body goes out EXACTLY as written —
+    no LLM, no guards, zero variance (the expectation_setting
+    precedent, generalized). The copy-control lever for wording
+    experiments; the message still lands in the user's history as an
+    assistant turn so the conversation continues coherently.
+
+    POST /debug/say?secret=...&user_id=X
+    body (plain text) = the exact message
+    """
+    import sms
+
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (
+        request.headers.get("X-Cron-Secret", "").strip()
+        or request.query.get("secret", "").strip()
+    )
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+
+    user_id = request.query.get("user_id", "").strip()
+    if not user_id:
+        return web.Response(status=400, text="user_id required")
+    text = (await request.text()).strip()
+    if not text:
+        return web.Response(status=400, text="text body required")
+    phone = sms._phone_for(user_id)
+    if not phone:
+        return web.Response(status=404, text=f"no phone for {user_id}")
+    sid = sms.send_sms(phone, text, user_id=user_id)
+    db.save_sms_message(user_id, "assistant", text, "out")
+    db.log_event(user_id, "sms_out",
+                 {"text": text, "trigger": "operator_say",
+                  "server_sent": True}, source="sms")
+    return web.json_response({"ok": bool(sid), "user_id": user_id,
+                              "sent": text})
+
+
 async def _nudge_handler(request):
     """Wizard-of-Oz promise fulfillment: make the coach send one
     proactive message under an operator instruction. This is how
@@ -4210,6 +4248,7 @@ def start_ws_server():
         app.router.add_post("/debug/track-convo", _track_convo_handler)
         app.router.add_get("/debug/tracks", _debug_tracks_handler)
         app.router.add_post("/debug/nudge", _nudge_handler)
+        app.router.add_post("/debug/say", _say_handler)
         app.router.add_post("/reminders/tick", _reminders_tick_handler)
         app.router.add_post("/debug/reminder", _reminder_admin_handler)
         app.router.add_get("/debug/reminder", _reminder_admin_handler)
