@@ -2432,9 +2432,11 @@ def get_active_users():
 
 
 def set_user_status(user_id, status, source="operator"):
-    """'active' | 'paused'. Paused users keep all their data; the
-    cron fan-out simply skips them."""
-    if status not in ("active", "paused"):
+    """'active' | 'paused' | 'stopped'. Paused users keep all their
+    data; the cron fan-out simply skips them. Stopped = the user
+    texted STOP (carrier opt-out): every send path refuses them at
+    the send_sms choke point until they text START."""
+    if status not in ("active", "paused", "stopped"):
         raise ValueError(f"unknown status {status!r}")
     conn = get_conn()
     _execute(conn,

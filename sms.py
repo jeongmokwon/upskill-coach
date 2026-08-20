@@ -87,8 +87,21 @@ SMALLTALK_AVERSION_THRESHOLD = 0.6
 
 # A reply of exactly one of these (case-insensitive, strip
 # punctuation) is treated as a meta-command, not conversation.
-SKIP_TOKENS = {"skip", "stop", "pause", "mute"}
+# 'stop' left this set 2026-08-20: the signup page promises "Reply
+# STOP to cancel", so STOP must be a real opt-out, not a skip-today.
+SKIP_TOKENS = {"skip", "pause", "mute"}
 LATER_TOKENS = {"later", "tonight", "9pm", "evening"}
+# Carrier-standard opt-out / opt-in keywords. STOP permanently sets
+# status='stopped' (send_sms refuses stopped users — the one choke
+# point every send path shares); START_TOKENS are only consulted for
+# an already-stopped user, so a conversational "yes" never toggles
+# anything.
+STOP_TOKENS = {"stop", "stopall", "unsubscribe", "cancel", "end",
+               "quit"}
+START_TOKENS = {"start", "unstop", "yes"}
+STOP_ACK = ("You're opted out and won't receive any more messages "
+            "from Theo. Reply START anytime to opt back in.")
+START_ACK = "You're opted back in. Pick up anywhere."
 
 
 # ─── Twilio (lazy import to keep coach.py boot working without it) ──
@@ -171,6 +184,19 @@ def send_sms(to_number, body, user_id=None):
     MESSAGING_CHANNEL=whatsapp — the Twilio Messages API is the same
     for both, only the address format differs.
     """
+    # Opt-out backstop — the ONE choke point every send path shares
+    # (crons, nudges, reminders, research, /debug/say). The stop_ack
+    # itself is sent before the status flips, so it passes.
+    if user_id:
+        status = ((db.get_user_profile_by_id(user_id) or {})
+                  .get("status") or "active").strip()
+        if status == "stopped":
+            print(f"[SMS] refusing send — {user_id} is stopped",
+                  flush=True)
+            db.log_event(user_id, "send_refused_stopped",
+                         {"text": body[:120]}, source="sms")
+            return None
+
     client = _twilio()
     from_number = os.environ.get("TWILIO_FROM_NUMBER")
     if not (client and from_number):
@@ -1926,6 +1952,34 @@ def _reply_to_inbound(user_id, from_number, body, my_msg_id):
         db.log_event(user_id, "inbound_folded",
                      {"text": body[:120]}, source="sms")
         return None
+
+    # Opt-out / opt-in — checked before everything else. The ack is
+    # sent BEFORE the status flip (send_sms refuses stopped users;
+    # carriers require the one final confirmation).
+    user_status = ((db.get_user_profile_by_id(user_id) or {})
+                   .get("status") or "active").strip()
+    if user_status == "stopped":
+        if _is_command(body, START_TOKENS):
+            db.set_user_status(user_id, "active", source="sms_start")
+            send_sms(from_number, START_ACK, user_id=user_id)
+            db.save_sms_message(user_id, "assistant", START_ACK, "out")
+            db.log_event(user_id, "sms_out",
+                         {"text": START_ACK, "trigger": "start_ack",
+                          "server_sent": True}, source="sms")
+            return START_ACK
+        # A stopped user said something else: keep the record, send
+        # nothing — they opted out.
+        db.log_event(user_id, "inbound_while_stopped",
+                     {"text": body[:120]}, source="sms")
+        return None
+    if _is_command(body, STOP_TOKENS):
+        send_sms(from_number, STOP_ACK, user_id=user_id)
+        db.save_sms_message(user_id, "assistant", STOP_ACK, "out")
+        db.log_event(user_id, "sms_out",
+                     {"text": STOP_ACK, "trigger": "stop_ack",
+                      "server_sent": True}, source="sms")
+        db.set_user_status(user_id, "stopped", source="sms_stop")
+        return STOP_ACK
 
     # Meta-commands short-circuit the LLM.
     if _is_command(body, SKIP_TOKENS):
