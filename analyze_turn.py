@@ -251,11 +251,15 @@ _TOOL = {
                                "carrying enough of the user's "
                                "situation to search well. "
                                "evidence_quote: verbatim substring "
-                               "of a USER message containing the "
-                               "ask. NOT for questions answerable "
-                               "from the thread, and NOT your own "
-                               "idea that research would help — "
-                               "only their explicit ask.",
+                               "of the user's LATEST message "
+                               "containing the ask. ONLY the latest "
+                               "message counts — asks in older "
+                               "messages were already handled; never "
+                               "re-report them (the server drops "
+                               "them anyway). NOT for questions "
+                               "answerable from the thread, and NOT "
+                               "your own idea that research would "
+                               "help — only their explicit ask.",
             },
             "notes_for_operator": {
                 "type": "string",
@@ -281,6 +285,20 @@ def _norm(t):
     and double spaces are not paraphrase; anything else is)."""
     import re as _re
     return _re.sub(r"\s+", " ", t or "").strip()
+
+
+def _latest_user_message(user_id):
+    """The content of the user's most recent message. Research asks
+    are only honored from HERE (operator directive 2026-08-20): the
+    analyzer re-reads the whole transcript every turn, so an old ask
+    kept re-firing as a fresh research request — answered again and
+    again. Scoping to the latest message makes re-firing structurally
+    impossible; older asks were either already handled or are the
+    operator's to fire manually via /debug/research."""
+    for m in reversed(db.get_recent_sms_messages(user_id, limit=30)):
+        if m["role"] == "user":
+            return m["content"]
+    return ""
 
 
 def _user_said(user_id, quote, limit=100):
@@ -670,12 +688,15 @@ def _apply(user_id, p, llm_call_id):
     r_question = (rq.get("question") or "").strip()
     r_quote = (rq.get("evidence_quote") or "").strip()
     if r_question and r_quote:
-        if not _user_said(user_id, r_quote):
-            print(f"[ANALYZE] ⚠️ research evidence not found in user "
-                  f"messages — dropped: {r_question[:80]!r}", flush=True)
+        latest = _norm(_latest_user_message(user_id))
+        if not latest or _norm(r_quote) not in latest:
+            print(f"[ANALYZE] ⚠️ research ask not in the LATEST user "
+                  f"message — dropped: {r_question[:80]!r}", flush=True)
             db.log_event(user_id, "research_quote_rejected",
                          {"question": r_question[:200],
-                          "quote": r_quote[:120]}, source="analyze")
+                          "quote": r_quote[:120],
+                          "reason": "not_in_latest_message"},
+                         source="analyze")
         else:
             rid = db.create_research_request(user_id, r_question,
                                              evidence_quote=r_quote)
