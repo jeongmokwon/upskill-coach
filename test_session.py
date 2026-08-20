@@ -310,7 +310,7 @@ r, j = hit_json(coach._session_start_handler,
                 f"/session/start?k={tok}", {"source": "정리본"})
 sid5 = j["session_id"]
 check("start returns the understated greeting, stored on the thread",
-      j["greeting"] == "세션 시작했네. 보고 있을게."
+      j["greeting"] == "Session started. I'm watching with you."
       and db.get_recent_sms_messages(U, limit=1)[0]["content"]
       == j["greeting"])
 check("greeting is marked template in its event (no model chose it)",
@@ -342,7 +342,7 @@ r2, j2 = hit_json(coach._session_start_handler,
 r3, j3 = hit_json(coach._session_stop_handler,
                   f"/session/stop?k={tok}", {"session_id": j2["session_id"]})
 check("endpoint stop returns the closing and stores it",
-      j3["closing"].startswith("오늘 세션은 여기까지")
+      j3["closing"].startswith("Logged today's session")
       and db.get_recent_sms_messages(U, limit=1)[0]["content"]
       == j3["closing"])
 label_idle = sms._walkthrough_label(W2)
