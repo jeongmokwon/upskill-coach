@@ -128,5 +128,24 @@ check("marked failed", row2["status"] == "failed")
 check("user told honestly", len(nudges) == 2
       and "honestly" in nudges[1][1])
 
+
+print("only the LATEST message can fire research (operator directive)")
+db.save_sms_message("jm", "user", "thanks, unrelated chit chat", "in")
+before = len(db.get_open_research_requests("jm")) 
+out = analyze_turn._apply("jm", {"research_request": {
+    "question": "BigLaw partnership path, reworded once more",
+    "evidence_quote": QUOTE}}, "call4")
+check("old ask re-report dropped once a newer message exists",
+      len(db.get_open_research_requests("jm")) == before
+      and not any("research_request" in a for a in out))
+db.save_sms_message("jm", "user",
+                    "can you look up SMS marketing benchmarks?", "in")
+analyze_turn._apply("jm", {"research_request": {
+    "question": "SMS marketing engagement benchmarks",
+    "evidence_quote": "look up SMS marketing benchmarks"}}, "call5")
+check("ask in the latest message still fires",
+      any(r["question"].startswith("SMS marketing")
+          for r in db.get_open_research_requests("jm")))
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
