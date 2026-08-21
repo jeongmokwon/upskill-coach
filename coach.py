@@ -2427,8 +2427,8 @@ async def _landing_handler(request):
     <h3>Tell Theo what you're building</h3>
     <p>Sign up with what you're working on — your company, your side
     business, the thing you're trying to get off the ground — and
-    agree on when Theo may text you. Texting is strictly opt-in: each
-    message type has its own consent checkbox, and nothing is sent
+    agree on when Theo may text you. Texting is strictly opt-in — a
+    single, never-pre-checked consent checkbox — and nothing is sent
     before you've said yes.</p>
     <p class="hiw-note">Every member is personally onboarded and gets
     hands-on attention from day one.</p>
@@ -2442,9 +2442,7 @@ async def _landing_handler(request):
         <span class="v">Land 3 B2B conversations</span></div>
       <div class="row"><span class="k">Check-in window</span>
         <span class="v">Mornings, around 8:30 AM</span></div>
-      <div class="row"><span class="k">Check-ins</span>
-        <span class="v ok">Consented ✓</span></div>
-      <div class="row"><span class="k">Thinking-partner support</span>
+      <div class="row"><span class="k">Text messages</span>
         <span class="v ok">Consented ✓</span></div>
     </div>
   </div>
@@ -2650,16 +2648,16 @@ opt-in on the signup form. That's it — there is no app to install.</p>
 <h2>The SMS program</h2>
 
 <h3>How do I sign up for text messages?</h3>
-<p>On the <a href="/sms-signup">signup form</a>, each of the two
-message programs — check-ins and thinking-partner support — has its
-own separate, optional checkbox. You only receive the message types you
-checked, and only after you submit the form. No messages are ever
-sent without your explicit consent.</p>
+<p>On the <a href="/sms-signup">signup form</a>, one optional
+checkbox covers Theo's text messages — replies, agreed check-ins,
+and follow-ups you've asked for. You only receive messages after you
+check it and submit the form. No messages are ever sent without your
+explicit consent.</p>
 
-<h3>Do I have to check the consent boxes to sign up?</h3>
-<p>No. Both checkboxes are optional, and consent is not a condition
-of signing up or of any purchase. You can sign up without them —
-text coaching simply doesn't start until you've opted in.</p>
+<h3>Do I have to check the consent box to sign up?</h3>
+<p>No. The checkbox is optional, and consent is not a condition of
+signing up or of any purchase. You can sign up without it — texting
+simply doesn't start until you've opted in.</p>
 
 <h3>How many messages will I get?</h3>
 <p>Up to 4 messages per day total across all Theo messages. The
@@ -2844,12 +2842,11 @@ by replying STOP.</p>
 
 <h2>Opt-in</h2>
 <p>Consent to receive text messages is collected through our
-<a href="/sms-signup">web signup form</a>, which offers a separate,
-optional checkbox for each message type (check-ins and
-thinking-partner support). You will only receive the message types
-you have checked. Providing your phone number alone does not
-constitute consent, and consent is not a condition of signing
-up.</p>
+<a href="/sms-signup">web signup form</a>, via a single optional,
+never-pre-checked checkbox covering Theo's conversational program
+(replies, agreed check-ins, and requested follow-ups). Providing
+your phone number alone does not constitute consent, and consent is
+not a condition of signing up.</p>
 
 <h2>Opt-out and help</h2>
 <ul>
@@ -2884,18 +2881,18 @@ number and messages are handled.</p>
 
 # ─── SMS opt-in signup form ──────────────────────────────────────────
 #
-# The compliant web opt-in form for the SMS coaching pilot. Serves two
-# purposes: (1) the real consent-capture entry point for pilot users,
-# (2) the public "opt-in policy proof" URL for Twilio's Toll-Free
-# Verification review. Built to the carrier checklist AND the TFV
-# round-2 rejection feedback (2026-07-25):
-#   - one NOT-pre-checked checkbox PER messaging purpose (check-ins
-#     vs thinking-partner support), each describing the message type
-#     it covers; labels repositioned 2026-08-21 (thinking partner for
-#     solo founders) — DB columns keep their original names;
+# The compliant web opt-in form. Serves two purposes: (1) the real
+# consent-capture entry point, (2) the public "opt-in policy proof"
+# URL for Twilio's Toll-Free Verification review. Built to the
+# carrier checklist:
+#   - ONE not-pre-checked checkbox (single-consent since 2026-08-21:
+#     the product is one conversational program — replies, agreed
+#     check-ins, requested follow-ups — so the TFV-era per-purpose
+#     split collapsed; the one consent is stored in BOTH legacy DB
+#     columns);
 #   - SMS consent is OPTIONAL: email is the primary signup field, the
 #     submit button is always enabled, and the form states explicitly
-#     that signup works without either box checked;
+#     that signup works without the box checked;
 #   - frequency, data-rates, HELP/STOP, ToS/Privacy links kept.
 # Submissions are consent records only — status stays 'pending' until
 # the founder activates the user; the form never triggers messages by
@@ -2911,8 +2908,8 @@ async def _sms_signup_page_handler(request):
 <h1>Sign up for Theo</h1>
 <div class="meta">Green Gables Studio LLC</div>
 
-<p>Leave your details to sign up. The text-message consent boxes
-below are optional — you can sign up without checking either, and we
+<p>Leave your details to sign up. The text-message consent box
+below is optional — you can sign up without checking it, and we
 will contact you by email to get you set up.</p>
 
 <form method="POST" action="/sms-signup" style="margin-top:20px">
@@ -2940,32 +2937,19 @@ will contact you by email to get you set up.</p>
   <div style="margin-top:18px; display:flex; gap:10px; align-items:flex-start;">
     <input type="checkbox" id="consent_checkins" name="consent_checkins"
            value="yes" style="margin-top:4px; width:16px; height:16px;">
-    <label for="consent_checkins">I consent to receive
-    <strong>check-in</strong> text messages from Theo (Green Gables
-    Studio LLC) at the phone number provided — scheduled check-ins and
-    follow-ups on the things I've chosen to work on with Theo. Up to 4
-    messages per day total across all Theo messages; actual frequency
-    varies with my replies. Message and data rates may apply. Reply
-    HELP for help or STOP to cancel at any time.</label>
+    <label for="consent_checkins">I consent to receive recurring
+    <strong>text messages</strong> from Theo (Green Gables Studio LLC)
+    at the phone number provided — conversational replies when I text
+    Theo, check-ins we've agreed on, and research or follow-ups I've
+    asked for. Up to 4 messages per day total; actual frequency varies
+    with my replies. Message and data rates may apply. Reply HELP for
+    help or STOP to cancel at any time.</label>
   </div>
 
-  <div style="margin-top:12px; display:flex; gap:10px; align-items:flex-start;">
-    <input type="checkbox" id="consent_support" name="consent_support"
-           value="yes" style="margin-top:4px; width:16px; height:16px;">
-    <label for="consent_support">I consent to receive
-    <strong>thinking-partner support</strong> text messages from Theo
-    (Green Gables Studio LLC) at the phone number provided — replies
-    when I text Theo, and research or follow-ups I have asked for. Up
-    to 4 messages per day total across all Theo messages; actual
-    frequency varies with my replies. Message and data rates may
-    apply. Reply HELP for help or STOP to cancel at any time.</label>
-  </div>
-
-  <p style="margin-top:16px"><strong>Consent is optional:</strong> each
-  checkbox above is a separate, optional consent for that message type
-  only, and you can complete this signup without checking either.
-  Consent is not required to use Theo and is not a condition of any
-  purchase.</p>
+  <p style="margin-top:16px"><strong>Consent is optional:</strong> the
+  checkbox above is optional, and you can complete this signup without
+  checking it. Consent is not required to use Theo and is not a
+  condition of any purchase.</p>
 
   <p>By signing up, you agree to our
   <a href="/terms">Terms of Service</a> and
@@ -4221,9 +4205,12 @@ async def _sms_signup_submit_handler(request):
     form = await request.post()
     name = (form.get("name") or "").strip()[:200]
     email = (form.get("email") or "").strip()[:200]
+    # Single-consent form (2026-08-21): one checkbox covers the whole
+    # conversational program, stored in BOTH legacy columns so any
+    # reader of either sees the truth.
     consent_checkins = form.get("consent_checkins") == "yes"
-    consent_support = form.get("consent_support") == "yes"
-    any_consent = consent_checkins or consent_support
+    consent_support = consent_checkins
+    any_consent = consent_checkins
 
     # Email and phone are both required signup fields; the SMS consent
     # checkboxes stay optional (TFV round-2: consent must not gate
