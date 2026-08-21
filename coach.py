@@ -2514,7 +2514,7 @@ async def _landing_handler(request):
     <h2>Why a partner in your texts?</h2>
     <p class="sub">Theo is built on a simple observation from months
     of hands-on experiments with real founders: now that the code
-    writes itself, the bottleneck is the stuck hours.</p>
+    writes itself, the bottleneck is us — the founders.</p>
   </div>
   <div class="cards">
     <div class="card">
