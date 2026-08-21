@@ -2123,18 +2123,10 @@ def _reply_to_inbound(user_id, from_number, body, my_msg_id):
                       "reask": drill_next["reask"],
                       "why": drill_next["why"], "followup": True,
                       "llm_call_id": llm_call_id}, source="sms")
-    # Life-track ops hop: AFTER the reply (so it sees the coach's
-    # confirmation in history), in the background (extraction must
-    # not delay the conversation), and only for lane-open users —
-    # tracks_ops.run() itself re-checks the gate, so this costs the
-    # husband's path nothing but a boolean.
-    if db.tracks_lane_open(user_id):
-        import threading
-
-        import tracks_ops
-        threading.Thread(target=tracks_ops.run, args=(user_id,),
-                         kwargs={"trigger": "inbound"},
-                         daemon=True).start()
+    # (Life-track ops hop RETIRED 2026-08-21 with the delegation
+    # lane: no more per-reply track extraction. Track DATA stays in
+    # the ledgers — the machine is off. tracks_ops.py remains for
+    # the operator's /debug/track tooling.)
     return reply_text
 
 
@@ -2259,12 +2251,9 @@ def _build_companion_prompt(user_id, drill_graded=None,
     except Exception as e:
         print(f"[SMS] ⚠️ companion materials block failed: {e}",
               flush=True)
-    try:
-        tb = _tracks_block(user_id)
-        if tb:
-            parts.append(tb)
-    except Exception as e:
-        print(f"[SMS] ⚠️ tracks block failed: {e}", flush=True)
+    # (tracks state block RETIRED 2026-08-21 — the delegation lane
+    # is dead; existing track rows stay in the DB for the record but
+    # no longer ride the prompt.)
     import drill
     if drill_graded:
         parts.append(drill.graded_reply_block(drill_graded))
@@ -2333,63 +2322,10 @@ def _research_block(user_id):
     return "\n".join(lines)
 
 
-def _tracks_block(user_id):
-    """Life-track STATE render — current tracks + open items, for
-    lane-open users only (empty string otherwise). The behavioral
-    stance (genie rules, curiosity, two verbs) lives in
-    prompts/sms_companion.md — state and instruction are separate
-    on purpose: this block changes every conversation, the stance
-    file is versioned like every other prompt."""
-    if not db.tracks_lane_open(user_id):
-        return ""
-    rows = db.get_life_tracks(user_id, statuses=("active", "held"))
-    lines = ["## Life tracks (the concerns you carry for them)"]
-    if rows:
-        for t in rows:
-            lines.append(f"- [{t['status']}] {t['name']} — {t['role']} "
-                         f"(part: {t['part_type']}, "
-                         f"surfacing: {t['surfacing']})")
-            items = db.get_track_items(t["id"], status="open")
-            if items:
-                lines.append(f"  open items: " + "; ".join(
-                    (it["payload"] or "{}")[:80] for it in items[:8]))
-    else:
-        lines.append("(none yet — this conversation builds them)")
-    return "\n".join(lines)
-
-
-# The product's two verbs, both visible (founder-approved copy,
-# 2026-08-18): work tracks are pushed on TOGETHER (the husband does
-# not want to hand over partner prep — he wants a capable
-# companion), while small recurring load is HELD for the user. An
-# opener with only one verb misses half the users; the first draft
-# ("dump them here") read as a survey and asked instead of offering.
-TRACK_CONVO_OPENER = (
-    "I can do more for you now. The things you're working toward — "
-    "or keep meaning to get to — we can push on together. And the "
-    "small stuff you re-remember every day, I can just hold for "
-    "you. What's on your plate these days? Start anywhere.")
-
-
-def send_track_convo_opener(user_id):
-    """Operator/cron-triggered opener for the track conversation.
-    Enables the lane if it isn't already, then sends a fixed opener
-    (deterministic on purpose — the conversation after it is the
-    experiment). Returns sent text or None."""
-    db.enable_tracks(user_id, source="admin")
-    phone = _phone_for(user_id)
-    if not phone:
-        print(f"[TRACKS] no phone for {user_id}", flush=True)
-        return None
-    text = TRACK_CONVO_OPENER
-    send_sms(phone, text, user_id=user_id)
-    db.save_sms_message(user_id, "assistant", text, "out")
-    db.log_event(user_id, "sms_out",
-                 {"text": text, "trigger": "track_convo_opener"},
-                 source="sms")
-    return text
-
-
+# (_tracks_block, TRACK_CONVO_OPENER, and
+# send_track_convo_opener RETIRED 2026-08-21 — the delegation
+# lane and its migration opener are dead. Track data stays in
+# the DB; lane opening now happens at activation/bind-phone.)
 def send_nudge(user_id, instruction):
     """The Wizard-of-Oz lever: make the coach send one proactive
     message under an operator instruction — how promises harvested
