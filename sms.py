@@ -1128,7 +1128,16 @@ def send_expectation_message(user_id, to_number, trigger):
     checklist item, record everything. SERVER-SENT by design: the one
     onboarding item with zero LLM variance. Returns the text, or None
     if sending failed."""
-    text = _read_prompt("expectation_setting").strip()
+    # Self-onboarded users (text-STUCK funnel) have no email on
+    # file, so the copy that points at "your welcome email" would be
+    # a broken promise — they get the no-email variant.
+    email = ((db.get_user_profile_by_id(user_id) or {})
+             .get("email") or "").strip()
+    name = "expectation_setting" if "@" in email \
+        else "expectation_setting_noemail"
+    text = _read_prompt(name).strip()
+    if not text and name != "expectation_setting":
+        text = _read_prompt("expectation_setting").strip()
     if not text:
         print("[SMS] ⚠️ expectation_setting.md is empty — not sending",
               flush=True)
@@ -1944,6 +1953,41 @@ def _inbound_lock(user_id):
         return _inbound_locks[user_id]
 
 
+def _self_onboard(from_number, body):
+    """A stranger texted the keyword: create the user on the spot.
+    user_id is auto-generated (no name needed — founder decision
+    2026-08-21): 'u' + last 4 phone digits + 4 hex chars, collision-
+    checked. Opens the companion lane; the normal inbound flow then
+    sends the (no-email) expectation bubble and the first real reply.
+    → user_id, or None if creation failed."""
+    import uuid
+
+    phone = _strip_channel(from_number)
+    last4 = "".join(ch for ch in phone if ch.isdigit())[-4:] or "0000"
+    user_id = None
+    for _ in range(5):
+        candidate = f"u{last4}{uuid.uuid4().hex[:4]}"
+        if not db.get_user_profile_by_id(candidate):
+            user_id = candidate
+            break
+    if not user_id:
+        return None
+    try:
+        db.ensure_user_profile_row(user_id)
+        db.set_user_phone(user_id, phone, source="self_onboard")
+        db.enable_tracks(user_id, source="self_onboard")
+    except Exception as e:
+        print(f"[SMS] ⚠️ self-onboard failed for {phone}: {e}",
+              flush=True)
+        return None
+    db.log_event(user_id, "user_self_onboarded",
+                 {"phone": phone, "first_text": body[:200]},
+                 source="sms")
+    print(f"[SMS] self-onboarded {user_id} from inbound keyword",
+          flush=True)
+    return user_id
+
+
 def handle_inbound(from_number, body):
     """Process an inbound SMS. Returns the text we replied with (or
     None if we chose not to reply).
@@ -1957,11 +2001,19 @@ def handle_inbound(from_number, body):
     written with the full burst in view."""
     user_id = _resolve_user_from_phone(from_number)
     if not user_id:
-        # Unknown sender is still an event (brief: nothing unrecorded).
-        db.log_event(None, "sms_in_unknown_sender",
-                     {"from": _strip_channel(from_number), "text": body[:200]},
-                     source="sms")
-        return None
+        # Inbound-first onboarding (2026-08-21, founder decision: no
+        # keyword gate): ANY first text from an unknown number
+        # self-onboards — texting first is the strongest consent
+        # there is, and stray/spam texts are cheap to ignore
+        # operationally (the user_self_onboarded event keeps them
+        # visible). Only a failed creation still drops, loudly.
+        user_id = _self_onboard(from_number, body)
+        if not user_id:
+            db.log_event(None, "sms_in_unknown_sender",
+                         {"from": _strip_channel(from_number),
+                          "text": body[:200]},
+                         source="sms")
+            return None
 
     # Log the user's message FIRST so it's part of history before we
     # build context for our reply.
