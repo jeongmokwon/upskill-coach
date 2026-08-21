@@ -169,7 +169,7 @@ print("\n── companion prompt: its own stack, not the edtech one ──")
 comp_prompt, comp_v = sms._build_system_prompt_for_reply(U)
 check("lane user gets the companion prompt",
       "sms_companion" in comp_v
-      and "partner they text when they're stuck" in comp_prompt)
+      and "founder's companion" in comp_prompt)
 check("genie stance retired (2026-08-21 대청소)",
       "capability is UNLIMITED" not in comp_prompt
       and "10x productive" not in comp_prompt)
@@ -211,7 +211,7 @@ print("\n── drill user + open lane coexist (the husband's next state) ──
 db.enable_tracks("hub", source="test")
 hub_prompt, _v = sms._build_system_prompt_for_reply("hub")
 check("companion prompt takes over",
-      "partner they text when they're stuck" in hub_prompt)
+      "founder's companion" in hub_prompt)
 check("drill freelance guard still present",
       "No freelance drill questions" in hub_prompt)
 check("ops hop now live for him", db.tracks_lane_open("hub"))
