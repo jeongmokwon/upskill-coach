@@ -2228,9 +2228,8 @@ main.wide { max-width: 1360px; margin: 0 auto; padding: 0 28px 64px; }
 _SITE_ORIGIN = "https://www.learningtheo.com"
 
 _SITE_DESC = ("Theo is the partner solo founders text when they're "
-              "stuck — it knows your situation, pulls you from "
-              "abstract to concrete, and checks that you moved. By "
-              "Green Gables Studio LLC.")
+              "stuck — it knows your situation and pulls you from "
+              "abstract to concrete. By Green Gables Studio LLC.")
 
 # Inline SVG logo mark (matches site_assets/favicon.svg).
 _LOGO_SVG = """<svg width="30" height="30" viewBox="0 0 100 100"
@@ -2394,7 +2393,7 @@ async def _landing_handler(request):
     <p class="lead">Text Theo the moment you're stuck. It knows your
     situation — every thread, every decision you've been circling —
     and it pulls you from abstract to concrete: "Right now — next
-    two hours — what will you do?" Then it checks that you did.</p>
+    two hours — what will you do?"</p>
     <div class="hero-ctas">
       <a class="btn" href="/sms-signup">Get started</a>
       <a class="btn btn-ghost" href="#how-it-works">See how it works</a>
