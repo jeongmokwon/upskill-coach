@@ -2227,9 +2227,9 @@ main.wide { max-width: 1360px; margin: 0 auto; padding: 0 28px 64px; }
 
 _SITE_ORIGIN = "https://www.learningtheo.com"
 
-_SITE_DESC = ("Theo is a learning coach in your text messages — coaching "
-              "check-ins that get you to actually start studying, and "
-              "step-by-step help when you're stuck. By Green Gables "
+_SITE_DESC = ("Theo is a thinking partner for solo founders, in your "
+              "text messages — untangle what's stuck, find your next "
+              "move, and keep every thread going. By Green Gables "
               "Studio LLC.")
 
 # Inline SVG logo mark (matches site_assets/favicon.svg).
@@ -2259,8 +2259,8 @@ _SITE_FOOTER = f"""
   <div class="footer-in">
     <div>
       <div class="flogo">{_LOGO_SVG} Theo</div>
-      <p class="fdesc">A learning coach in your text messages. Built and
-      operated by Green Gables Studio LLC, an independent software studio
+      <p class="fdesc">A thinking partner for solo founders, in your text
+      messages. Built and operated by Green Gables Studio LLC, an independent software studio
       in Mountain View, California.</p>
     </div>
     <div>
@@ -2382,13 +2382,12 @@ async def _landing_handler(request):
     body = f"""
 <section class="hero">
   <div>
-    <div class="eyebrow">Your AI learning coach</div>
-    <h1>A learning coach in your text messages</h1>
-    <p class="lead">You don't fail at learning because the material is
-    too hard. You fail because sitting down is hard. Theo texts you at
-    the moments you chose, gets you started with a step small enough to
-    actually take, and helps you through it — right in your Messages
-    app.</p>
+    <div class="eyebrow">Your AI thinking partner</div>
+    <h1>A thinking partner for solo founders</h1>
+    <p class="lead">When you build alone, every decision, plan, and
+    doubt lives in one head — yours. Theo is the partner you think out
+    loud with: text what's tangled, pull it apart together, and leave
+    with your next move — right in your Messages app.</p>
     <div class="hero-ctas">
       <a class="btn" href="/sms-signup">Get started</a>
       <a class="btn btn-ghost" href="#how-it-works">See how it works</a>
@@ -2399,15 +2398,16 @@ async def _landing_handler(request):
   <div class="hero-visual">
     <div class="hero-photo">
       <img src="/site_assets/hero-home.jpg"
-           alt="A Theo member at home in the evening, starting a study
-           session from a text check-in">
+           alt="A Theo member at home in the evening, thinking through
+           their business over text">
       <div class="pthread">
-        <div class="pchip">Evening check-in · 7:50 PM</div>
-        <div class="pbubble in">Hi, it's Theo — your evening study
-        check-in. Yesterday we agreed on a 15-minute session on your
-        Python course. Ready to start now, or reply LATER to push it
-        to tonight. Reply HELP for help or STOP to cancel.</div>
-        <div class="pbubble out">ok, starting now</div>
+        <div class="pchip">Check-in · 8:30 AM</div>
+        <div class="pbubble in">Hi, it's Theo — checking in like we
+        agreed. Yesterday you were circling the pricing for the fall
+        launch and left it at two options. Want to pull that apart
+        now, or reply LATER for tonight. Reply HELP for help or STOP
+        to cancel.</div>
+        <div class="pbubble out">now works — where were we?</div>
       </div>
     </div>
   </div>
@@ -2418,26 +2418,27 @@ async def _landing_handler(request):
   <div class="hiw-copy">
     <div class="hiw-num">1</div>
     <div class="hiw-eyebrow">Sign up</div>
-    <h3>Tell Theo what you're learning</h3>
-    <p>Sign up with your goal — an online course, YouTube tutorials, a
-    textbook, your own project — and agree on when Theo may text you.
-    Text coaching is strictly opt-in: each message type has its own
-    consent checkbox, and nothing is sent before you've said yes.</p>
+    <h3>Tell Theo what you're building</h3>
+    <p>Sign up with what you're working on — your company, your side
+    business, the thing you're trying to get off the ground — and
+    agree on when Theo may text you. Texting is strictly opt-in: each
+    message type has its own consent checkbox, and nothing is sent
+    before you've said yes.</p>
     <p class="hiw-note">Every member is personally onboarded and gets
     hands-on attention from day one.</p>
   </div>
   <div class="hiw-visual">
     <div class="mock">
-      <div class="mhead">Your coaching setup</div>
-      <div class="row"><span class="k">Learning</span>
-        <span class="v">Python for data analysis</span></div>
-      <div class="row"><span class="k">This week's goal</span>
-        <span class="v">Finish course section 3</span></div>
+      <div class="mhead">Your setup</div>
+      <div class="row"><span class="k">Building</span>
+        <span class="v">Food &amp; travel guide business</span></div>
+      <div class="row"><span class="k">This month</span>
+        <span class="v">Land 3 B2B conversations</span></div>
       <div class="row"><span class="k">Check-in window</span>
-        <span class="v">Evenings, around 7:50 PM</span></div>
-      <div class="row"><span class="k">Coaching check-ins</span>
+        <span class="v">Mornings, around 8:30 AM</span></div>
+      <div class="row"><span class="k">Check-ins</span>
         <span class="v ok">Consented ✓</span></div>
-      <div class="row"><span class="k">Study support</span>
+      <div class="row"><span class="k">Thinking-partner support</span>
         <span class="v ok">Consented ✓</span></div>
     </div>
   </div>
@@ -2446,13 +2447,13 @@ async def _landing_handler(request):
 <section class="hiw-row flip">
   <div class="hiw-copy">
     <div class="hiw-num">2</div>
-    <div class="hiw-eyebrow">Coaching check-ins</div>
-    <h3>Theo texts. You start.</h3>
-    <p>At the times you agreed on, Theo checks in — while you're on the
-    couch, walking home, anywhere your phone is. Not a nagging
-    reminder: a conversation that ends with a first step small enough
-    to start right now. That moment of starting is the whole
-    point.</p>
+    <div class="hiw-eyebrow">Check-ins</div>
+    <h3>Theo texts. You think out loud.</h3>
+    <p>At the times you agreed on, Theo picks up the thread — while
+    you're on the couch, walking, anywhere your phone is. Not a
+    nagging reminder: a conversation that takes the thing you've been
+    circling and ends with a concrete next move. Theo remembers every
+    thread, so nothing has to be re-explained.</p>
     <p class="hiw-note">Up to 4 messages per day total; the actual
     rhythm follows your replies and your schedule.</p>
   </div>
@@ -2460,12 +2461,12 @@ async def _landing_handler(request):
     <div class="mock">
       <div class="mhead">Theo · Messages</div>
       <div class="thread">
-        <div class="tstamp">7:50 PM</div>
-        <div class="msg in">Hi, it's Theo — your evening study check-in.
-        Yesterday we agreed on a 15-minute session on your Python
-        course. Ready to start now, or reply LATER to push it to
-        tonight. Reply HELP for help or STOP to cancel.</div>
-        <div class="msg out">ok, starting now</div>
+        <div class="tstamp">8:30 AM</div>
+        <div class="msg in">Hi, it's Theo — checking in like we agreed.
+        Yesterday you were torn between pitching at the conference or
+        emailing ahead of it. Want to settle that now, or reply LATER
+        for tonight. Reply HELP for help or STOP to cancel.</div>
+        <div class="msg out">let's settle it now</div>
       </div>
     </div>
   </div>
@@ -2474,25 +2475,27 @@ async def _landing_handler(request):
 <section class="hiw-row">
   <div class="hiw-copy">
     <div class="hiw-num">3</div>
-    <div class="hiw-eyebrow">Study support</div>
-    <h3>Stuck? Text back.</h3>
-    <p>While you study, Theo stays one text away. Hit an error, lose
-    the thread, don't know what a sentence means — text it to Theo and
-    get an answer that walks you through it step by step, using your
-    own materials rather than replacing them.</p>
-    <p class="hiw-note">Theo carries no course catalog — it coaches you
-    through whatever you're already learning with.</p>
+    <div class="hiw-eyebrow">Thinking-partner support</div>
+    <h3>Stuck? Text it over.</h3>
+    <p>Theo stays one text away all day. A decision you keep going
+    back and forth on, a plan that won't take shape, something you
+    need looked into — text it over. Theo pulls it apart with you,
+    reads the documents you share, and comes back with research when
+    you ask for it.</p>
+    <p class="hiw-note">Theo works on your business, in your words —
+    it's a partner in your thinking, not another dashboard.</p>
   </div>
   <div class="hiw-visual">
     <div class="mock">
       <div class="mhead">Theo · Messages</div>
       <div class="thread">
-        <div class="tstamp">8:14 PM</div>
-        <div class="msg out">getting a NameError in cell 2</div>
-        <div class="msg in">Hi, it's Theo. That NameError usually means
-        the variable isn't defined yet in this session. Try re-running
-        the first cell, then tell me what output you see. Reply HELP
-        for help or STOP to cancel.</div>
+        <div class="tstamp">2:14 PM</div>
+        <div class="msg out">keep flip-flopping on whether the gift
+        guide pitch is worth doing before the conference</div>
+        <div class="msg in">Hi, it's Theo. Let's pull it apart — what
+        would make it a clear no: the time it takes, the fit, or the
+        timing? Answer that and the decision usually falls out. Reply
+        HELP for help or STOP to cancel.</div>
       </div>
     </div>
   </div>
@@ -2501,17 +2504,18 @@ async def _landing_handler(request):
 
 <section class="section" id="why">
   <div class="centered">
-    <h2>Why a coach in your texts?</h2>
+    <h2>Why a thinking partner in your texts?</h2>
     <p class="sub">Theo is built on a simple observation from months of
-    hands-on coaching experiments: adults don't need more content —
-    they need to start.</p>
+    hands-on experiments with real founders: building alone doesn't
+    fail on effort — it fails on tangled, unspoken thinking.</p>
   </div>
   <div class="cards">
     <div class="card">
-      <h3>Starting is the real problem</h3>
-      <p>Courses, tutorials, and textbooks are everywhere. What's rare
-      is the nudge that turns "I should study tonight" into an open
-      laptop. Theo is built entirely around that moment.</p>
+      <h3>Thinking alone is the real problem</h3>
+      <p>Advice, content, and tools are everywhere. What's rare is
+      someone who knows your situation and helps you untangle it —
+      the role a cofounder or a great manager plays. Theo is built
+      entirely around that role.</p>
     </div>
     <div class="card">
       <h3>No new app to open</h3>
@@ -2520,24 +2524,25 @@ async def _landing_handler(request):
       streak guilt.</p>
     </div>
     <div class="card">
-      <h3>Grounded in behavioral science</h3>
-      <p>Theo's coaching draws on established research — implementation
-      intentions, self-determination theory, motivational
-      interviewing — not badges and leaderboards.</p>
+      <h3>It remembers everything</h3>
+      <p>Every thread you've opened, every decision you've weighed,
+      every document you've shared — Theo carries it, so each
+      conversation starts where the last one ended, not from
+      scratch.</p>
     </div>
   </div>
 </section>
 
 <section class="section">
   <div class="band" style="text-align:center;">
-    <h2>Ready to actually start?</h2>
+    <h2>Ready to think out loud?</h2>
     <p style="max-width:520px; margin:8px auto 20px;">Tell Theo what
-    you're learning, and let the check-ins do the rest.</p>
+    you're building, and bring it the first tangled thing.</p>
     <a class="btn" href="/sms-signup">Get started</a>
   </div>
 </section>
 """
-    return web.Response(text=_site_page("Theo — A learning coach in your text messages",
+    return web.Response(text=_site_page("Theo — A thinking partner for solo founders",
                                         body, path="/", wide=True),
                         content_type="text/html")
 
@@ -2548,59 +2553,59 @@ async def _about_handler(request):
 <div class="meta">Green Gables Studio LLC · Mountain View, California</div>
 
 <p>Green Gables Studio LLC is an independent software studio that
-designs and operates <strong>Theo</strong>, an AI learning coach
-delivered by text message. The studio builds the whole service
-in-house: the coaching program, the SMS service, and this
-website.</p>
+designs and operates <strong>Theo</strong>, an AI thinking partner
+for solo founders, delivered by text message. The studio builds the
+whole service in-house: the companion itself, the SMS service, and
+this website.</p>
 
 <h2>Why we are building Theo</h2>
 <p>Theo comes out of a simple observation from our founder's own
-years of self-directed learning: adults who study on their own rarely
-fail because the material is too hard. They fail because sitting down
-and starting is hard. Courses, tutorials, and textbooks are everywhere
-— what's missing is the thing a good human coach provides: someone who
-knows how <em>you</em> work, notices when you stall, and makes the
-next step small enough to actually take.</p>
+years of building alone: solo founders rarely fail on effort. They
+fail because every decision, plan, and doubt lives in one head with
+no one to think it through with. Advice and tools are everywhere —
+what's missing is what a cofounder or a great manager provides:
+someone who knows <em>your</em> situation, notices what you keep
+circling, and helps you leave each conversation with a next move.</p>
 
 <p>Before writing a line of product code, our founder — Jeongmo Kwon,
 a former iOS app developer and startup founder — spent months running
-the coaching loop manually as a self-experiment: daily coaching
-messages, real study sessions, and careful notes on what actually got
-a tired adult to open the laptop and begin. Theo is that experiment,
-productized: an AI coach that layers on top of whatever you are
-already using to learn, rather than another content library.</p>
+that loop manually with real users: daily conversations, real
+decisions, and careful notes on what actually helped a person who
+builds alone move forward. Theo is that experiment, productized: a
+thinking partner that works on your business in your words, rather
+than another dashboard to maintain.</p>
 
-<h2>How Theo coaches</h2>
+<h2>How Theo works with you</h2>
 <ul>
-  <li><strong>Start-first coaching.</strong> Theo's job begins before
-      the study session: check-ins, tiny first steps, and
-      conversations that lower the cost of starting.</li>
-  <li><strong>Your materials, not ours.</strong> Theo carries no
-      course catalog. It coaches you through your own course,
-      tutorial, textbook, or project.</li>
-  <li><strong>Grounded in behavioral science.</strong> The coaching
-      approach draws on established research — self-determination
-      theory, implementation intentions, and motivational
-      interviewing — rather than streaks and badges.</li>
-  <li><strong>Personal by design.</strong> Theo adapts its coaching
-      to how each learner actually starts, stalls, and recovers.</li>
+  <li><strong>Untangle first.</strong> Bring what's stuck — a
+      decision, a plan, a doubt — and pull it apart together until
+      the next move is obvious.</li>
+  <li><strong>Your business, your words.</strong> Theo has no
+      templates or playbooks to force you through. It works on what
+      you bring, the way you describe it.</li>
+  <li><strong>It remembers.</strong> Every thread, decision, and
+      shared document carries forward — conversations start where the
+      last one ended.</li>
+  <li><strong>It does real work.</strong> Ask for research, share a
+      document to think through — Theo reads it and comes back with
+      something useful, not just encouragement.</li>
 </ul>
 
 <h2>Joining Theo</h2>
 <p>Theo is deliberately high-touch: every member is personally
-onboarded, and coaching is reviewed by a person, not left to run on
-autopilot. Members join through our
-<a href="/sms-signup">signup form</a> (US phone numbers);
-text-message coaching is optional and requires explicit per-purpose
-consent. Theo is currently free to use.</p>
+onboarded, and the service is reviewed by a person, not left to run
+on autopilot. Members join through our
+<a href="/sms-signup">signup form</a> (US phone numbers); text
+messaging is optional and requires explicit per-purpose consent.
+Theo is currently free to use.</p>
 
 {_BUSINESS_BLOCK}
 """
     return web.Response(
         text=_site_page("About — Theo", body,
                         desc=("Green Gables Studio LLC is the independent "
-                              "software studio behind Theo, an AI learning "
-                              "coach grounded in behavioral science."),
+                              "software studio behind Theo, an AI thinking "
+                              "partner for solo founders."),
                         path="/about"),
         content_type="text/html")
 
@@ -2613,15 +2618,15 @@ async def _faq_handler(request):
 <h2>About Theo</h2>
 
 <h3>What is Theo?</h3>
-<p>Theo is a personal AI learning coach that lives in your text
-messages. It checks in at the times you agreed on to help you actually
-start studying, and answers by text when you're stuck mid-session.</p>
+<p>Theo is a personal AI thinking partner that lives in your text
+messages. Bring it whatever is tangled or stuck in your work — it
+helps you pull it apart, find your next move, and remembers every
+thread so nothing has to be re-explained.</p>
 
-<h3>Is Theo a course?</h3>
-<p>No. Theo has no content library and doesn't replace your
-materials. You bring whatever you are learning with — an online
-course, YouTube tutorials, a textbook, your own project — and Theo
-coaches you through it.</p>
+<h3>Who is Theo for?</h3>
+<p>Solo founders and people building something on their own — anyone
+whose decisions, plans, and doubts live in one head with no one to
+think them through with.</p>
 
 <h3>Who can join?</h3>
 <p>Anyone with a US mobile number. Leave your details on the
@@ -2640,8 +2645,8 @@ opt-in on the signup form. That's it — there is no app to install.</p>
 
 <h3>How do I sign up for text messages?</h3>
 <p>On the <a href="/sms-signup">signup form</a>, each of the two
-message programs — coaching check-ins and study support — has its own
-separate, optional checkbox. You only receive the message types you
+message programs — check-ins and thinking-partner support — has its
+own separate, optional checkbox. You only receive the message types you
 checked, and only after you submit the form. No messages are ever
 sent without your explicit consent.</p>
 
@@ -2652,7 +2657,8 @@ text coaching simply doesn't start until you've opted in.</p>
 
 <h3>How many messages will I get?</h3>
 <p>Up to 4 messages per day total across all Theo messages. The
-actual number varies with your replies and your study schedule.</p>
+actual number varies with your replies and what you've asked Theo to
+work on.</p>
 
 <h3>Does it cost anything to receive messages?</h3>
 <p>Theo doesn't charge for messages, but standard message and data
@@ -2673,9 +2679,9 @@ third parties for marketing. Details are in our
 """
     return web.Response(
         text=_site_page("FAQ — Theo", body,
-                        desc=("Common questions about Theo, the AI learning "
-                              "coach by Green Gables Studio LLC, and its "
-                              "opt-in SMS coaching program."),
+                        desc=("Common questions about Theo, the AI thinking "
+                              "partner by Green Gables Studio LLC, and "
+                              "its opt-in SMS program."),
                         path="/faq"),
         content_type="text/html")
 
@@ -2720,9 +2726,10 @@ async def _privacy_handler(request):
 <h1>Privacy Policy</h1>
 <div class="meta">Last updated: August 2026</div>
 
-<p>Theo is an AI learning-coach service built and operated by Green
-Gables Studio LLC. This policy describes how phone numbers, message
-content, and study data are handled.</p>
+<p>Theo is an AI thinking-partner service built and operated by
+Green Gables Studio LLC. This policy describes how phone numbers,
+message content, and the work-related content you share are
+handled.</p>
 
 <h2>What we collect</h2>
 <ul>
@@ -2731,16 +2738,16 @@ content, and study data are handled.</p>
       and mobile phone number, together with the text-message consent
       choices made on that form.</li>
   <li>SMS messages exchanged with members, stored for the purpose of
-      providing learning context to subsequent messages.</li>
-  <li>Study materials and study-session data a member chooses to
-      share (see "Study sessions and shared materials" below).</li>
+      providing conversational context to subsequent messages.</li>
+  <li>Documents and working-session data a member chooses to share
+      (see "Working sessions and shared documents" below).</li>
   <li>Service usage data tied to the member's account.</li>
 </ul>
 
 <h2>How we use it</h2>
-<p>Contact details and message content are used solely to operate the
-service: delivering educational content, study check-ins, and coaching
-conversations to members, and contacting members about their
+<p>Contact details and message content are used solely to operate
+the service: delivering check-ins, conversational replies, and
+research a member has requested, and contacting members about their
 enrollment. They are not used for marketing or advertising of any
 kind. Text messages are sent only for the purposes a member has
 separately consented to on the signup form.</p>
@@ -2748,18 +2755,18 @@ separately consented to on the signup form.</p>
 <h2>Service improvement and research</h2>
 <p>We use de-identified and aggregated data — including message
 content and service usage patterns with personal identifiers
-removed — to improve Theo's coaching quality, evaluate which coaching
+removed — to improve Theo's quality, evaluate which conversational
 approaches work, and train and refine the models and prompts that
 power the service. De-identified data cannot reasonably be linked
 back to you. This use never includes selling your data or sharing it
 for third parties' own purposes, and you may request deletion of your
 data at any time.</p>
 
-<h2>Study sessions and shared materials</h2>
-<p>When you choose to share your screen during a study session,
+<h2>Working sessions and shared documents</h2>
+<p>When you choose to share your screen during a working session,
 captured frames are processed transiently to generate text
 observations and are not stored. Documents and links you share are
-stored as extracted text to power your coaching. You can end a
+stored as extracted text to power your conversations. You can end a
 session at any time, and sharing is always initiated by you. Before
 your first session we present a dedicated
 <a href="/screen-consent">Screen Sharing Consent</a> describing
@@ -2813,15 +2820,16 @@ async def _terms_handler(request):
 <h1>Terms and Conditions</h1>
 <div class="meta">Last updated: August 2026</div>
 
-<p>Theo is an early-stage AI learning-coach service operated
+<p>Theo is an early-stage AI thinking-partner service operated
 by Green Gables Studio LLC. By using the SMS service, you agree to the
 following.</p>
 
 <h2>What you'll receive</h2>
-<p>You will receive SMS messages from Theo intended to deliver
-educational content, study prompts, and motivational nudges related to
-the topic you have chosen to study. Messages are generated by an AI
-model and may occasionally contain mistakes.</p>
+<p>You will receive SMS messages from Theo intended to help you think
+through your work: scheduled check-ins, conversational replies to
+what you send, and research or summaries you have requested. Messages
+are generated by an AI model and may occasionally contain
+mistakes.</p>
 
 <h2>Message frequency</h2>
 <p>Up to 4 messages per day. The actual frequency varies based on your
@@ -2831,8 +2839,8 @@ by replying STOP.</p>
 <h2>Opt-in</h2>
 <p>Consent to receive text messages is collected through our
 <a href="/sms-signup">web signup form</a>, which offers a separate,
-optional checkbox for each message type (coaching check-ins and
-study support). You will only receive the message types
+optional checkbox for each message type (check-ins and
+thinking-partner support). You will only receive the message types
 you have checked. Providing your phone number alone does not
 constitute consent, and consent is not a condition of signing
 up.</p>
@@ -2854,10 +2862,11 @@ models behind it, as described in our
 <a href="/privacy">Privacy Policy</a>.</p>
 
 <h2>Disclaimer</h2>
-<p>Theo is provided as-is for personal educational use. The
-service makes no warranty as to the accuracy of generated content and
-should not be used as a substitute for professional instruction in
-fields where accuracy is critical.</p>
+<p>Theo is provided as-is for personal informational use. The
+service makes no warranty as to the accuracy of generated content,
+and nothing Theo sends is professional legal, financial, tax, or
+medical advice — consult a qualified professional for decisions in
+those areas.</p>
 
 <h2>Privacy</h2>
 <p>See our <a href="/privacy">Privacy Policy</a> for how your phone
@@ -2874,9 +2883,10 @@ number and messages are handled.</p>
 # (2) the public "opt-in policy proof" URL for Twilio's Toll-Free
 # Verification review. Built to the carrier checklist AND the TFV
 # round-2 rejection feedback (2026-07-25):
-#   - one NOT-pre-checked checkbox PER messaging purpose (coaching
-#     check-ins vs two-way learning support), each describing the
-#     message type it covers;
+#   - one NOT-pre-checked checkbox PER messaging purpose (check-ins
+#     vs thinking-partner support), each describing the message type
+#     it covers; labels repositioned 2026-08-21 (thinking partner for
+#     solo founders) — DB columns keep their original names;
 #   - SMS consent is OPTIONAL: email is the primary signup field, the
 #     submit button is always enabled, and the form states explicitly
 #     that signup works without either box checked;
@@ -2924,25 +2934,25 @@ will contact you by email to get you set up.</p>
   <div style="margin-top:18px; display:flex; gap:10px; align-items:flex-start;">
     <input type="checkbox" id="consent_checkins" name="consent_checkins"
            value="yes" style="margin-top:4px; width:16px; height:16px;">
-    <label for="consent_checkins">I consent to receive <strong>coaching
-    check-in</strong> text messages from Theo (Green Gables Studio LLC)
-    at the phone number provided — scheduled check-ins and reminders
-    about my study plan. Up to 4 messages per day total across all Theo
-    messages; actual frequency varies with my replies. Message and data
-    rates may apply. Reply HELP for help or STOP to cancel at any
-    time.</label>
+    <label for="consent_checkins">I consent to receive
+    <strong>check-in</strong> text messages from Theo (Green Gables
+    Studio LLC) at the phone number provided — scheduled check-ins and
+    follow-ups on the things I've chosen to work on with Theo. Up to 4
+    messages per day total across all Theo messages; actual frequency
+    varies with my replies. Message and data rates may apply. Reply
+    HELP for help or STOP to cancel at any time.</label>
   </div>
 
   <div style="margin-top:12px; display:flex; gap:10px; align-items:flex-start;">
     <input type="checkbox" id="consent_support" name="consent_support"
            value="yes" style="margin-top:4px; width:16px; height:16px;">
-    <label for="consent_support">I consent to receive <strong>study
-    support</strong> text messages from Theo (Green Gables Studio LLC)
-    at the phone number provided — replies that help me step by step
-    when I text Theo during a study session. Up to 4 messages per day
-    total across all Theo messages; actual frequency varies with my
-    replies. Message and data rates may apply. Reply HELP for help or
-    STOP to cancel at any time.</label>
+    <label for="consent_support">I consent to receive
+    <strong>thinking-partner support</strong> text messages from Theo
+    (Green Gables Studio LLC) at the phone number provided — replies
+    when I text Theo, and research or follow-ups I have asked for. Up
+    to 4 messages per day total across all Theo messages; actual
+    frequency varies with my replies. Message and data rates may
+    apply. Reply HELP for help or STOP to cancel at any time.</label>
   </div>
 
   <p style="margin-top:16px"><strong>Consent is optional:</strong> each
