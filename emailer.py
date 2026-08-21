@@ -96,9 +96,9 @@ def send_my_link(user_id, to_email):
     link = f"https://www.learningtheo.com/my?k={token}"
     text = f"""Hi — it's Theo.
 
-This is your private page with me — if you want me to work from a
-document (a plan, a deck, a doc, or a link), share it here and I'll
-actually read it:
+This is your private page with me — if you ever want me to think
+through a document with you (a plan, a deck, a doc, or a link),
+share it here and I'll actually read it:
 
 {link}
 
