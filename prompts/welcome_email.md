@@ -7,9 +7,10 @@ Welcome to Theo
 
 Hi — I'm Theo.
 
-We'll be talking over text. I'm a thinking partner: bring me
-whatever is tangled or stuck — we pull it apart together, and I
-help you find the next move. I remember what you tell me, so you
+We'll be talking over text. I'm the partner you text when you're
+stuck — when you know what to do but can't start, or when you can't
+tell what the next move is. We pull it down to concrete together,
+and your startup keeps moving. I remember what you tell me, so you
 never have to explain yourself twice.
 
 This is your private page with me — if you ever want me to think
