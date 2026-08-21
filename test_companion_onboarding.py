@@ -118,6 +118,7 @@ check("grounding rule present", "never improvise contents" in blk)
 
 print("material_ready fires for companion users (no onboarding gate)")
 sent = {}
+_real_generate_message = sms.generate_message
 sms.generate_message = lambda *a, **k: ("Read it — the outreach "
                                         "cadence stood out.", [], None,
                                         "c1", None)
@@ -143,14 +144,62 @@ r = hit(coach._bind_phone_handler,
 check("unknown lane refused", r.status == 400)
 
 
-print("unblock stance rides the companion prompt")
+print("YC-partner identity + containment (2026-08-21 rewrite)")
 prompt, _ = sms._build_companion_prompt("dana1")
-check("stuck-moments stance present",
-      "The stuck moments" in prompt
-      and "next two hours" in prompt)
-check("persona is internal-only, secrecy rule present",
-      "Never mention YC" in prompt
-      and "never volunteer" in prompt)
+check("identity: founder's companion, always-on YC partner",
+      "founder's companion" in prompt
+      and "always-on YC partner" in prompt)
+check("containment + self-check marker instruction present",
+      "The persona stays inside" in prompt
+      and "[PERSONA_CHECK: clean]" in prompt)
+check("long stance section and recording section deleted",
+      "The stuck moments" not in prompt
+      and "What gets recorded" not in prompt)
+
+print("persona self-check marker mechanics")
+verdict, text = sms._process_persona_check(
+    "Good question.\n[PERSONA_CHECK: clean]")
+check("clean marker stripped", verdict == "clean"
+      and text == "Good question.")
+verdict, _t = sms._process_persona_check("no marker at all")
+check("absent marker is a no-op (legacy prompts)", verdict is None)
+
+
+class _LeakThenClean:
+    calls = []
+
+    def __init__(self, *a, **kw):
+        pass
+
+    class messages:
+        @staticmethod
+        def create(**kwargs):
+            _LeakThenClean.calls.append(kwargs)
+
+            class _B:
+                if len(_LeakThenClean.calls) == 1:
+                    text = ("As a YC partner I'd ask: what's the "
+                            "next step?\n[PERSONA_CHECK: leaked]")
+                else:
+                    text = ("What's the next step?\n"
+                            "[PERSONA_CHECK: clean]")
+
+            class _R:
+                content = [_B()]
+                stop_reason = "end_turn"
+            return _R()
+
+
+sms.generate_message = _real_generate_message
+sms.anthropic.Anthropic = _LeakThenClean
+out, _s, _e, _cid, _h = sms.generate_message(
+    "dana1", "system", [{"role": "user", "content": "hi"}], "test")
+check("leaked draft rewritten in the same guard loop",
+      len(_LeakThenClean.calls) == 2
+      and out == "What's the next step?")
+check("leak logged for observability",
+      any(r["kind"] == "persona_leak_caught"
+          for r in db.get_events("dana1", limit=30)))
 
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

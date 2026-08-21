@@ -1615,6 +1615,22 @@ _UPLOAD_GUARD_MSG = (
 _HOLD_REASON_RE = re.compile(r'\[HOLD:\s*"([^"]{3,300})"\s*\]', re.DOTALL)
 
 
+_PERSONA_CHECK_RE = re.compile(
+    r"\s*\[PERSONA_CHECK:\s*(clean|leaked)\s*\]\s*", re.I)
+
+
+def _process_persona_check(text):
+    """The persona self-check marker (companion prompt): the model
+    audits its own draft for persona attribution ("as a YC partner
+    ...") in the SAME completion — no extra hop. → (verdict, text
+    with the marker stripped); verdict None when absent (legacy
+    prompts don't emit it)."""
+    m = _PERSONA_CHECK_RE.search(text)
+    if not m:
+        return None, text
+    return m.group(1).lower(), _PERSONA_CHECK_RE.sub("\n", text).strip()
+
+
 def _process_hold_reason(text):
     """→ (reason_or_None, text_without_the_marker)."""
     m = _HOLD_REASON_RE.search(text)
@@ -1690,6 +1706,7 @@ def generate_message(user_id, system_prompt, history, trigger,
         text = _process_plan_markers(user_id, text, trigger=trigger)
         expect, text = _process_expect_marker(text)
         hold_reason, text = _process_hold_reason(text)
+        persona, text = _process_persona_check(text)
         steps, text = _process_step_marker(user_id, text)
 
         # Planner-chosen silence is RETIRED (2026-08-12): an empty
@@ -1714,6 +1731,14 @@ def generate_message(user_id, system_prompt, history, trigger,
             continue
 
         violations = check_send_guards(text, steps, user_id=user_id)
+        if persona == "leaked":
+            # Self-reported: the draft attributes the persona. Rides
+            # the same rewrite loop as every other guard violation.
+            db.log_event(user_id, "persona_leak_caught",
+                         {"draft": text[:300],
+                          "llm_call_id": llm_call_id}, source="sms")
+            violations = violations + [
+                "persona attribution leak (self-reported)"]
         # Two rewrite attempts for guard violations (was one): the
         # one-question rule failed through a single retry twice in
         # one live evening — both the draft AND its rewrite carried
@@ -1728,6 +1753,10 @@ def generate_message(user_id, system_prompt, history, trigger,
                      "every other question must become a statement "
                      "or disappear — do not merge them into a "
                      "bigger question.")
+        if any("persona attribution" in v for v in violations):
+            tail += (" Remove every attribution of your role or "
+                     "method to YC or any persona; keep the "
+                     "substance in your own voice.")
         attempt_history = attempt_history + [
             {"role": "assistant", "content": raw},
             _server_turn("Your draft broke a hard rule:\n- "
