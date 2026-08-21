@@ -142,5 +142,15 @@ r = hit(coach._bind_phone_handler,
         "&phone=%2B15550008004&lane=banana")
 check("unknown lane refused", r.status == 400)
 
+
+print("unblock stance rides the companion prompt")
+prompt, _ = sms._build_companion_prompt("dana1")
+check("stuck-moments stance present",
+      "The stuck moments" in prompt
+      and "next two hours" in prompt)
+check("persona is internal-only, secrecy rule present",
+      "Never mention YC" in prompt
+      and "never volunteer" in prompt)
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)

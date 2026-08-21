@@ -1154,32 +1154,9 @@ async def _debug_timeline_handler(request):
     return web.Response(text="\n".join(lines) + "\n", content_type="text/plain")
 
 
-async def _track_convo_handler(request):
-    """Open the life-track lane for a user and send the track
-    conversation opener — the trigger of the 2026-08-18 experiment
-    (SMS로 멀티 에이전트 생성). Manual/cron-fired, idempotent on the
-    lane flag; each POST sends one opener.
-
-    POST /debug/track-convo?secret=...&user_id=X
-    """
-    import sms
-
-    expected = os.environ.get("CRON_SECRET", "").strip()
-    provided = (
-        request.headers.get("X-Cron-Secret", "").strip()
-        or request.query.get("secret", "").strip()
-    )
-    if not expected or provided != expected:
-        return web.Response(status=403, text="bad secret")
-
-    user_id = request.query.get("user_id", "").strip()
-    if not user_id:
-        return web.Response(status=400, text="user_id required")
-    sent = sms.send_track_convo_opener(user_id)
-    return web.json_response({"ok": bool(sent), "user_id": user_id,
-                              "sent": sent})
-
-
+# (_track_convo_handler RETIRED 2026-08-21 with the delegation
+# lane — the migration opener is dead; companion lane opening
+# happens at /debug/activate and /debug/bind-phone.)
 async def _reminders_tick_handler(request):
     """Fire every due reminder through send_nudge. Render cron hits
     this every 15 minutes — the machinery that keeps Theo's
@@ -4336,7 +4313,6 @@ def start_ws_server():
         app.router.add_post("/debug/track", _track_admin_handler)
         app.router.add_post("/debug/rebank", _rebank_handler)
         app.router.add_get("/debug/prompt-preview", _prompt_preview_handler)
-        app.router.add_post("/debug/track-convo", _track_convo_handler)
         app.router.add_get("/debug/tracks", _debug_tracks_handler)
         app.router.add_post("/debug/nudge", _nudge_handler)
         app.router.add_post("/debug/say", _say_handler)

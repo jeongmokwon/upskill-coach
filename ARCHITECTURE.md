@@ -203,6 +203,13 @@ lane 게이트 (user_profiles.tracks_enabled)      [코드]
    findings 생산 → send_nudge로 배달. 답장 프롬프트는 열린 요청을
    research-underway 블록으로 받아 "능력 부인"과 "결과 조작" 둘 다
    차단 (chrisyu2 2026-08-20 "I can't research" 실사고가 계기).
+0-d. **트랙 기계 은퇴 (2026-08-21):** 위임 lane 사망 판정에 따라
+   기계를 끄고 데이터는 보존 — 답장별 tracks_ops 추출 홉 제거,
+   companion 프롬프트의 트랙 상태 블록 제거, TRACK_CONVO_OPENER와
+   /debug/track-convo 제거. tracks/track_items 테이블과 기존 행은
+   그대로 (장부는 기록), tracks_enabled는 companion lane 게이트로
+   역할이 바뀌어 존속. /debug/tracks(읽기)와 /debug/track(운영자
+   데이터 관리)는 유지.
 0-c. **레인 분리 완료 (2026-08-20, PR-2):** companion 유저는
    reactive-by-default — 일반 스케줄 발송은 lane-open이면 스킵
    (`companion_reactive_only`), 드릴 발송만 통과 (드릴 유저에겐

@@ -51,8 +51,9 @@ print("\n── lane gate ──")
 check("lane closed by default", not db.tracks_lane_open(U))
 check("ops run is a no-op when lane closed",
       tracks_ops.run(U) is None)
-check("tracks block empty when lane closed",
-      sms._tracks_block(U) == "")
+check("tracks block machinery retired (2026-08-21)",
+      not hasattr(sms, "_tracks_block")
+      and not hasattr(sms, "send_track_convo_opener"))
 check("enable opens the lane", db.enable_tracks(U) and
       db.tracks_lane_open(U))
 check("enable is idempotent", db.enable_tracks(U) is False)
@@ -165,22 +166,22 @@ check("item ownership checked",
       any("not our item" in r for r in rejectedO))
 
 print("\n── companion prompt: its own stack, not the edtech one ──")
-blk = sms._tracks_block(U)
-check("state block renders tracks (user's own words)",
-      "장보기" in blk and "부모님 전화" in blk)
 comp_prompt, comp_v = sms._build_system_prompt_for_reply(U)
 check("lane user gets the companion prompt",
-      "sms_companion" in comp_v and "capability is UNLIMITED" in comp_prompt)
-check("genie: imagines FOR them, 10x bar",
-      "imagining it FOR them" in comp_prompt
-      and "10x productive" in comp_prompt)
-check("curiosity before design present",
+      "sms_companion" in comp_v
+      and "partner they text when they're stuck" in comp_prompt)
+check("genie stance retired (2026-08-21 대청소)",
+      "capability is UNLIMITED" not in comp_prompt
+      and "10x productive" not in comp_prompt)
+check("curiosity present (no design/offer machinery)",
       "get curious" in comp_prompt
-      and "what can you even do for me?" in comp_prompt)
-check("facts stay honest (the one limit)",
-      "knowledge is not unlimited" in comp_prompt.lower())
-check("tracks state rides the companion prompt",
-      "Life tracks" in comp_prompt and "장보기" in comp_prompt)
+      and "what's hard this week" in comp_prompt)
+check("facts stay honest",
+      "never claim to have read" in comp_prompt.lower())
+check("tracks state no longer rides the companion prompt "
+      "(machine off, data kept)",
+      "Life tracks" not in comp_prompt and "장보기" not in comp_prompt
+      and db.get_life_tracks(U, statuses=("active",)))
 check("edtech stack is GONE — no shared persona, no discovery mode, "
       "no user-facts",
       "sms_shared" not in comp_v and "sms_discovery" not in comp_v
@@ -192,9 +193,8 @@ comp_file = open("prompts/sms_companion.md").read()
 check("companion prompt file carries no Korean tokens",
       not any('가' <= ch <= '힣' for ch in comp_file))
 db.ensure_user_profile_row("hub")
-check("drill user: lane closed, no block, no ops",
+check("drill user: lane closed, no ops",
       not db.tracks_lane_open("hub")
-      and sms._tracks_block("hub") == ""
       and tracks_ops.run("hub") is None)
 legacy = db.create_track("hub", "Cleary PDF", mode="drill",
                          source="test")
@@ -210,7 +210,8 @@ check("lane-closed drill user keeps the legacy stack",
 print("\n── drill user + open lane coexist (the husband's next state) ──")
 db.enable_tracks("hub", source="test")
 hub_prompt, _v = sms._build_system_prompt_for_reply("hub")
-check("companion prompt takes over", "capability is UNLIMITED" in hub_prompt)
+check("companion prompt takes over",
+      "partner they text when they're stuck" in hub_prompt)
 check("drill freelance guard still present",
       "No freelance drill questions" in hub_prompt)
 check("ops hop now live for him", db.tracks_lane_open("hub"))
