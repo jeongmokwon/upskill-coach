@@ -2227,10 +2227,10 @@ main.wide { max-width: 1360px; margin: 0 auto; padding: 0 28px 64px; }
 
 _SITE_ORIGIN = "https://www.learningtheo.com"
 
-_SITE_DESC = ("Theo is a thinking partner for solo founders, in your "
-              "text messages — untangle what's stuck, find your next "
-              "move, and keep every thread going. By Green Gables "
-              "Studio LLC.")
+_SITE_DESC = ("Theo is the partner solo founders text when they're "
+              "stuck — it knows your situation, pulls you from "
+              "abstract to concrete, and checks that you moved. By "
+              "Green Gables Studio LLC.")
 
 # Inline SVG logo mark (matches site_assets/favicon.svg).
 _LOGO_SVG = """<svg width="30" height="30" viewBox="0 0 100 100"
@@ -2383,11 +2383,18 @@ async def _landing_handler(request):
 <section class="hero">
   <div>
     <div class="eyebrow">Your AI thinking partner</div>
-    <h1>A thinking partner for solo founders</h1>
-    <p class="lead">When you build alone, every decision, plan, and
-    doubt lives in one head — yours. Theo is the partner you think out
-    loud with: text what's tangled, pull it apart together, and leave
-    with your next move — right in your Messages app.</p>
+    <h1>For solo founders who don't know what to do — or just
+    can't start.</h1>
+    <p class="lead">You know the feeling. The task is right there —
+    and instead you're scrolling feeds, checking stocks, three videos
+    deep on YouTube. Hating it the whole time, and still not
+    starting. Or your thinking floats up into the big picture — the
+    future, the scale you don't have yet — anywhere but the next
+    concrete thing.</p>
+    <p class="lead">Text Theo the moment you're stuck. It knows your
+    situation — every thread, every decision you've been circling —
+    and it pulls you from abstract to concrete: "Right now — next
+    two hours — what will you do?" Then it checks that you did.</p>
     <div class="hero-ctas">
       <a class="btn" href="/sms-signup">Get started</a>
       <a class="btn btn-ghost" href="#how-it-works">See how it works</a>
@@ -2504,40 +2511,40 @@ async def _landing_handler(request):
 
 <section class="section" id="why">
   <div class="centered">
-    <h2>Why a thinking partner in your texts?</h2>
-    <p class="sub">Theo is built on a simple observation from months of
-    hands-on experiments with real founders: building alone doesn't
-    fail on effort — it fails on tangled, unspoken thinking.</p>
+    <h2>Why a partner in your texts?</h2>
+    <p class="sub">Theo is built on a simple observation from months
+    of hands-on experiments with real founders: now that the code
+    writes itself, the bottleneck is the stuck hours.</p>
   </div>
   <div class="cards">
     <div class="card">
-      <h3>Thinking alone is the real problem</h3>
-      <p>Advice, content, and tools are everywhere. What's rare is
-      someone who knows your situation and helps you untangle it —
-      the role a cofounder or a great manager plays. Theo is built
-      entirely around that role.</p>
+      <h3>The flinch</h3>
+      <p>You know what to do — your hands won't do it. Theo doesn't
+      lecture you about discipline. It makes the next step small and
+      concrete enough that starting stops being scary.</p>
     </div>
     <div class="card">
-      <h3>No new app to open</h3>
-      <p>Opening yet another app is itself a hurdle. Texts arrive where
-      your attention already lives — no install, no login, no
-      streak guilt.</p>
+      <h3>The fog</h3>
+      <p>Meta-thinking feels like work. It isn't. When your head
+      floats up into futures you can't act on, Theo pulls the thread
+      back down: this week, today, the next two hours.</p>
     </div>
     <div class="card">
       <h3>It remembers everything</h3>
-      <p>Every thread you've opened, every decision you've weighed,
-      every document you've shared — Theo carries it, so each
-      conversation starts where the last one ended, not from
-      scratch.</p>
+      <p>Every thread, every decision, every document you've shared
+      carries forward — the moment you text "I'm stuck," Theo
+      already knows stuck on <em>what</em>. No app to open, no
+      re-explaining.</p>
     </div>
   </div>
 </section>
 
 <section class="section">
   <div class="band" style="text-align:center;">
-    <h2>Ready to think out loud?</h2>
+    <h2>Stuck on something right now?</h2>
     <p style="max-width:520px; margin:8px auto 20px;">Tell Theo what
-    you're building, and bring it the first tangled thing.</p>
+    you're building — then text it the thing you've been
+    avoiding.</p>
     <a class="btn" href="/sms-signup">Get started</a>
   </div>
 </section>
