@@ -2346,6 +2346,18 @@ def set_user_phone(user_id, phone, source="operator"):
     log_event(user_id, "phone_bound", {"phone": phone}, source=source)
 
 
+def list_users():
+    """Every user row's operator-relevant identity fields, newest
+    first — the /debug/users roster."""
+    conn = get_conn()
+    cur = _execute(conn,
+        "SELECT user_id, user_name, phone, email, status, "
+        "tracks_enabled, created_at FROM user_profiles "
+        "ORDER BY created_at DESC")
+    rows = _fetchall(cur); conn.close()
+    return rows
+
+
 def get_user_by_phone(phone):
     """→ user_id or None. DB is the source of truth for routing; the
     TUTOR_USER_* env pair remains a fallback in sms.py so nothing

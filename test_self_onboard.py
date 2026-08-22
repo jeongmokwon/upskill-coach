@@ -114,5 +114,28 @@ sent = sms.send_expectation_message("hasmail", "+19998885555", "test")
 check("main copy (welcome email line) for email users",
       "welcome email" in sent)
 
+print("/debug/users roster")
+import asyncio
+import coach
+from aiohttp.test_utils import make_mocked_request
+os.environ["CRON_SECRET"] = "sek"
+
+
+def hit(path):
+    async def go():
+        return await coach._debug_users_handler(
+            make_mocked_request("GET", path))
+    return asyncio.run(go())
+
+
+r = hit("/debug/users?secret=sek")
+import json
+data = json.loads(r.text)
+check("roster lists the self-onboarded users with lane",
+      data["count"] >= 2
+      and any(u["user_id"] == uid and u["lane"] == "companion"
+              for u in data["users"]))
+check("bad secret refused", hit("/debug/users?secret=no").status == 403)
+
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
