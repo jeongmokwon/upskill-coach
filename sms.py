@@ -1953,6 +1953,22 @@ def _inbound_lock(user_id):
         return _inbound_locks[user_id]
 
 
+def notify_founder(text):
+    """Operator notification to the founder's phone (FOUNDER_PHONE
+    env, fallback TUTOR_USER_PHONE). Out-of-band by design: not
+    saved to any conversation history, prefixed so it reads as ops
+    telemetry, not as Theo speaking. Never raises — a failed
+    notification must never break the flow it reports on."""
+    try:
+        phone = (os.environ.get("FOUNDER_PHONE", "").strip()
+                 or os.environ.get("TUTOR_USER_PHONE", "").strip())
+        if not phone:
+            return
+        send_sms(phone, "[Theo ops] " + text)
+    except Exception as e:
+        print(f"[SMS] ⚠️ founder notify failed: {e}", flush=True)
+
+
 def _self_onboard(from_number, body):
     """A stranger texted the keyword: create the user on the spot.
     user_id is auto-generated (no name needed — founder decision
@@ -1983,8 +1999,10 @@ def _self_onboard(from_number, body):
     db.log_event(user_id, "user_self_onboarded",
                  {"phone": phone, "first_text": body[:200]},
                  source="sms")
-    print(f"[SMS] self-onboarded {user_id} from inbound keyword",
+    print(f"[SMS] self-onboarded {user_id} from inbound text",
           flush=True)
+    notify_founder(f"New user self-onboarded: {user_id} ({phone}). "
+                   f"First text: \"{body[:120]}\"")
     return user_id
 
 

@@ -54,6 +54,18 @@ class FakeClient:
 
 sms.anthropic.Anthropic = FakeClient
 
+os.environ["FOUNDER_PHONE"] = "+15550009000"
+_sent = []
+_orig_send = sms.send_sms
+
+
+def _capture_send(to, body, user_id=None):
+    _sent.append((to, body))
+    return _orig_send(to, body, user_id=user_id)
+
+
+sms.send_sms = _capture_send
+
 print("ANY first text from an unknown number self-onboards")
 out = sms.handle_inbound("+19998887777",
                          "STUCK. I keep circling my pricing page.")
@@ -74,6 +86,12 @@ check("real companion reply follows",
       out == "What kind of work are you building?"
       and assistant[-1] == out)
 check("expectation stamped", not sms._expectation_due(uid))
+check("founder notified out-of-band",
+      any(to == "+15550009000" and body.startswith("[Theo ops]")
+          and uid in body for to, body in _sent))
+check("ops notice not in any conversation history",
+      not any("[Theo ops]" in m["content"]
+              for m in db.get_recent_sms_messages(uid, limit=20)))
 
 print("second message routes to the same user")
 out = sms.handle_inbound("+19998887777", "mostly the pricing")

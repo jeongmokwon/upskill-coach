@@ -4217,6 +4217,10 @@ async def _sms_signup_submit_handler(request):
                   "consent_checkins": consent_checkins,
                   "consent_support": consent_support},
                  source="web")
+    import sms as sms_mod
+    sms_mod.notify_founder(
+        f"New signup: {name or '(no name)'} {phone or ''} "
+        f"{email or ''} — activate via /debug/signups")
 
     body = """
 <h1>You're all set 🎉</h1>
