@@ -1281,6 +1281,32 @@ async def _research_admin_handler(request):
                               "status": "running"})
 
 
+async def _debug_users_handler(request):
+    """The user roster, operator view: id, phone, status, lane,
+    created_at — newest first. The post-launch 'who came in?' lever.
+
+    GET /debug/users?secret=...
+    """
+    expected = os.environ.get("CRON_SECRET", "").strip()
+    provided = (request.headers.get("X-Cron-Secret", "").strip()
+                or request.query.get("secret", "").strip())
+    if not expected or provided != expected:
+        return web.Response(status=403, text="bad secret")
+    users = []
+    for u in db.list_users():
+        users.append({
+            "user_id": u["user_id"],
+            "name": u.get("user_name") or "",
+            "phone": u.get("phone") or "",
+            "email": u.get("email") or "",
+            "status": u.get("status") or "active",
+            "lane": ("companion" if (u.get("tracks_enabled") or "").strip()
+                     else "legacy"),
+            "created_at": u.get("created_at") or "",
+        })
+    return web.json_response({"count": len(users), "users": users})
+
+
 async def _say_handler(request):
     """Verbatim operator send: the body goes out EXACTLY as written —
     no LLM, no guards, zero variance (the expectation_setting
@@ -4217,6 +4243,10 @@ async def _sms_signup_submit_handler(request):
                   "consent_checkins": consent_checkins,
                   "consent_support": consent_support},
                  source="web")
+    import sms as sms_mod
+    sms_mod.notify_founder(
+        f"New signup: {name or '(no name)'} {phone or ''} "
+        f"{email or ''} — activate via /debug/signups")
 
     body = """
 <h1>You're all set 🎉</h1>
@@ -4311,6 +4341,7 @@ def start_ws_server():
         app.router.add_get("/debug/tracks", _debug_tracks_handler)
         app.router.add_post("/debug/nudge", _nudge_handler)
         app.router.add_post("/debug/say", _say_handler)
+        app.router.add_get("/debug/users", _debug_users_handler)
         app.router.add_post("/debug/research", _research_admin_handler)
         app.router.add_get("/debug/research", _research_admin_handler)
         app.router.add_post("/reminders/tick", _reminders_tick_handler)

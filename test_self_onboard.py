@@ -54,6 +54,18 @@ class FakeClient:
 
 sms.anthropic.Anthropic = FakeClient
 
+os.environ["FOUNDER_PHONE"] = "+15550009000"
+_sent = []
+_orig_send = sms.send_sms
+
+
+def _capture_send(to, body, user_id=None):
+    _sent.append((to, body))
+    return _orig_send(to, body, user_id=user_id)
+
+
+sms.send_sms = _capture_send
+
 print("ANY first text from an unknown number self-onboards")
 out = sms.handle_inbound("+19998887777",
                          "STUCK. I keep circling my pricing page.")
@@ -74,6 +86,12 @@ check("real companion reply follows",
       out == "What kind of work are you building?"
       and assistant[-1] == out)
 check("expectation stamped", not sms._expectation_due(uid))
+check("founder notified out-of-band",
+      any(to == "+15550009000" and body.startswith("[Theo ops]")
+          and uid in body for to, body in _sent))
+check("ops notice not in any conversation history",
+      not any("[Theo ops]" in m["content"]
+              for m in db.get_recent_sms_messages(uid, limit=20)))
 
 print("second message routes to the same user")
 out = sms.handle_inbound("+19998887777", "mostly the pricing")
@@ -95,6 +113,29 @@ db.set_user_email("hasmail", "a@b.co")
 sent = sms.send_expectation_message("hasmail", "+19998885555", "test")
 check("main copy (welcome email line) for email users",
       "welcome email" in sent)
+
+print("/debug/users roster")
+import asyncio
+import coach
+from aiohttp.test_utils import make_mocked_request
+os.environ["CRON_SECRET"] = "sek"
+
+
+def hit(path):
+    async def go():
+        return await coach._debug_users_handler(
+            make_mocked_request("GET", path))
+    return asyncio.run(go())
+
+
+r = hit("/debug/users?secret=sek")
+import json
+data = json.loads(r.text)
+check("roster lists the self-onboarded users with lane",
+      data["count"] >= 2
+      and any(u["user_id"] == uid and u["lane"] == "companion"
+              for u in data["users"]))
+check("bad secret refused", hit("/debug/users?secret=no").status == 403)
 
 print(f"\n{sum(PASS)}/{len(PASS)} passed")
 raise SystemExit(0 if all(PASS) else 1)
